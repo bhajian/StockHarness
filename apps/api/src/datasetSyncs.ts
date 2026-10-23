@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { randomUUID } from 'node:crypto';
 import { HttpError } from '../../../packages/core/src/security.js';
-import { catalogView, catalogById } from '../../../packages/core/src/datasetCatalog.js';
+import { catalogView, catalogById, TICKER_PRESETS } from '../../../packages/core/src/datasetCatalog.js';
 import {
   datasetSyncs as syncsCol,
   datasetSyncRuns,
@@ -19,7 +19,10 @@ const assertAdmin = (role: string) => {
 };
 
 datasetSyncRouter.get('/datasets/catalog', (_req, res) => {
-  res.json({ datasets: catalogView() });
+  res.json({
+    datasets: catalogView(),
+    presets: TICKER_PRESETS.map((p) => ({ id: p.id, label: p.label, description: p.description })),
+  });
 });
 
 async function listSyncs(ownerId: string) {

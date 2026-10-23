@@ -1,8 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Database, Plus, Play, Pencil, Trash2, Clock, AlertTriangle } from 'lucide-react';
+import { Database, Plus, Play, Pencil, Trash2 } from 'lucide-react';
 import {
   type Data,
   type DatasetCatalogItem,
+  type TickerPreset,
   fetchDatasetCatalog,
   saveDatasetSync,
   deleteDatasetSync,
@@ -27,7 +28,8 @@ type SyncForm = {
   name: string;
   connectionId: string;
   dataset: string;
-  symbolsMode: 'universe' | 'list';
+  symbolsMode: 'universe' | 'list' | 'preset';
+  preset: string;
   symbols: string;
   from: string;
   to: string;
@@ -39,17 +41,22 @@ type SyncForm = {
 
 export function DatasetsPage({ data, refresh, act, isAdmin }: Props) {
   const [catalog, setCatalog] = useState<DatasetCatalogItem[]>([]);
+  const [presets, setPresets] = useState<TickerPreset[]>([]);
   const [selected, setSelected] = useState<string>('');
   const [editing, setEditing] = useState<SyncForm | null>(null);
 
   useEffect(() => {
     fetchDatasetCatalog()
-      .then((r) => setCatalog(r.datasets))
-      .catch(() => setCatalog([]));
+      .then((r) => {
+        setCatalog(r.datasets);
+        setPresets(r.presets ?? []);
+      })
+      .catch(() => undefined);
   }, []);
 
   const syncs = data.datasetSyncs ?? [];
   const catalogById = useMemo(() => new Map(catalog.map((c) => [c.id, c])), [catalog]);
+  const presetById = useMemo(() => new Map(presets.map((p) => [p.id, p])), [presets]);
   const mongo = data.connections.find((c) => c.kind === 'mongodb' && c.enabled);
   const fmpConnections = data.connections.filter((c) => c.kind === 'mcp' && c.enabled);
   const defaultFmp =
@@ -67,6 +74,7 @@ export function DatasetsPage({ data, refresh, act, isAdmin }: Props) {
     connectionId: defaultFmp,
     dataset: catalog[0]?.id ?? '',
     symbolsMode: 'universe',
+    preset: presets[0]?.id ?? '',
     symbols: '',
     from: '',
     to: '',
@@ -81,13 +89,13 @@ export function DatasetsPage({ data, refresh, act, isAdmin }: Props) {
       timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
     },
   });
-
   const editForm = (s: Record<string, any>): SyncForm => ({
     id: s.id,
     name: s.name ?? '',
     connectionId: s.connectionId ?? defaultFmp,
     dataset: s.dataset ?? catalog[0]?.id ?? '',
     symbolsMode: s.symbolsMode ?? 'universe',
+    preset: s.preset ?? presets[0]?.id ?? '',
     symbols: Array.isArray(s.symbols) ? s.symbols.join(', ') : '',
     from: s.from ?? '',
     to: s.to ?? '',
@@ -108,8 +116,11 @@ export function DatasetsPage({ data, refresh, act, isAdmin }: Props) {
       schedule: editing.schedule,
       symbolsMode: editing.symbolsMode,
     };
-    if (item?.perSymbol && editing.symbolsMode === 'list')
-      body.symbols = editing.symbols.split(/[\s,]+/).map((s) => s.trim().toUpperCase()).filter(Boolean);
+    if (item?.perSymbol) {
+      if (editing.symbolsMode === 'list')
+        body.symbols = editing.symbols.split(/[\s,]+/).map((s) => s.trim().toUpperCase()).filter(Boolean);
+      if (editing.symbolsMode === 'preset') body.preset = editing.preset;
+    }
     if (item?.supportsDateRange) {
       if (editing.from) body.from = editing.from;
       if (editing.to) body.to = editing.to;
@@ -121,124 +132,125 @@ export function DatasetsPage({ data, refresh, act, isAdmin }: Props) {
     setEditing(null);
   }
 
+  const symbolsLabel = (s: Record<string, any>) => {
+    const item = catalogById.get(s.dataset);
+    if (!item?.perSymbol) return 'Market';
+    if (s.symbolsMode === 'list') return `${(s.symbols ?? []).length} tickers`;
+    if (s.symbolsMode === 'preset') return presetById.get(s.preset)?.label ?? 'Preset';
+    return 'Universe';
+  };
+
   const selectedItem = editing ? catalogById.get(editing.dataset) : undefined;
+  const addBtn = isAdmin && (
+    <Button onClick={() => setEditing(blankForm())} disabled={!catalog.length}>
+      <Plus size={16} /> Add dataset sync
+    </Button>
+  );
 
   return (
     <>
       <PageTitle
         eyebrow="Data"
         title="Dataset"
-        text="Sync market data from FMP into MongoDB collections you can browse here and reuse in harnesses."
-        action={
-          isAdmin && (
-            <Button onClick={() => setEditing(blankForm())} disabled={!catalog.length}>
-              <Plus size={16} /> Add dataset sync
-            </Button>
-          )
-        }
+        text="Sync raw market data from FMP into MongoDB collections you can browse here and reuse in harnesses (as a MongoDB tool or via oh.read in Python nodes)."
+        action={addBtn}
       />
       {!syncs.length ? (
         <Empty
           icon={<Database size={28} />}
           title="No datasets yet"
-          text="Add a dataset sync to pull data from FMP on a schedule into a reusable collection."
-          action={
-            isAdmin && (
-              <Button onClick={() => setEditing(blankForm())} disabled={!catalog.length}>
-                <Plus size={16} /> Add dataset sync
-              </Button>
-            )
-          }
+          text="Add a dataset sync to pull raw data from FMP on a schedule into a reusable collection."
+          action={addBtn}
         />
       ) : (
-        <div className="dataset-layout">
-          <aside className="dataset-list">
-            {syncs.map((s) => {
-              const item = catalogById.get(s.dataset as string);
-              return (
-                <button
-                  key={s.id}
-                  className={`dataset-card ${current?.id === s.id ? 'active' : ''}`}
-                  onClick={() => setSelected(s.id)}
-                >
-                  <div className="dataset-card-head">
-                    <strong>{s.name}</strong>
-                    <Status status={s.enabled ? (s.lastError ? 'failed' : 'ready') : 'disabled'} />
-                  </div>
-                  <div className="dataset-card-meta">
-                    <span>{item?.label ?? s.dataset}</span>
-                    <span className="dot">·</span>
-                    <span>{describeSchedule(s.schedule as Schedule | undefined)}</span>
-                  </div>
-                  <div className="dataset-card-sub">
-                    {s.lastError ? (
-                      <span className="dataset-error">
-                        <AlertTriangle size={12} /> {String(s.lastError).slice(0, 60)}
-                      </span>
-                    ) : (
-                      <span>
-                        {s.lastRunAt ? `Last: ${timestamp(s.lastRunAt)}` : 'Not run yet'}
-                        {typeof s.lastRows === 'number' ? ` · ${s.lastRows.toLocaleString()} rows` : ''}
-                      </span>
+        <div className="dataset-v2">
+          <div className="table-wrap dataset-table">
+            <table>
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Dataset</th>
+                  <th>Symbols</th>
+                  <th>Schedule</th>
+                  <th>Last run</th>
+                  <th>Rows</th>
+                  <th>Status</th>
+                  {isAdmin && <th aria-label="Actions" />}
+                </tr>
+              </thead>
+              <tbody>
+                {syncs.map((s) => (
+                  <tr
+                    key={s.id}
+                    className={current?.id === s.id ? 'active' : ''}
+                    onClick={() => setSelected(s.id)}
+                  >
+                    <td>
+                      <strong>{s.name}</strong>
+                    </td>
+                    <td>{catalogById.get(s.dataset as string)?.label ?? s.dataset}</td>
+                    <td>{symbolsLabel(s)}</td>
+                    <td>{describeSchedule(s.schedule as Schedule | undefined)}</td>
+                    <td>{s.lastRunAt ? timestamp(s.lastRunAt) : '—'}</td>
+                    <td>{typeof s.lastRows === 'number' ? s.lastRows.toLocaleString() : '—'}</td>
+                    <td>
+                      <Status status={s.enabled ? (s.lastError ? 'failed' : 'ready') : 'disabled'} />
+                    </td>
+                    {isAdmin && (
+                      <td className="dataset-row-actions" onClick={(e) => e.stopPropagation()}>
+                        <IconButton
+                          title="Run now"
+                          onClick={() =>
+                            act(async () => {
+                              await runDatasetSyncNow(s.id);
+                              setTimeout(() => void refresh(), 4000);
+                            })
+                          }
+                        >
+                          <Play size={15} />
+                        </IconButton>
+                        <IconButton title="Edit" onClick={() => setEditing(editForm(s))}>
+                          <Pencil size={15} />
+                        </IconButton>
+                        <IconButton
+                          title="Delete"
+                          onClick={() =>
+                            act(async () => {
+                              if (!confirm(`Delete sync "${s.name}"? The collection is kept.`)) return;
+                              await deleteDatasetSync(s.id);
+                              setSelected('');
+                              await refresh();
+                            })
+                          }
+                        >
+                          <Trash2 size={15} />
+                        </IconButton>
+                      </td>
                     )}
-                  </div>
-                </button>
-              );
-            })}
-          </aside>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
 
-          <section className="dataset-main">
-            {current && (
-              <>
-                <div className="dataset-main-head">
-                  <div>
-                    <h2>{current.name}</h2>
-                    <div className="dataset-main-meta">
-                      <code>{currentCollection}</code>
-                      <span className="dot">·</span>
-                      <Clock size={13} /> {describeSchedule(current.schedule as Schedule | undefined)}
-                    </div>
+          {current && (
+            <section className="dataset-grid-section">
+              <div className="dataset-grid-head">
+                <div>
+                  <h2>{current.name}</h2>
+                  <div className="dataset-grid-meta">
+                    <code>{currentCollection}</code>
+                    {current.lastError ? <span className="dataset-error">· {String(current.lastError)}</span> : null}
                   </div>
-                  {isAdmin && (
-                    <div className="dataset-main-actions">
-                      <Button
-                        variant="secondary"
-                        onClick={() =>
-                          act(async () => {
-                            await runDatasetSyncNow(current.id);
-                            setTimeout(() => void refresh(), 4000);
-                          })
-                        }
-                      >
-                        <Play size={15} /> Run now
-                      </Button>
-                      <IconButton title="Edit" onClick={() => setEditing(editForm(current))}>
-                        <Pencil size={16} />
-                      </IconButton>
-                      <IconButton
-                        title="Delete"
-                        onClick={() =>
-                          act(async () => {
-                            if (!confirm(`Delete sync "${current.name}"? The collection is kept.`)) return;
-                            await deleteDatasetSync(current.id);
-                            setSelected('');
-                            await refresh();
-                          })
-                        }
-                      >
-                        <Trash2 size={16} />
-                      </IconButton>
-                    </div>
-                  )}
                 </div>
-                {mongo && currentCollection ? (
-                  <DataGrid connectionId={mongo.id} collection={currentCollection} />
-                ) : (
-                  <div className="notice">Connect the built-in MongoDB to browse this collection.</div>
-                )}
-              </>
-            )}
-          </section>
+              </div>
+              {mongo && currentCollection ? (
+                <DataGrid connectionId={mongo.id} collection={currentCollection} />
+              ) : (
+                <div className="notice">Connect the built-in MongoDB to browse this collection.</div>
+              )}
+            </section>
+          )}
         </div>
       )}
 
@@ -291,15 +303,30 @@ export function DatasetsPage({ data, refresh, act, isAdmin }: Props) {
             {selectedItem?.description && <p className="field-help">{selectedItem.description}</p>}
 
             {selectedItem?.perSymbol && (
-              <Field label="Symbols" hint="Per-symbol dataset: iterate the Universe collection or an explicit list.">
+              <Field label="Symbols" hint="Per-symbol dataset: choose which tickers to pull.">
                 <select
                   value={editing.symbolsMode}
                   onChange={(e) =>
-                    setEditing({ ...editing, symbolsMode: e.target.value as 'universe' | 'list' })
+                    setEditing({ ...editing, symbolsMode: e.target.value as SyncForm['symbolsMode'] })
                   }
                 >
                   <option value="universe">Reuse the Universe collection</option>
+                  <option value="preset">Screener preset</option>
                   <option value="list">Explicit ticker list</option>
+                </select>
+              </Field>
+            )}
+            {selectedItem?.perSymbol && editing.symbolsMode === 'preset' && (
+              <Field label="Preset" hint={presetById.get(editing.preset)?.description}>
+                <select
+                  value={editing.preset}
+                  onChange={(e) => setEditing({ ...editing, preset: e.target.value })}
+                >
+                  {presets.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.label}
+                    </option>
+                  ))}
                 </select>
               </Field>
             )}

@@ -135,7 +135,9 @@ export type DatasetSyncRun = {
   startedAt: string;
   finishedAt?: string;
 };
-export const fetchDatasetCatalog = () => api<{ datasets: DatasetCatalogItem[] }>('/datasets/catalog');
+export type TickerPreset = { id: string; label: string; description: string };
+export const fetchDatasetCatalog = () =>
+  api<{ datasets: DatasetCatalogItem[]; presets: TickerPreset[] }>('/datasets/catalog');
 export const saveDatasetSync = (body: Record<string, unknown>, id?: string) =>
   send<Entity>(`/dataset-syncs${id ? `/${id}` : ''}`, body, id ? 'PUT' : 'POST');
 export const deleteDatasetSync = (id: string) => api(`/dataset-syncs/${id}`, { method: 'DELETE' });
