@@ -1,4 +1,7 @@
-"""build_trading_calendar (spec §3.1): NYSE sessions 1990..next year from pandas_market_calendars."""
+"""build_trading_calendar (spec §3.1): NYSE sessions 1990..next year.
+
+Uses exchange_calendars (already in the executor image); falls back to pandas_market_calendars.
+"""
 from __future__ import annotations
 
 from datetime import date
@@ -7,21 +10,35 @@ from ..core.runner import transform
 from .calendar_logic import shape_calendar
 
 
+def _sessions(start: date, end: date):
+    try:
+        import exchange_calendars as xcals
+
+        cal = xcals.get_calendar("XNYS")
+        idx = cal.sessions_in_range(str(start), str(end))
+        out = []
+        for s in idx:
+            out.append((s.date(), cal.session_open(s).to_pydatetime(), cal.session_close(s).to_pydatetime()))
+        return out
+    except Exception:
+        import pandas_market_calendars as mcal
+
+        sched = mcal.get_calendar("XNYS").schedule(start_date=str(start), end_date=str(end))
+        return [
+            (i.date(), r["market_open"].to_pydatetime(), r["market_close"].to_pydatetime())
+            for i, r in sched.iterrows()
+        ]
+
+
 @transform("build_trading_calendar")
 def build(ctx):
-    import pandas_market_calendars as mcal
     from pymongo import ReplaceOne
 
     from ..core.db import coll
 
     start = ctx.start or date(1990, 1, 1)
     end = ctx.end or date(date.today().year + 1, 12, 31)
-    nyse = mcal.get_calendar("XNYS")
-    sched = nyse.schedule(start_date=start.isoformat(), end_date=end.isoformat())
-    sessions = [
-        (idx.date(), row["market_open"].to_pydatetime(), row["market_close"].to_pydatetime())
-        for idx, row in sched.iterrows()
-    ]
+    sessions = _sessions(start, end)
     ctx.rows_read = len(sessions)
     rows = shape_calendar(sessions)
     c = coll("trading_calendar")
