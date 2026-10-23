@@ -42,6 +42,7 @@ import { ConnectionsPage, RunsPage, WorkflowsPage } from './components/pages';
 import { KnowledgePage } from './components/KnowledgePage';
 import { MongoCollections } from './components/MongoCollections';
 import { SkillsPage } from './components/SkillsPage';
+import { DatasetsPage } from './components/DatasetsPage';
 import { EmbedChat, Playground, playgroundTargets } from './components/Playground';
 import { IntegrationsPage, SettingsPage } from './components/Settings';
 import './styles.css';
@@ -53,6 +54,7 @@ const nav = [
   { id: 'skills', label: 'Skills', icon: Sparkles },
   { id: 'connections', label: 'MCP connections', icon: Plug },
   { id: 'knowledge', label: 'Knowledge', icon: BookOpen },
+  { id: 'datasets', label: 'Dataset', icon: Database },
   { id: 'inbox', label: 'Inbox', icon: ShieldCheck },
   { id: 'executions', label: 'Executions', icon: Activity },
   { id: 'integrations', label: 'Integrations', icon: Code2 },
@@ -537,6 +539,8 @@ function App() {
               <SkillsPage data={data} refresh={refresh} act={act} />
             ) : page === 'connections' ? (
               <ConnectionsPage {...props} />
+            ) : page === 'datasets' ? (
+              <DatasetsPage data={data} refresh={refresh} act={act} isAdmin={user.role === 'admin'} />
             ) : page === 'inbox' ? (
               <HumanInbox />
             ) : page === 'executions' ? (
