@@ -40,10 +40,16 @@ GAPS.md                   # [done] Layer 1 gap analysis
 3. `corporate_actions`, `prices_daily`, `macro_daily`.
 4. `fundamentals_pit`.
 5. Backtest engine on price-only features (proves PIT machinery end-to-end).
+5b. Historical simulation: rules-mode replay, the shared paper broker, and server-side `as_of`
+    enforcement in the tool layer. Reuses the backtest engine's costs/delisting/holdout. See
+    [docs/replay.md](docs/replay.md).
 6. Remaining Layer 2.
 7. `universe_daily`, `regime_daily`, `features_daily`, `features_ranked`.
 8. Validation gates + lookahead tests.
 9. Agent views + MCP tools.
+9b. Agent replay: agent-mode replay over history with anonymization and process-validation
+    reporting through the same paper broker. Validates process only, never edge. See
+    [docs/replay.md](docs/replay.md).
 10. Holdout protection + `strategy_*`.
 11. Backfill full history; acceptance tests.
 
