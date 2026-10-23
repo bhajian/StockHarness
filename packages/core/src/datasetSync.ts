@@ -221,8 +221,11 @@ async function pull(sync: DatasetSync, def: DatasetDef, apikey: string): Promise
       rows += await upsertRows(coll, list, def.keyFields);
     }
   } else if (def.id === UNIVERSE_DATASET_ID) {
+    // Survivorship-free SYNC universe (C1 #22): active screener names UNION all delisted companies,
+    // so per-symbol flows also pull the history of names that later died. The market-cap / tradeable
+    // filter is a point-in-time RESEARCH universe applied later in Layer 3 (universe_daily), never here.
     const p = (sync.params ?? {}) as Record<string, unknown>;
-    const data = await fmpGet(
+    const screener = await fmpGet(
       'company-screener',
       {
         exchange: String(p.exchange ?? 'NASDAQ,NYSE,AMEX'),
@@ -234,7 +237,7 @@ async function pull(sync: DatasetSync, def: DatasetDef, apikey: string): Promise
       },
       apikey,
     );
-    const list = (Array.isArray(data) ? data : [])
+    const active = (Array.isArray(screener) ? screener : [])
       .filter((r): r is Record<string, unknown> => !!r && typeof r === 'object' && !!r.symbol)
       .map((r) => ({
         symbol: r.symbol,
@@ -243,8 +246,41 @@ async function pull(sync: DatasetSync, def: DatasetDef, apikey: string): Promise
         exchange: r.exchangeShortName,
         sector: r.sector,
         industry: r.industry,
+        is_delisted: false,
       }));
-    rows += await upsertRows(coll, list, def.keyFields);
+    // Delisted companies (paginated). Non-fatal: the Premium plan only serves page 0 (page>=1 -> 402),
+    // so we take what is available and never let it fail the universe build. Refreshes delisted_companies.
+    const delisted: Record<string, unknown>[] = [];
+    for (let page = 0; page < Number(p.delistedPages ?? 100); page++) {
+      let d: unknown;
+      try {
+        d = await fmpGet('delisted-companies', { page, limit: 100 }, apikey);
+      } catch {
+        break; // plan caps delisted paging; use whatever earlier pages returned
+      }
+      const dl = (Array.isArray(d) ? d : []).filter(
+        (r): r is Record<string, unknown> => !!r && typeof r === 'object' && !!r.symbol,
+      );
+      if (!dl.length) break;
+      delisted.push(...dl);
+    }
+    if (delisted.length) {
+      const dcoll = mongo.db(workspaceDatabase(sync.ownerId)).collection('delisted_companies');
+      await dcoll.createIndex({ symbol: 1, delistedDate: 1 }).catch(() => undefined);
+      await upsertRows(dcoll, delisted, ['symbol', 'delistedDate']);
+    }
+    // Merge: an active screener row overrides a delisted row for the same symbol.
+    const bySymbol = new Map<string, Record<string, unknown>>();
+    for (const r of delisted)
+      bySymbol.set(String(r.symbol), {
+        symbol: r.symbol,
+        companyName: r.companyName,
+        exchange: r.exchange,
+        delisted_date: r.delistedDate,
+        is_delisted: true,
+      });
+    for (const r of active) bySymbol.set(String(r.symbol), r);
+    rows += await upsertRows(coll, [...bySymbol.values()], def.keyFields);
   } else if (def.scope === 'feed') {
     const maxPages = Number((sync.params as Record<string, unknown> | undefined)?.pages ?? 5);
     for (let page = 0; page < maxPages; page++) {
