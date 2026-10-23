@@ -76,6 +76,12 @@ def _ensure_loaded():
     if _loaded:
         return
     # Import transform modules so their @transform decorators register.
-    from ..layer2 import trading_calendar, securities  # noqa: F401
+    from ..layer2 import (  # noqa: F401
+        trading_calendar,
+        securities,
+        corporate_actions,
+        prices_daily,
+        macro_daily,
+    )
 
     _loaded = True
