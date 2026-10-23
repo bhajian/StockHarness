@@ -38,7 +38,9 @@ export const DATASET_CATALOG: DatasetDef[] = [
     label: 'Universe (screener)',
     category: 'Reference',
     description:
-      'US common stock on NYSE/Nasdaq/AMEX above a market-cap floor. Per-symbol datasets iterate this list.',
+      'Survivorship-free SYNC universe: active screener names plus all delisted companies, so per-symbol ' +
+      'datasets also pull the history of names that later died. The point-in-time cap/tradeable filter is a ' +
+      'separate RESEARCH universe applied in Layer 3 (universe_daily), never at sync time.',
     endpoint: 'company-screener',
     scope: 'market',
     incremental: 'snapshot',
