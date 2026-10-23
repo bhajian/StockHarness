@@ -1,0 +1,98 @@
+# AWS EKS overlay: HTTP ALB ingress + persistent gp3 EBS storage.
+# Excludes the Caddy TLS proxy (ALB terminates at L7) and the optional NeMo
+# guardrails / Garak evaluation services.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: openharness
+resources:
+  - ../../base
+  - storageclass.yaml
+  - proxy-http.yaml
+images:
+  - name: openharness
+    newName: 491085405405.dkr.ecr.us-east-1.amazonaws.com/openharness/app
+    newTag: c6f90af9dacf
+  - name: openharness-gateway
+    newName: 491085405405.dkr.ecr.us-east-1.amazonaws.com/openharness/gateway
+    newTag: c6f90af9dacf
+  - name: openharness-mongodb-mcp
+    newName: 491085405405.dkr.ecr.us-east-1.amazonaws.com/openharness/mongodb-mcp
+    newTag: c6f90af9dacf
+  - name: openharness-python-executor
+    newName: 491085405405.dkr.ecr.us-east-1.amazonaws.com/openharness/python-executor
+    newTag: c6f90af9dacf
+patches:
+  # Drop the Caddy TLS proxy (the ALB replaces it).
+  - patch: |-
+      $patch: delete
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: proxy
+  - patch: |-
+      $patch: delete
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: proxy
+  - patch: |-
+      $patch: delete
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: openharness-proxy
+  - patch: |-
+      $patch: delete
+      apiVersion: networking.k8s.io/v1
+      kind: NetworkPolicy
+      metadata:
+        name: public-proxy
+  # Drop the optional NeMo guardrails service.
+  - patch: |-
+      $patch: delete
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: guardrails
+  - patch: |-
+      $patch: delete
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: guardrails
+  # Drop the optional Garak evaluation service.
+  - patch: |-
+      $patch: delete
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: guardrail-evaluation
+  - patch: |-
+      $patch: delete
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: guardrail-evaluation
+  # Public origin: the ALB terminates TLS, so the app sees https via X-Forwarded-Proto.
+  - patch: |-
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: openharness-config
+      data:
+        PUBLIC_URL: https://openharness.faberiq.ai
+        GATEWAY_PUBLIC_URL: wss://openharness.faberiq.ai
+  # Persistent EBS for the shared files claim and every StatefulSet volume.
+  - target:
+      kind: PersistentVolumeClaim
+      name: files
+    patch: |-
+      - op: add
+        path: /spec/storageClassName
+        value: openharness-gp3
+  - target:
+      kind: StatefulSet
+    patch: |-
+      - op: add
+        path: /spec/volumeClaimTemplates/0/spec/storageClassName
+        value: openharness-gp3
