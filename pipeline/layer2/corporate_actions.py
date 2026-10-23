@@ -5,7 +5,25 @@ from ..core.runner import transform
 from .corporate_actions_logic import is_special_dividend, normalize_split_ratio
 from ._resolve import ticker_resolver, iso_minus_days
 
-TV = "1"
+TV = "2"
+
+
+def _union(coll, names, keys=("symbol", "date")):
+    """Concatenate docs from several collections (tolerant), deduped on `keys`.
+    Lets us merge the rolling calendar windows with the full per-symbol history (C3)."""
+    docs, seen = [], set()
+    for n in names:
+        try:
+            rows = list(coll(n).find({}))
+        except Exception:
+            rows = []
+        for r in rows:
+            k = tuple(r.get(f) for f in keys)
+            if k in seen:
+                continue
+            seen.add(k)
+            docs.append(r)
+    return docs
 
 
 @transform("build_corporate_actions")
@@ -19,8 +37,8 @@ def build(ctx):
     resolve = ticker_resolver(securities)
     out: list[dict] = []
 
-    # Dividends (grouped per security to classify specials vs the trailing regular).
-    divs = list(coll("dividends_calendar").find({}))
+    # Dividends: calendar window UNION full per-symbol history (C3), grouped per security.
+    divs = _union(coll, ["dividends_calendar", "dividends_history"])
     ctx.rows_read += len(divs)
     by_sec: dict[str, list] = {}
     for r in divs:
@@ -45,14 +63,15 @@ def build(ctx):
                     "dividend_amount": amt,
                     "currency": "USD",
                     "known_at": r.get("declarationDate") or iso_minus_days(r["date"], 1),
-                    "_lineage": lineage("dividends_calendar", [r.get("_id")], "build_corporate_actions", TV),
+                    "_lineage": lineage("dividends", [r.get("_id")], "build_corporate_actions", TV),
                 }
             )
             if amt and not special:
                 prev_regular = amt
 
     # Splits.
-    splits = list(coll("splits_calendar").find({}))
+    # Splits: calendar window UNION full per-symbol history (C3).
+    splits = _union(coll, ["splits_calendar", "splits_history"])
     ctx.rows_read += len(splits)
     for r in splits:
         ex = r.get("date")
@@ -67,7 +86,7 @@ def build(ctx):
                 "split_ratio": normalize_split_ratio(r.get("numerator"), r.get("denominator")),
                 "split_type": r.get("splitType"),
                 "known_at": iso_minus_days(ex, 1),
-                "_lineage": lineage("splits_calendar", [r.get("_id")], "build_corporate_actions", TV),
+                "_lineage": lineage("splits", [r.get("_id")], "build_corporate_actions", TV),
             }
         )
 
