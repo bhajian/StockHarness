@@ -1,7 +1,4 @@
-import { InfrastructurePage } from './components/InfrastructurePage';
-import { GuardrailsPage } from './components/GuardrailsPage';
 import { HumanInbox } from './components/HumanInbox';
-import { OpenShellPage } from './components/OpenShellPage';
 import React, { useCallback, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import {
@@ -10,7 +7,6 @@ import {
   BookOpen,
   Database,
   Bot,
-  Boxes,
   ChevronRight,
   CircleHelp,
   Code2,
@@ -22,7 +18,6 @@ import {
   Plus,
   Plug,
   Search,
-  Server,
   Settings2,
   ShieldCheck,
   Sparkles,
@@ -31,7 +26,6 @@ import {
 import {
   api,
   collections,
-  defaultProviderId,
   emptyData,
   errorMessage,
   send,
@@ -39,7 +33,6 @@ import {
   type Entity,
   type User,
 } from './api';
-import { makeStarter } from '../../../packages/core/src/starters.js';
 import { Button, ErrorNotice, UpdateNotice } from './components/ui';
 import { ConnectionEditor, KnowledgeEditor, ProviderEditor } from './components/editors';
 import { WorkflowStarter } from './components/WorkflowStarter';
@@ -57,12 +50,9 @@ import './refresh.css';
 const nav = [
   { id: 'workflows', label: 'Harnesses', icon: GitBranch },
   { id: 'playground', label: 'Playground', icon: MessageSquare },
-  { id: 'inventory', label: 'Inventory', icon: Server },
-  { id: 'openshell', label: 'OpenShell', icon: Boxes },
   { id: 'skills', label: 'Skills', icon: Sparkles },
   { id: 'connections', label: 'MCP connections', icon: Plug },
   { id: 'knowledge', label: 'Knowledge', icon: BookOpen },
-  { id: 'guardrails', label: 'Guardrails', icon: ShieldCheck },
   { id: 'inbox', label: 'Inbox', icon: ShieldCheck },
   { id: 'executions', label: 'Executions', icon: Activity },
   { id: 'integrations', label: 'Integrations', icon: Code2 },
@@ -212,8 +202,6 @@ function Auth({ needsSetup, onLogin }: { needsSetup: boolean; onLogin: (u: User)
 }
 const currentPage = () => {
   const first = location.pathname.split('/')[1];
-  // Older links to the machine and cluster pages open the inventory.
-  if (first === 'clusters' || first === 'machines') return 'inventory';
   return first === 'harnesses' ? 'workflows' : first || 'workflows';
 };
 /** The Knowledge page shows documents (vector-indexed knowledge bases) or MongoDB collections. */
@@ -344,11 +332,6 @@ function App() {
     return () => removeEventListener('popstate', handler);
   }, []);
   const navigate = (next: string, newTarget = '') => {
-    // Keep the selected inventory view and its URL when reselecting the active menu.
-    if (next === 'inventory' && page === 'inventory') {
-      setSidebar(false);
-      return;
-    }
     setPage(next);
     if (next === 'knowledge') setKnowledgeViewState('documents');
     if (newTarget) setTarget(newTarget);
@@ -415,7 +398,7 @@ function App() {
         <nav>
           {nav.map((item) => (
             <React.Fragment key={item.id}>
-              {item.id === 'guardrails' && <div className="nav-label lower">Workspace</div>}
+              {item.id === 'inbox' && <div className="nav-label lower">Workspace</div>}
               <button
                 aria-label={item.label}
                 className={page === item.id ? 'active' : ''}
@@ -552,40 +535,8 @@ function App() {
           <main className="page-content">
             {page === 'skills' ? (
               <SkillsPage data={data} refresh={refresh} act={act} />
-            ) : page === 'inventory' ? (
-              <InfrastructurePage
-                {...props}
-                isAdmin={user.role === 'admin'}
-                onUseMachine={(m) => {
-                  // Resources are workflow tools: start an operator workflow bound to this one.
-                  if (!m?.connectionId) return;
-                  setEditor({
-                    type: 'workflows',
-                    draft: makeStarter({
-                      kind: 'machine',
-                      name: `${m.name} operator`,
-                      providerId: defaultProviderId(data),
-                      machine: {
-                        connectionId: m.connectionId,
-                        name: m.name,
-                        tools: m.tools.map((t) => t.name),
-                        platform: m.platform,
-                      },
-                    }),
-                  });
-                }}
-              />
-            ) : page === 'openshell' ? (
-              <OpenShellPage
-                data={data}
-                isAdmin={user.role === 'admin'}
-                navigate={navigate}
-                refresh={refresh}
-              />
             ) : page === 'connections' ? (
               <ConnectionsPage {...props} />
-            ) : page === 'guardrails' ? (
-              <GuardrailsPage data={data} refresh={refresh} isAdmin={user.role === 'admin'} />
             ) : page === 'inbox' ? (
               <HumanInbox />
             ) : page === 'executions' ? (
