@@ -8,7 +8,7 @@ import { ownedConnection } from './mcp.js';
 import { nextScheduledAt } from './schedule.js';
 import { HttpError, safeError } from './security.js';
 import { scheduleSchema, type Stored } from './schema.js';
-import { catalogById, UNIVERSE_DATASET_ID, type DatasetDef } from './datasetCatalog.js';
+import { catalogById, UNIVERSE_DATASET_ID, presetById, type DatasetDef } from './datasetCatalog.js';
 
 const FMP_BASE = 'https://financialmodelingprep.com/stable';
 const MAX_RPM = Number(process.env.DATASET_SYNC_RPM) || 400;
@@ -20,8 +20,9 @@ export const datasetSyncInput = z.object({
   enabled: z.boolean().default(true),
   connectionId: z.string().min(1),
   dataset: z.string().min(1),
-  symbolsMode: z.enum(['universe', 'list']).default('universe'),
+  symbolsMode: z.enum(['universe', 'list', 'preset']).default('universe'),
   symbols: z.array(z.string().min(1).max(20)).max(5000).optional(),
+  preset: z.string().min(1).max(64).optional(),
   from: z
     .string()
     .regex(/^\d{4}-\d{2}-\d{2}$/)
@@ -135,8 +136,23 @@ const objToStr = (o: Record<string, string | number>) =>
   Object.fromEntries(Object.entries(o).map(([k, v]) => [k, String(v)]));
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-async function resolveSymbols(sync: DatasetSync, wsDb: ReturnType<typeof mongo.db>) {
+async function resolveSymbols(sync: DatasetSync, wsDb: ReturnType<typeof mongo.db>, apikey: string) {
   if (sync.symbolsMode === 'list' && sync.symbols?.length) return sync.symbols;
+  if (sync.symbolsMode === 'preset' && sync.preset) {
+    const preset = presetById.get(sync.preset);
+    if (!preset) throw new HttpError(400, `Unknown ticker preset: ${sync.preset}`);
+    const data = await fmpGet(
+      'company-screener',
+      { ...preset.screener, isEtf: 'false', isFund: 'false', isActivelyTrading: 'true', limit: 5000 },
+      apikey,
+    );
+    let list = (Array.isArray(data) ? data : []).filter(
+      (r): r is Record<string, unknown> => !!r && typeof r === 'object' && !!r.symbol,
+    );
+    list.sort((a, b) => Number(b.marketCap ?? 0) - Number(a.marketCap ?? 0));
+    if (preset.take) list = list.slice(0, preset.take);
+    return list.map((r) => String(r.symbol));
+  }
   const rows = await wsDb
     .collection('universe')
     .find({}, { projection: { symbol: 1, _id: 0 } })
@@ -179,7 +195,7 @@ async function pull(sync: DatasetSync, def: DatasetDef, apikey: string): Promise
   let rows = 0;
 
   if (def.perSymbol) {
-    const symbols = await resolveSymbols(sync, wsDb);
+    const symbols = await resolveSymbols(sync, wsDb, apikey);
     for (const symbol of symbols) {
       const params: Record<string, string | number> = { ...(def.params ?? {}), symbol };
       if (isTimeseries(def)) {
@@ -243,7 +259,12 @@ async function pull(sync: DatasetSync, def: DatasetDef, apikey: string): Promise
       rows += await upsertRows(coll, Array.isArray(data) ? data : [], def.keyFields);
     }
   } else {
-    const params: Record<string, string | number> = def.id === 'sector_performance' ? { date: now } : {};
+    const params: Record<string, string | number> = { ...(def.params ?? {}) };
+    if (def.id === 'sector_performance') params.date = now;
+    if (def.supportsDateRange) {
+      params.from = sync.from || addDays(now, -365 * 5);
+      params.to = sync.to || now;
+    }
     const data = await fmpGet(def.endpoint, params, apikey);
     rows += await upsertRows(coll, Array.isArray(data) ? data : [], def.keyFields);
   }
