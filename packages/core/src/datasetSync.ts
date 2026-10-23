@@ -248,10 +248,16 @@ async function pull(sync: DatasetSync, def: DatasetDef, apikey: string): Promise
         industry: r.industry,
         is_delisted: false,
       }));
-    // Delisted companies (paginated). Refreshes the full delisted_companies collection too.
+    // Delisted companies (paginated). Non-fatal: the Premium plan only serves page 0 (page>=1 -> 402),
+    // so we take what is available and never let it fail the universe build. Refreshes delisted_companies.
     const delisted: Record<string, unknown>[] = [];
     for (let page = 0; page < Number(p.delistedPages ?? 100); page++) {
-      const d = await fmpGet('delisted-companies', { page, limit: 100 }, apikey);
+      let d: unknown;
+      try {
+        d = await fmpGet('delisted-companies', { page, limit: 100 }, apikey);
+      } catch {
+        break; // plan caps delisted paging; use whatever earlier pages returned
+      }
       const dl = (Array.isArray(d) ? d : []).filter(
         (r): r is Record<string, unknown> => !!r && typeof r === 'object' && !!r.symbol,
       );
