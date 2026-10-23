@@ -77,7 +77,8 @@ def build(ctx):
     delisted = {d["symbol"]: d for d in coll("delisted_companies").find({})}
     ctx.rows_read = len(profiles) + len(stock_list) + len(delisted)
 
-    symbols = set(profiles) | set(stock_list) | set(delisted)
+    # Seed from the synced profile universe + delisted; stock_list only backfills names.
+    symbols = set(profiles) | set(delisted)
     touched: dict[str, dict] = {}
 
     for sym in sorted(symbols):
@@ -88,8 +89,8 @@ def build(ctx):
         if p:
             if p.get("isEtf") or p.get("isFund"):
                 continue
-            exch = p.get("exchange") or p.get("exchangeShortName")
-            if exch and allowed_exch and exch not in allowed_exch:
+            exch = (p.get("exchange") or p.get("exchangeShortName") or "").upper()
+            if exch and allowed_exch and not any(a.upper() in exch for a in allowed_exch):
                 continue
         name = p.get("companyName") or sl.get("companyName") or dl.get("companyName") or sym
         candidate = {"ticker": sym, "cik": p.get("cik"), "cusip": p.get("cusip"), "name": name}
