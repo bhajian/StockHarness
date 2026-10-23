@@ -208,6 +208,8 @@ async function pull(sync: DatasetSync, def: DatasetDef, apikey: string): Promise
         if (r && typeof r === 'object') {
           (r as Record<string, unknown>).symbol = symbol;
           if (def.params?.period) (r as Record<string, unknown>).period ??= def.params.period;
+          // Append-only snapshots: stamp the sync date so each weekly pull adds rows (revision history).
+          if (def.snapshotDated) (r as Record<string, unknown>).snapshot_date = now;
         }
       rows += await upsertRows(coll, list, def.keyFields);
     }

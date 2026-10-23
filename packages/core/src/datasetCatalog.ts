@@ -15,6 +15,7 @@ export interface DatasetDef {
   scope: DatasetScope;
   incremental: IncrementalMode;
   keyFields: string[]; // upsert identity
+  snapshotDated?: boolean; // append one row per sync (adds snapshot_date to the key)
   dateField?: string; // enables retention + timeseries cursoring
   supportsDateRange: boolean; // accepts from/to
   perSymbol: boolean; // iterate the universe (or an explicit list)
@@ -279,7 +280,8 @@ export const DATASET_CATALOG: DatasetDef[] = [
     endpoint: 'analyst-estimates',
     scope: 'per-symbol',
     incremental: 'snapshot',
-    keyFields: ['symbol', 'date'],
+    keyFields: ['symbol', 'date', 'snapshot_date'],
+    snapshotDated: true,
     dateField: 'date',
     supportsDateRange: false,
     perSymbol: true,
@@ -295,7 +297,8 @@ export const DATASET_CATALOG: DatasetDef[] = [
     endpoint: 'price-target-consensus',
     scope: 'per-symbol',
     incremental: 'snapshot',
-    keyFields: ['symbol'],
+    keyFields: ['symbol', 'snapshot_date'],
+    snapshotDated: true,
     supportsDateRange: false,
     perSymbol: true,
     defaultCollection: 'price_target_consensus',
@@ -309,7 +312,8 @@ export const DATASET_CATALOG: DatasetDef[] = [
     endpoint: 'grades-consensus',
     scope: 'per-symbol',
     incremental: 'snapshot',
-    keyFields: ['symbol'],
+    keyFields: ['symbol', 'snapshot_date'],
+    snapshotDated: true,
     supportsDateRange: false,
     perSymbol: true,
     defaultCollection: 'grades_consensus',
@@ -323,7 +327,8 @@ export const DATASET_CATALOG: DatasetDef[] = [
     endpoint: 'financial-scores',
     scope: 'per-symbol',
     incremental: 'snapshot',
-    keyFields: ['symbol'],
+    keyFields: ['symbol', 'snapshot_date'],
+    snapshotDated: true,
     supportsDateRange: false,
     perSymbol: true,
     defaultCollection: 'financial_scores',
@@ -385,7 +390,7 @@ export const DATASET_CATALOG: DatasetDef[] = [
     endpoint: 'income-statement',
     scope: 'per-symbol',
     incremental: 'snapshot',
-    keyFields: ['symbol', 'date'],
+    keyFields: ['symbol', 'date', 'acceptedDate'],
     dateField: 'date',
     supportsDateRange: false,
     perSymbol: true,
@@ -401,7 +406,7 @@ export const DATASET_CATALOG: DatasetDef[] = [
     endpoint: 'balance-sheet-statement',
     scope: 'per-symbol',
     incremental: 'snapshot',
-    keyFields: ['symbol', 'date'],
+    keyFields: ['symbol', 'date', 'acceptedDate'],
     dateField: 'date',
     supportsDateRange: false,
     perSymbol: true,
@@ -417,7 +422,7 @@ export const DATASET_CATALOG: DatasetDef[] = [
     endpoint: 'cash-flow-statement',
     scope: 'per-symbol',
     incremental: 'snapshot',
-    keyFields: ['symbol', 'date'],
+    keyFields: ['symbol', 'date', 'acceptedDate'],
     dateField: 'date',
     supportsDateRange: false,
     perSymbol: true,
