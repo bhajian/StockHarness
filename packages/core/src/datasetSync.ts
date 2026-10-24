@@ -11,7 +11,7 @@ import { scheduleSchema, type Stored } from './schema.js';
 import { catalogById, UNIVERSE_DATASET_ID, presetById, type DatasetDef } from './datasetCatalog.js';
 
 const FMP_BASE = 'https://financialmodelingprep.com/stable';
-const MAX_RPM = Number(process.env.DATASET_SYNC_RPM) || 400;
+const MAX_RPM = Number(process.env.DATASET_SYNC_RPM) || 250;
 const MIN_INTERVAL = 60000 / Math.max(1, MAX_RPM);
 let lastCall = 0;
 
@@ -104,7 +104,7 @@ async function fmpGet(
   const query = new URLSearchParams({ ...objToStr(params), apikey });
   const url = `${FMP_BASE}/${endpoint}?${query.toString()}`;
   let lastErr: unknown;
-  for (let attempt = 0; attempt < 6; attempt++) {
+  for (let attempt = 0; attempt < 8; attempt++) {
     const wait = MIN_INTERVAL - (Date.now() - lastCall);
     if (wait > 0) await sleep(wait);
     lastCall = Date.now();
@@ -116,7 +116,7 @@ async function fmpGet(
       if (res.ok) return await res.json();
       // 402 on some feeds is a transient throttle mislabeled "not in current plan".
       if ([402, 429, 500, 502, 503, 504].includes(res.status)) {
-        if (res.status === 402 && attempt >= 3)
+        if (res.status === 402 && attempt >= 5)
           throw new HttpError(402, `FMP endpoint ${endpoint} is not in the current plan`);
         await sleep(Math.min(60000, 2 ** attempt * 1000) + Math.random() * 1000);
         lastErr = new Error(`FMP ${res.status}`);
@@ -196,29 +196,41 @@ async function pull(sync: DatasetSync, def: DatasetDef, apikey: string): Promise
 
   if (def.perSymbol) {
     const symbols = await resolveSymbols(sync, wsDb, apikey);
+    let errors = 0;
     for (const symbol of symbols) {
-      const params: Record<string, string | number> = { ...(def.params ?? {}), symbol };
-      if (isTimeseries(def)) {
-        params.from = sync.cursor || defaultFrom;
-        params.to = now;
-      }
-      const data = await fmpGet(def.endpoint, params, apikey);
-      const list = Array.isArray(data) ? data : data ? [data] : [];
-      for (const r of list)
-        if (r && typeof r === 'object') {
-          (r as Record<string, unknown>).symbol = symbol;
-          if (def.params?.period) (r as Record<string, unknown>).period ??= def.params.period;
-          // Append-only snapshots: stamp the sync date so each weekly pull adds rows (revision history).
-          if (def.snapshotDated) (r as Record<string, unknown>).snapshot_date = now;
+      // One symbol's transient throttle (402/429) must never fail the whole dataset.
+      try {
+        const params: Record<string, string | number> = { ...(def.params ?? {}), symbol };
+        if (isTimeseries(def)) {
+          params.from = sync.cursor || defaultFrom;
+          params.to = now;
         }
-      rows += await upsertRows(coll, list, def.keyFields);
+        const data = await fmpGet(def.endpoint, params, apikey);
+        const list = Array.isArray(data) ? data : data ? [data] : [];
+        for (const r of list)
+          if (r && typeof r === 'object') {
+            (r as Record<string, unknown>).symbol = symbol;
+            if (def.params?.period) (r as Record<string, unknown>).period ??= def.params.period;
+            // Append-only snapshots: stamp the sync date so each weekly pull adds rows.
+            if (def.snapshotDated) (r as Record<string, unknown>).snapshot_date = now;
+          }
+        rows += await upsertRows(coll, list, def.keyFields);
+      } catch (error) {
+        errors++;
+        if (errors <= 5) console.warn(`dataset ${def.id} ${symbol}: ${safeError(error)}`);
+      }
     }
+    if (errors) console.warn(`dataset ${def.id}: ${errors}/${symbols.length} symbols errored (kept the rest)`);
   } else if (def.fixedSymbols) {
     for (const symbol of def.fixedSymbols) {
-      const data = await fmpGet(def.endpoint, { symbol, from: sync.cursor || defaultFrom, to: now }, apikey);
-      const list = Array.isArray(data) ? data : [];
-      for (const r of list) if (r && typeof r === 'object') (r as Record<string, unknown>).symbol = symbol;
-      rows += await upsertRows(coll, list, def.keyFields);
+      try {
+        const data = await fmpGet(def.endpoint, { symbol, from: sync.cursor || defaultFrom, to: now }, apikey);
+        const list = Array.isArray(data) ? data : [];
+        for (const r of list) if (r && typeof r === 'object') (r as Record<string, unknown>).symbol = symbol;
+        rows += await upsertRows(coll, list, def.keyFields);
+      } catch (error) {
+        console.warn(`dataset ${def.id} ${symbol}: ${safeError(error)}`);
+      }
     }
   } else if (def.id === UNIVERSE_DATASET_ID) {
     // Survivorship-free SYNC universe (C1 #22): active screener names UNION all delisted companies,
