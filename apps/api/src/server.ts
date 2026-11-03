@@ -10,10 +10,15 @@ import { closeQueue } from '../../../packages/core/src/queue.js';
 import { dispatchPending, dispatchSchedules, recoverStaleJobs } from '../../../packages/core/src/runs.js';
 import { deliverWebhooks } from '../../../packages/core/src/harnessEvents.js';
 import { dispatchReflections } from '../../../packages/core/src/experience.js';
-import { dispatchDatasetSyncs } from '../../../packages/core/src/datasetSync.js';
+import {
+  dispatchDatasetSyncs,
+  recoverInterruptedDatasetSyncRuns,
+} from '../../../packages/core/src/datasetSync.js';
 import { safeError } from '../../../packages/core/src/security.js';
 
 await connectDatabase();
+const interrupted = await recoverInterruptedDatasetSyncRuns();
+if (interrupted) console.warn(`Marked ${interrupted} interrupted dataset sync run(s) as failed`);
 await provisionMongoMcp(
   async () =>
     (await collection('connections').distinct('ownerId', { kind: 'mongodb', builtIn: true })) as string[],
