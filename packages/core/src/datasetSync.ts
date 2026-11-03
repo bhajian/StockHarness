@@ -388,6 +388,27 @@ export async function runDatasetSync(
   }
 }
 
+/**
+ * Syncs run inside the API process (one replica, Recreate rollout), so at startup any run still
+ * marked `running` was killed by the previous process. Fail it so it neither shows as running nor
+ * blocks bulk runs. Call once after connecting, before the dispatcher starts.
+ */
+export async function recoverInterruptedDatasetSyncRuns() {
+  const orphans = await datasetSyncRuns().find({ status: 'running' }).toArray();
+  if (!orphans.length) return 0;
+  const error = 'Interrupted by a server restart';
+  const finishedAt = new Date();
+  await datasetSyncRuns().updateMany(
+    { _id: { $in: orphans.map((r) => r._id) }, status: 'running' },
+    { $set: { status: 'failed', error, finishedAt } },
+  );
+  await datasetSyncs().updateMany(
+    { _id: { $in: [...new Set(orphans.map((r) => r.syncId))] } },
+    { $set: { lastError: error } },
+  );
+  return orphans.length;
+}
+
 /** Fired every tick: run due, enabled syncs; advance nextRunAt. Mirrors dispatchSchedules(). */
 export async function dispatchDatasetSyncs() {
   const due = await datasetSyncs()

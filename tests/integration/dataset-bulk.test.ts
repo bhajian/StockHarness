@@ -8,7 +8,7 @@ process.env.ENCRYPTION_KEY ??= 'ab'.repeat(32);
 process.env.SETUP_TOKEN ??= 'unit-test-setup-token'.repeat(3);
 const { mongo } = await import('../../packages/core/src/db.js');
 const { workspaceDatabase } = await import('../../packages/core/src/mongoMcp.js');
-const { datasetSyncs, datasetSyncRuns, applyDatasetSyncBulk } =
+const { datasetSyncs, datasetSyncRuns, applyDatasetSyncBulk, recoverInterruptedDatasetSyncRuns } =
   await import('../../packages/core/src/datasetSync.js');
 
 const ownerId = `bulk-test-${randomUUID()}`;
@@ -149,4 +149,26 @@ test('delete with dropCollections drops only collections no remaining sync write
   assert.ok(!names.includes('eod_index'));
   assert.equal(await datasetSyncs().countDocuments({ _id: { $in: ['prices-a', 'index'] } }), 0);
   assert.equal(await datasetSyncs().countDocuments({ _id: 'foreign' }), 1);
+});
+
+test('startup recovery fails runs orphaned by a restart', async () => {
+  const id = randomUUID();
+  await datasetSyncRuns().insertOne({
+    _id: id,
+    ownerId,
+    syncId: 'rates',
+    trigger: 'manual',
+    status: 'running',
+    startedAt: new Date(),
+  });
+  assert.ok((await recoverInterruptedDatasetSyncRuns()) >= 1);
+  const run = (await datasetSyncRuns().findOne({ _id: id }))!;
+  assert.equal(run.status, 'failed');
+  assert.equal(run.error, 'Interrupted by a server restart');
+  assert.equal(
+    (await datasetSyncs().findOne({ _id: 'rates' }))!.lastError,
+    'Interrupted by a server restart',
+  );
+  const r = await applyDatasetSyncBulk(ownerId, { ids: ['rates'], action: 'run', dropCollections: false });
+  assert.deepEqual(r.alreadyRunning, []);
 });
