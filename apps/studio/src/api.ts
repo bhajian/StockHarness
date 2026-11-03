@@ -142,4 +142,15 @@ export const saveDatasetSync = (body: Record<string, unknown>, id?: string) =>
   send<Entity>(`/dataset-syncs${id ? `/${id}` : ''}`, body, id ? 'PUT' : 'POST');
 export const deleteDatasetSync = (id: string) => api(`/dataset-syncs/${id}`, { method: 'DELETE' });
 export const runDatasetSyncNow = (id: string) => send(`/dataset-syncs/${id}/run`);
+export type DatasetBulkAction = 'run' | 'enable' | 'disable' | 'reset' | 'purge' | 'delete';
+export type DatasetBulkResult = {
+  action: DatasetBulkAction;
+  matched: number;
+  queued?: string[];
+  alreadyRunning?: string[];
+  collections?: { name: string; deleted?: number; dropped?: boolean }[];
+  keptCollections?: string[];
+};
+export const bulkDatasetSyncs = (ids: string[], action: DatasetBulkAction, dropCollections = false) =>
+  send<DatasetBulkResult>('/dataset-syncs/bulk', { ids, action, dropCollections });
 export const fetchDatasetRuns = (id: string) => api<DatasetSyncRun[]>(`/dataset-syncs/${id}/runs`);

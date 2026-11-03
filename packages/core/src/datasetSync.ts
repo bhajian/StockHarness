@@ -159,7 +159,10 @@ async function resolveSymbols(sync: DatasetSync, wsDb: ReturnType<typeof mongo.d
     .toArray();
   const symbols = rows.map((r) => r.symbol as string).filter(Boolean);
   if (!symbols.length)
-    throw new HttpError(400, 'No universe yet: sync the Universe dataset first, or use an explicit symbol list');
+    throw new HttpError(
+      400,
+      'No universe yet: sync the Universe dataset first, or use an explicit symbol list',
+    );
   return symbols;
 }
 
@@ -220,11 +223,16 @@ async function pull(sync: DatasetSync, def: DatasetDef, apikey: string): Promise
         if (errors <= 5) console.warn(`dataset ${def.id} ${symbol}: ${safeError(error)}`);
       }
     }
-    if (errors) console.warn(`dataset ${def.id}: ${errors}/${symbols.length} symbols errored (kept the rest)`);
+    if (errors)
+      console.warn(`dataset ${def.id}: ${errors}/${symbols.length} symbols errored (kept the rest)`);
   } else if (def.fixedSymbols) {
     for (const symbol of def.fixedSymbols) {
       try {
-        const data = await fmpGet(def.endpoint, { symbol, from: sync.cursor || defaultFrom, to: now }, apikey);
+        const data = await fmpGet(
+          def.endpoint,
+          { symbol, from: sync.cursor || defaultFrom, to: now },
+          apikey,
+        );
         const list = Array.isArray(data) ? data : [];
         for (const r of list) if (r && typeof r === 'object') (r as Record<string, unknown>).symbol = symbol;
         rows += await upsertRows(coll, list, def.keyFields);
@@ -372,7 +380,10 @@ export async function runDatasetSync(
       { _id: run._id },
       { $set: { status: 'failed', error: message, finishedAt: new Date() } },
     );
-    await datasetSyncs().updateOne({ _id: sync._id }, { $set: { lastRunAt: new Date(), lastError: message } });
+    await datasetSyncs().updateOne(
+      { _id: sync._id },
+      { $set: { lastRunAt: new Date(), lastError: message } },
+    );
     throw error;
   }
 }
@@ -421,3 +432,141 @@ export async function dispatchDatasetSyncs() {
 }
 
 export type { Stored };
+
+// --- Bulk operations (Datasets toolbar) -------------------------------------------------------
+export const DATASET_BULK_ACTIONS = ['run', 'enable', 'disable', 'reset', 'purge', 'delete'] as const;
+export type DatasetBulkAction = (typeof DATASET_BULK_ACTIONS)[number];
+export const datasetBulkInput = z.object({
+  ids: z.array(z.string().min(1)).min(1).max(500),
+  action: z.enum(DATASET_BULK_ACTIONS),
+  /** delete only: also drop each sync's collection unless a remaining sync still writes to it. */
+  dropCollections: z.boolean().default(false),
+});
+export type DatasetBulkResult = {
+  action: DatasetBulkAction;
+  matched: number;
+  /** Sync ids queued for a background run (run only). */
+  queued?: string[];
+  /** Sync ids skipped because a run is already in progress (run only). */
+  alreadyRunning?: string[];
+  /** Collections whose documents were removed (purge) or that were dropped (delete). */
+  collections?: { name: string; deleted?: number; dropped?: boolean }[];
+  /** Collections kept on delete because another sync still writes to them. */
+  keptCollections?: string[];
+};
+
+/** The collection a sync writes to: its override, else the catalog default. */
+export const syncCollection = (s: Pick<DatasetSync, 'dataset' | 'targetCollection'>) =>
+  s.targetCollection || catalogById.get(s.dataset)?.defaultCollection || '';
+
+/**
+ * Split the collections of `selected` syncs into those safe to drop and those still written by a
+ * sync outside the selection. Each collection appears once even if several selected syncs share it.
+ */
+export function collectionsToDrop(
+  selected: Pick<DatasetSync, '_id' | 'dataset' | 'targetCollection'>[],
+  all: Pick<DatasetSync, '_id' | 'dataset' | 'targetCollection'>[],
+) {
+  const selectedIds = new Set(selected.map((s) => s._id));
+  const stillUsed = new Set(all.filter((s) => !selectedIds.has(s._id)).map(syncCollection));
+  const names = [...new Set(selected.map(syncCollection).filter(Boolean))];
+  return { drop: names.filter((n) => !stillUsed.has(n)), keep: names.filter((n) => stillUsed.has(n)) };
+}
+
+// A run row stuck in `running` longer than this (e.g. the pod restarted mid-sync) no longer blocks.
+const STALE_RUN_MS = 12 * 3600 * 1000;
+
+/** Run syncs one after another so a "run all" does not stampede the shared FMP rate limiter. */
+async function runSequentially(syncs: DatasetSync[]) {
+  for (const sync of syncs) {
+    const fresh = await datasetSyncs().findOne({ _id: sync._id });
+    if (!fresh) continue; // deleted while queued
+    await runDatasetSync(fresh, { trigger: 'manual' }).catch(() => undefined);
+  }
+}
+
+export async function applyDatasetSyncBulk(
+  ownerId: string,
+  input: z.infer<typeof datasetBulkInput>,
+): Promise<DatasetBulkResult> {
+  const { action } = input;
+  const ids = [...new Set(input.ids)];
+  const selected = await datasetSyncs()
+    .find({ ownerId, _id: { $in: ids } })
+    .toArray();
+  const matchedIds = selected.map((s) => s._id);
+  const result: DatasetBulkResult = { action, matched: selected.length };
+  if (!selected.length) return result;
+  const wsDb = mongo.db(workspaceDatabase(ownerId));
+
+  switch (action) {
+    case 'enable':
+    case 'disable':
+      await datasetSyncs().updateMany(
+        { ownerId, _id: { $in: matchedIds } },
+        // Re-enabling re-seeds the schedule from now instead of firing every missed slot at once.
+        { $set: { enabled: action === 'enable', updatedAt: new Date() }, $unset: { nextRunAt: '' } },
+      );
+      break;
+    case 'reset':
+      await datasetSyncs().updateMany(
+        { ownerId, _id: { $in: matchedIds } },
+        { $unset: { cursor: '' }, $set: { updatedAt: new Date() } },
+      );
+      break;
+    case 'purge': {
+      const names = [...new Set(selected.map(syncCollection).filter(Boolean))];
+      result.collections = [];
+      for (const name of names) {
+        const res = await wsDb.collection(name).deleteMany({});
+        result.collections.push({ name, deleted: res.deletedCount });
+      }
+      // Every sync writing to a purged collection (selected or not) must re-pull its history.
+      const all = await datasetSyncs().find({ ownerId }).toArray();
+      const affected = all.filter((s) => names.includes(syncCollection(s))).map((s) => s._id);
+      await datasetSyncs().updateMany(
+        { ownerId, _id: { $in: affected } },
+        { $unset: { cursor: '', lastRows: '' }, $set: { updatedAt: new Date() } },
+      );
+      break;
+    }
+    case 'delete': {
+      const all = await datasetSyncs().find({ ownerId }).toArray();
+      const { drop, keep } = collectionsToDrop(selected, all);
+      await datasetSyncs().deleteMany({ ownerId, _id: { $in: matchedIds } });
+      if (input.dropCollections) {
+        result.collections = [];
+        for (const name of drop) {
+          const dropped = await wsDb
+            .collection(name)
+            .drop()
+            .catch(() => false); // already absent
+          result.collections.push({ name, dropped: !!dropped });
+        }
+        result.keptCollections = keep;
+      }
+      break;
+    }
+    case 'run': {
+      const running = await datasetSyncRuns()
+        .find({
+          ownerId,
+          syncId: { $in: matchedIds },
+          status: 'running',
+          startedAt: { $gt: new Date(Date.now() - STALE_RUN_MS) },
+        })
+        .project<{ syncId: string }>({ syncId: 1 })
+        .toArray();
+      const busy = new Set(running.map((r) => r.syncId));
+      // Keep the table order (newest first), matching what the user sees.
+      const queue = selected
+        .filter((s) => !busy.has(s._id))
+        .sort((a, b) => ids.indexOf(a._id) - ids.indexOf(b._id));
+      result.queued = queue.map((s) => s._id);
+      result.alreadyRunning = [...busy];
+      void runSequentially(queue);
+      break;
+    }
+  }
+  return result;
+}
