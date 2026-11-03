@@ -7,6 +7,8 @@ import {
   datasetSyncRuns,
   datasetSyncInput,
   runDatasetSync,
+  datasetBulkInput,
+  applyDatasetSyncBulk,
   type DatasetSync,
 } from '../../../packages/core/src/datasetSync.js';
 
@@ -27,11 +29,21 @@ datasetSyncRouter.get('/datasets/catalog', (_req, res) => {
 
 async function listSyncs(ownerId: string) {
   const items = await syncsCol().find({ ownerId }).sort({ createdAt: -1 }).toArray();
-  return items.map(publicSync);
+  // Flag syncs with an in-flight run (ignoring rows orphaned by a restart) so the table can show it.
+  const running = await datasetSyncRuns()
+    .find({ ownerId, status: 'running', startedAt: { $gt: new Date(Date.now() - 12 * 3600 * 1000) } })
+    .project<{ syncId: string }>({ syncId: 1 })
+    .toArray();
+  const busy = new Set(running.map((r) => r.syncId));
+  return items.map((s) => ({ ...publicSync(s), running: busy.has(s._id) }));
 }
 // The studio auto-loads `/datasetSyncs` (collections key); `/dataset-syncs` is the REST alias.
-datasetSyncRouter.get('/datasetSyncs', async (req, res) => res.json(await listSyncs(req.principal!.tenantId)));
-datasetSyncRouter.get('/dataset-syncs', async (req, res) => res.json(await listSyncs(req.principal!.tenantId)));
+datasetSyncRouter.get('/datasetSyncs', async (req, res) =>
+  res.json(await listSyncs(req.principal!.tenantId)),
+);
+datasetSyncRouter.get('/dataset-syncs', async (req, res) =>
+  res.json(await listSyncs(req.principal!.tenantId)),
+);
 
 datasetSyncRouter.get('/dataset-syncs/:id', async (req, res) => {
   const doc = await syncsCol().findOne({ _id: String(req.params.id), ownerId: req.principal!.tenantId });
@@ -75,6 +87,14 @@ datasetSyncRouter.delete('/dataset-syncs/:id', async (req, res) => {
   assertAdmin(req.principal!.user.role);
   await syncsCol().deleteOne({ _id: String(req.params.id), ownerId: req.principal!.tenantId });
   res.status(204).end();
+});
+
+// Apply one action to many syncs at once (Datasets toolbar). `run` returns immediately; the selected
+// syncs then run one after another in the background.
+datasetSyncRouter.post('/dataset-syncs/bulk', async (req, res) => {
+  assertAdmin(req.principal!.user.role);
+  const input = datasetBulkInput.parse(req.body);
+  res.json(await applyDatasetSyncBulk(req.principal!.tenantId, input));
 });
 
 // Trigger an immediate one-off sync (runs in the background; poll /runs for status).

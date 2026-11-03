@@ -7486,3 +7486,23 @@ details.advanced summary {
 .dataset-grid-meta { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted, #6b7280); }
 .dataset-grid-meta code { background: var(--surface-2, #f3f4f6); padding: 2px 7px; border-radius: 6px; }
 .dataset-grid-section .data-grid-table { max-height: calc(100vh - 360px); }
+/* ---- Dataset bulk toolbar ---- */
+.dataset-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 8px 12px;
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 10px;
+  background: var(--surface, #fff);
+}
+.dataset-toolbar-select { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; }
+.dataset-toolbar-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.dataset-toolbar-actions .button { padding: 6px 10px; font-size: 13px; }
+.dataset-table th.dataset-check,
+.dataset-table td.dataset-check { width: 32px; text-align: center; cursor: default; }
+.dataset-table tbody tr.checked { background: rgba(79, 70, 229, 0.05); }
+.dataset-notice { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.dataset-confirm-list { margin: 8px 0 12px; padding-left: 18px; font-size: 13px; }

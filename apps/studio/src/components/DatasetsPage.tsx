@@ -1,5 +1,5 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { Database, Plus, Play, Pencil, Trash2 } from 'lucide-react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { Database, Plus, Play, Pencil, Trash2, Power, PowerOff, RotateCcw, Eraser, X } from 'lucide-react';
 import {
   type Data,
   type DatasetCatalogItem,
@@ -8,6 +8,8 @@ import {
   saveDatasetSync,
   deleteDatasetSync,
   runDatasetSyncNow,
+  bulkDatasetSyncs,
+  type DatasetBulkAction,
   timestamp,
 } from '../api';
 import { describeSchedule } from '../../../../packages/core/src/schedule.js';
@@ -44,6 +46,13 @@ export function DatasetsPage({ data, refresh, act, isAdmin }: Props) {
   const [presets, setPresets] = useState<TickerPreset[]>([]);
   const [selected, setSelected] = useState<string>('');
   const [editing, setEditing] = useState<SyncForm | null>(null);
+  const [checked, setChecked] = useState<Set<string>>(new Set());
+  const [confirming, setConfirming] = useState<{
+    action: 'purge' | 'delete';
+    dropCollections: boolean;
+  } | null>(null);
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [notice, setNotice] = useState('');
 
   useEffect(() => {
     fetchDatasetCatalog()
@@ -64,9 +73,82 @@ export function DatasetsPage({ data, refresh, act, isAdmin }: Props) {
     fmpConnections[0]?.id ??
     '';
 
+  // Drop selections for syncs that no longer exist (deleted here or elsewhere).
+  const checkedIds = syncs.filter((s) => checked.has(s.id)).map((s) => s.id as string);
+  const allChecked = syncs.length > 0 && checkedIds.length === syncs.length;
+  const someChecked = checkedIds.length > 0 && !allChecked;
+  const selectAllRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (selectAllRef.current) selectAllRef.current.indeterminate = someChecked;
+  }, [someChecked]);
+  const toggle = (id: string) =>
+    setChecked((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  const toggleAll = () => setChecked(allChecked ? new Set() : new Set(syncs.map((s) => s.id as string)));
+  const collectionOf = (s: Record<string, any>) =>
+    (s.targetCollection as string) || catalogById.get(s.dataset as string)?.defaultCollection || '';
+  const checkedCollections = [
+    ...new Set(
+      syncs
+        .filter((s) => checked.has(s.id))
+        .map(collectionOf)
+        .filter(Boolean),
+    ),
+  ];
+  const anyRunning = syncs.some((s) => s.running);
+
+  // While a sync runs, refresh so rows, counts and status update without a manual reload.
+  useEffect(() => {
+    if (!anyRunning) return;
+    const t = setInterval(() => void refresh(), 5000);
+    return () => clearInterval(t);
+  }, [anyRunning, refresh]);
+
+  const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
+  async function bulk(action: DatasetBulkAction, dropCollections = false) {
+    if (!checkedIds.length) return;
+    setBulkBusy(true);
+    setNotice('');
+    try {
+      await act(async () => {
+        const r = await bulkDatasetSyncs(checkedIds, action, dropCollections);
+        const n = plural(r.matched, 'sync');
+        const messages: Record<DatasetBulkAction, string> = {
+          run: `Queued ${plural(r.queued?.length ?? 0, 'sync')} to run one after another${
+            r.alreadyRunning?.length ? ` (${r.alreadyRunning.length} already running)` : ''
+          }.`,
+          enable: `Enabled ${n}.`,
+          disable: `Disabled ${n}.`,
+          reset: `Reset ${n}: the next run re-pulls history from its start date.`,
+          purge: `Purged ${(r.collections ?? [])
+            .map((c) => `${c.name} (${(c.deleted ?? 0).toLocaleString()} rows)`)
+            .join(', ')}.`,
+          delete: `Deleted ${n}.${
+            r.collections?.length ? ` Dropped ${r.collections.map((c) => c.name).join(', ')}.` : ''
+          }${r.keptCollections?.length ? ` Kept ${r.keptCollections.join(', ')} (used by other syncs).` : ''}`,
+        };
+        setNotice(messages[action]);
+        if (action === 'delete') {
+          setChecked(new Set());
+          setSelected('');
+        }
+        await refresh();
+      });
+    } finally {
+      setBulkBusy(false);
+      setConfirming(null);
+    }
+  }
+
   const current = syncs.find((s) => s.id === selected) ?? syncs[0];
   const currentCollection = current
-    ? (current.targetCollection as string) || catalogById.get(current.dataset as string)?.defaultCollection || ''
+    ? (current.targetCollection as string) ||
+      catalogById.get(current.dataset as string)?.defaultCollection ||
+      ''
     : '';
 
   const blankForm = (): SyncForm => ({
@@ -118,7 +200,10 @@ export function DatasetsPage({ data, refresh, act, isAdmin }: Props) {
     };
     if (item?.perSymbol) {
       if (editing.symbolsMode === 'list')
-        body.symbols = editing.symbols.split(/[\s,]+/).map((s) => s.trim().toUpperCase()).filter(Boolean);
+        body.symbols = editing.symbols
+          .split(/[\s,]+/)
+          .map((s) => s.trim().toUpperCase())
+          .filter(Boolean);
       if (editing.symbolsMode === 'preset') body.preset = editing.preset;
     }
     if (item?.supportsDateRange) {
@@ -164,10 +249,88 @@ export function DatasetsPage({ data, refresh, act, isAdmin }: Props) {
         />
       ) : (
         <div className="dataset-v2">
+          {isAdmin && (
+            <div className="dataset-toolbar" role="toolbar" aria-label="Dataset sync actions">
+              <label className="dataset-toolbar-select">
+                <input type="checkbox" checked={allChecked} onChange={toggleAll} />
+                {checkedIds.length ? `${checkedIds.length} of ${syncs.length} selected` : 'Select all'}
+              </label>
+              <div className="dataset-toolbar-actions">
+                <Button
+                  variant="secondary"
+                  disabled={!checkedIds.length || bulkBusy}
+                  onClick={() => bulk('run')}
+                >
+                  <Play size={15} /> Run
+                </Button>
+                <Button
+                  variant="secondary"
+                  disabled={!checkedIds.length || bulkBusy}
+                  onClick={() => bulk('enable')}
+                >
+                  <Power size={15} /> Enable
+                </Button>
+                <Button
+                  variant="secondary"
+                  disabled={!checkedIds.length || bulkBusy}
+                  onClick={() => bulk('disable')}
+                >
+                  <PowerOff size={15} /> Disable
+                </Button>
+                <Button
+                  variant="secondary"
+                  disabled={!checkedIds.length || bulkBusy}
+                  title="Forget the sync cursor so the next run re-pulls history from the start date"
+                  onClick={() => bulk('reset')}
+                >
+                  <RotateCcw size={15} /> Reset cursor
+                </Button>
+                <Button
+                  variant="danger"
+                  disabled={!checkedIds.length || bulkBusy}
+                  title="Delete every record in the selected collections; the syncs are kept"
+                  onClick={() => setConfirming({ action: 'purge', dropCollections: false })}
+                >
+                  <Eraser size={15} /> Purge records
+                </Button>
+                <Button
+                  variant="danger"
+                  disabled={!checkedIds.length || bulkBusy}
+                  onClick={() => setConfirming({ action: 'delete', dropCollections: false })}
+                >
+                  <Trash2 size={15} /> Delete
+                </Button>
+                {checkedIds.length > 0 && (
+                  <IconButton title="Clear selection" onClick={() => setChecked(new Set())}>
+                    <X size={15} />
+                  </IconButton>
+                )}
+              </div>
+            </div>
+          )}
+          {notice && (
+            <div className="notice dataset-notice" role="status">
+              <span>{notice}</span>
+              <IconButton title="Dismiss" onClick={() => setNotice('')}>
+                <X size={14} />
+              </IconButton>
+            </div>
+          )}
           <div className="table-wrap dataset-table">
             <table>
               <thead>
                 <tr>
+                  {isAdmin && (
+                    <th className="dataset-check">
+                      <input
+                        ref={selectAllRef}
+                        type="checkbox"
+                        aria-label="Select all dataset syncs"
+                        checked={allChecked}
+                        onChange={toggleAll}
+                      />
+                    </th>
+                  )}
                   <th>Name</th>
                   <th>Dataset</th>
                   <th>Symbols</th>
@@ -182,9 +345,19 @@ export function DatasetsPage({ data, refresh, act, isAdmin }: Props) {
                 {syncs.map((s) => (
                   <tr
                     key={s.id}
-                    className={current?.id === s.id ? 'active' : ''}
+                    className={`${current?.id === s.id ? 'active' : ''} ${checked.has(s.id) ? 'checked' : ''}`}
                     onClick={() => setSelected(s.id)}
                   >
+                    {isAdmin && (
+                      <td className="dataset-check" onClick={(e) => e.stopPropagation()}>
+                        <input
+                          type="checkbox"
+                          aria-label={`Select ${s.name}`}
+                          checked={checked.has(s.id)}
+                          onChange={() => toggle(s.id)}
+                        />
+                      </td>
+                    )}
                     <td>
                       <strong>{s.name}</strong>
                     </td>
@@ -194,7 +367,11 @@ export function DatasetsPage({ data, refresh, act, isAdmin }: Props) {
                     <td>{s.lastRunAt ? timestamp(s.lastRunAt) : '—'}</td>
                     <td>{typeof s.lastRows === 'number' ? s.lastRows.toLocaleString() : '—'}</td>
                     <td>
-                      <Status status={s.enabled ? (s.lastError ? 'failed' : 'ready') : 'disabled'} />
+                      <Status
+                        status={
+                          s.running ? 'running' : s.enabled ? (s.lastError ? 'failed' : 'ready') : 'disabled'
+                        }
+                      />
                     </td>
                     {isAdmin && (
                       <td className="dataset-row-actions" onClick={(e) => e.stopPropagation()}>
@@ -240,7 +417,9 @@ export function DatasetsPage({ data, refresh, act, isAdmin }: Props) {
                   <h2>{current.name}</h2>
                   <div className="dataset-grid-meta">
                     <code>{currentCollection}</code>
-                    {current.lastError ? <span className="dataset-error">· {String(current.lastError)}</span> : null}
+                    {current.lastError ? (
+                      <span className="dataset-error">· {String(current.lastError)}</span>
+                    ) : null}
                   </div>
                 </div>
               </div>
@@ -254,8 +433,69 @@ export function DatasetsPage({ data, refresh, act, isAdmin }: Props) {
         </div>
       )}
 
+      {confirming && (
+        <Modal
+          title={
+            confirming.action === 'purge'
+              ? `Purge records from ${plural(checkedCollections.length, 'collection')}?`
+              : `Delete ${plural(checkedIds.length, 'dataset sync')}?`
+          }
+          onClose={() => setConfirming(null)}
+        >
+          <div className="form-content">
+            {confirming.action === 'purge' ? (
+              <p>
+                Every document in these collections will be deleted. The syncs are kept and their cursors are
+                reset, so the next run re-pulls history from the start date. Other syncs writing to the same
+                collection are reset too.
+              </p>
+            ) : (
+              <p>
+                The selected sync configurations will be removed. Their collections are kept unless you choose
+                to drop them.
+              </p>
+            )}
+            <ul className="dataset-confirm-list">
+              {checkedCollections.map((c) => (
+                <li key={c}>
+                  <code>{c}</code>
+                </li>
+              ))}
+            </ul>
+            {confirming.action === 'delete' && (
+              <label className="check-row">
+                <input
+                  type="checkbox"
+                  checked={confirming.dropCollections}
+                  onChange={(e) => setConfirming({ ...confirming, dropCollections: e.target.checked })}
+                />
+                Also drop these collections (skipped for any collection another sync still writes to)
+              </label>
+            )}
+          </div>
+          <div className="form-actions">
+            <Button type="button" variant="secondary" onClick={() => setConfirming(null)}>
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="danger"
+              disabled={bulkBusy}
+              onClick={() => bulk(confirming.action, confirming.dropCollections)}
+            >
+              {confirming.action === 'purge' ? <Eraser size={15} /> : <Trash2 size={15} />}{' '}
+              {confirming.action === 'purge' ? 'Purge records' : 'Delete'}
+            </Button>
+          </div>
+        </Modal>
+      )}
+
       {editing && (
-        <Modal title={editing.id ? 'Edit dataset sync' : 'Add dataset sync'} onClose={() => setEditing(null)} wide>
+        <Modal
+          title={editing.id ? 'Edit dataset sync' : 'Add dataset sync'}
+          onClose={() => setEditing(null)}
+          wide
+        >
           <SaveForm onSave={save} onCancel={() => setEditing(null)} label={editing.id ? 'Save' : 'Create'}>
             <Field label="Name">
               <input
