@@ -22,6 +22,8 @@ services:
       OPENAI_VECTOR_STORES_API_KEY: test-vector-stores-key
       # Every test file signs in; the suites together exceed the production limit of 20 per ten minutes.
       LOGIN_RATE_LIMIT: 500
+      # Dependency triggers (#92) settle for a minute in production; the tests do not wait that long.
+      TRANSFORM_TRIGGER_DEBOUNCE_SECONDS: 2
     depends_on: &test-store-services
       qdrant: { condition: service_healthy }
       opensearch: { condition: service_healthy }

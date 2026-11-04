@@ -16,6 +16,7 @@ import {
 } from '../../../packages/core/src/datasetSync.js';
 import { dispatchBackfills, recoverBackfills } from '../../../packages/core/src/datasetBackfill.js';
 import { dispatchTransforms, recoverTransformRuns } from '../../../packages/core/src/transformRunner.js';
+import { dispatchTransformTriggers } from '../../../packages/core/src/transformTriggers.js';
 import { safeError } from '../../../packages/core/src/security.js';
 import { dispatchConfigBackup } from './configBackup.js';
 import { refreshAllCatalogs } from './catalog.js';
@@ -48,6 +49,7 @@ async function tick() {
     await dispatchDatasetSyncs();
     await dispatchBackfills();
     await dispatchTransforms();
+    await dispatchTransformTriggers();
     await deliverWebhooks();
     await dispatchReflections();
     await dispatchGuardrailEvaluations();

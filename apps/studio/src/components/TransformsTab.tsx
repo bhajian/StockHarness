@@ -776,6 +776,26 @@ function TransformEditor({
                 onChange={(e) => set({ trigger: { ...draft.trigger, after: csv(e.target.value) } })}
               />
             </Field>
+            {transform && transform.trigger.after.length > 0 && (
+              <div className="trigger-status" aria-label="Upstreams completed since the last triggered run">
+                <small>
+                  Runs when all of these have completed (settled for a minute):
+                  {transform.triggerState?.lastFiredAt
+                    ? ` last triggered ${timestamp(transform.triggerState.lastFiredAt)}`
+                    : ''}
+                </small>
+                {transform.trigger.after.map((a) => {
+                  const p = transform.triggerState?.pending?.[a];
+                  return (
+                    <StatusPill
+                      key={a}
+                      status={p ? 'ok' : 'pending'}
+                      label={`${a}${p ? ` · done ${timestamp(p.at)}` : ' · waiting'}`}
+                    />
+                  );
+                })}
+              </div>
+            )}
           </ConfigSection>
           <ConfigSection title={`Incremental: ${draft.incremental.mode}`}>
             <div className="two-columns">
