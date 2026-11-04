@@ -1497,7 +1497,7 @@ Example (real row from the live workspace):
 
 ### Leftover raw collections (to be removed)
 
-The live workspace also holds collections from the earlier harness-based sync. M1.03 ([#75](https://github.com/bhajian/StockHarness/issues/75)) archives and drops them. The exception is `earnings_surprises`, which stays until `earnings_calendar` has been backfilled.
+The live workspace also holds collections from the earlier harness-based sync. Its code is deleted and nothing reads these collections any more (M1.03, [#75](https://github.com/bhajian/StockHarness/issues/75)); archiving and dropping them on the live workspace is the last step. The exception is `earnings_surprises`, which stays until `earnings_calendar` has been backfilled.
 
 | Collection                                                                                 | What it is                                                                                                                                          | Replaced by                                                                                                                                                    |
 | ------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
