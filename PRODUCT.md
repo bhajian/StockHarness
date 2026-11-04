@@ -27,13 +27,13 @@ This guide describes the **finished StockHarness product**: what data it stores 
 
 StockHarness is a research system for finding, proving and running stock strategies on your own infrastructure. It has five layers:
 
-| Layer                       | What it does                                                                                                                            | Where in the app                       | Main collections                                                      | Status                                                                    |
-| --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------- | --------------------------------------------------------------------- | ------------------------------------------------------------------------- |
-| **1 · Data Sync**           | Pulls 5–10 years of history plus scheduled updates from FMP into MongoDB, one raw collection per dataset                                | **Datasets → Syncs**, **Health**       | 42 raw collections (`eod_prices`, `income_statement`, …)              | ✅ works today; history depth, backfill, priorities and events come in M1 |
-| **2 · Data Prep**           | Python transforms turn raw data into **many clean, flat, point-in-time collections**                                                    | **Datasets → Transforms**, **Catalog** | `securities`, `prices_daily`, `fundamentals_pit`, `features_daily`, … | 🟡 5 transforms exist as pipeline modules; the Transforms tab comes in M2 |
-| **3 · Research agents**     | Agents read the catalog, propose theories, write strategy code, and a trusted evaluator backtests it                                    | **Research Lab**                       | `theories`, `evaluations`, `trials`                                   | ⏳ M3–M4                                                                  |
-| **4 · Ideas & simulations** | People review the proof packs, approve ideas and run full historical simulations                                                        | **Ideas**, **Simulations**             | `sim_orders`, `sim_trades`, `sim_portfolio_daily`                     | ⏳ M5–M6                                                                  |
-| **5 · Live**                | Approved strategies produce daily signals and trade a paper (dry-run) book; live results are tracked against what the backtest expected | **Signals**                            | `signals`, `live_strategies`, `alerts`                                | ⏳ M7                                                                     |
+| Layer                       | What it does                                                                                                                                                | Where in the app                       | Main collections                                                      | Status                                                                    |
+| --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------- | --------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| **1 · Data Sync**           | Pulls 5–10 years of history plus scheduled updates from FMP into MongoDB, one raw collection per dataset                                                    | **Datasets → Syncs**, **Health**       | 42 raw collections (`eod_prices`, `income_statement`, …)              | ✅ works today; history depth, backfill, priorities and events come in M1 |
+| **2 · Data Prep**           | _Optional:_ Python transforms turn raw data into clean, flat, point-in-time collections **only where needed**. Simple Layer 1 collections are used directly | **Datasets → Transforms**, **Catalog** | `securities`, `prices_daily`, `fundamentals_pit`, `features_daily`, … | 🟡 5 transforms exist as pipeline modules; the Transforms tab comes in M2 |
+| **3 · Research agents**     | Agents read the catalog, propose theories, write strategy code, and a trusted evaluator backtests it                                                        | **Research Lab**                       | `theories`, `evaluations`, `trials`                                   | ⏳ M3–M4                                                                  |
+| **4 · Ideas & simulations** | People review the proof packs, approve ideas and run full historical simulations                                                                            | **Ideas**, **Simulations**             | `sim_orders`, `sim_trades`, `sim_portfolio_daily`                     | ⏳ M5–M6                                                                  |
+| **5 · Live**                | Approved strategies produce daily signals and trade a paper (dry-run) book; live results are tracked against what the backtest expected                     | **Signals**                            | `signals`, `live_strategies`, `alerts`                                | ⏳ M7                                                                     |
 
 Four rules make the results trustworthy and recoverable:
 
@@ -57,23 +57,39 @@ FMP ──► Layer 1 raw collections ──► Layer 2 transforms ──► cle
 
 ---
 
+## 1b. Pipelines tie the layers together
+
+Every scheduled flow is a **pipeline**: a DAG that runs once per period, where each step starts only after its upstream steps have finished **and passed a completeness gate** (e.g. 95% of universe symbols present, every trading day of the period present). If Layer 1 is incomplete, Layers 2–5 wait, and you get an alert instead of research and signals built on half the data. In the app, **Data → Pipelines** shows the DAG in layer swimlanes with live status per node, run history, a Gantt timeline, and retry / re-run-from-here controls (#156, #157).
+
+```
+weekly-research · 2026-W45
+ L1  estimates ✓97% ─┐   statements ✓ ─┐
+                     ▼                 ▼
+ L2  estimates_snapshots ✓   fundamentals_pit ✓ ──► features_daily ✓ ──► features_ranked ✓
+                                                                             │
+ L3                                                          research loop (on W45 data) ⟳
+ L5                                                          live signals ✓ ──► brief ✓
+```
+
+**Layer 2 is optional.** A Layer 1 collection with a simple schema (e.g. `insider_trades`, `treasury_rates`) is read directly, using the known-at rule its dataset declares. Transforms exist only where the data needs cleaning, joining or versioning.
+
 ## 2. A day in the life
 
 All times are US Eastern on a trading day, once the product is finished.
 
-| Time         | What happens                                                                                                                    | Layer | Where you see it                               |
-| ------------ | ------------------------------------------------------------------------------------------------------------------------------- | ----- | ---------------------------------------------- |
-| 06:00        | Hourly feeds (news, price-target changes, grades) keep updating through the day                                                 | 1     | Datasets → Syncs                               |
-| 18:49        | `eod_prices` and `eod_index` sync today's bars for about 2,400 symbols, including delisted names in their history               | 1     | Syncs list: **ok 18:58**; Health: fresh        |
-| 18:58        | The sync emits `dataset.sync.completed`                                                                                         | 1 → 2 | Sync detail → Runs                             |
-| 19:00        | Transforms triggered by that event run: `corporate_actions` → `prices_daily` → `macro_daily`                                    | 2     | Transforms list: running / ok                  |
-| 19:31        | `features_daily` → `features_ranked` → `universe_daily` update; the catalog entries refresh                                     | 2     | Catalog: fresh · 19:31                         |
-| 19:45        | Live strategies (approved ideas with pinned code) run against today's data                                                      | 5     | Signals: generated 19:52                       |
-| 19:52        | Signals are written, and the paper book queues orders for the next close                                                        | 5     | Signals → By stock / Paper book                |
-| 20:00        | The daily brief email lists today's signals with links to each idea's proof pack                                                | 5     | Inbox / email                                  |
-| All night    | The research loop runs: about 40 theories proposed, reviewed, coded and evaluated                                               | 3     | Research Lab board and activity feed           |
-| Next morning | You review new successful ideas, approve one, and schedule a 10-year simulation                                                 | 4     | Ideas → T-0233 → Approve → Schedule simulation |
-| Saturday     | Weekly snapshot datasets (estimates, consensus, scores) **append** a new snapshot; statement syncs run "after earnings + 1 day" | 1     | Health: weekly gap strip                       |
+| Time         | What happens                                                                                                                                                          | Layer | Where you see it                               |
+| ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----- | ---------------------------------------------- |
+| 06:00        | Hourly feeds (news, price-target changes, grades) keep updating through the day                                                                                       | 1     | Datasets → Syncs                               |
+| 18:49        | `eod_prices` and `eod_index` sync today's bars for about 2,400 symbols, including delisted names in their history                                                     | 1     | Syncs list: **ok 18:58**; Health: fresh        |
+| 18:58        | The sync emits `dataset.sync.completed`; the **daily pipeline** checks its completeness gate (symbol coverage, today's bar present) before anything downstream starts | 1 → 2 | Sync detail → Runs                             |
+| 19:00        | Transforms triggered by that event run: `corporate_actions` → `prices_daily` → `macro_daily`                                                                          | 2     | Transforms list: running / ok                  |
+| 19:31        | `features_daily` → `features_ranked` → `universe_daily` update; the catalog entries refresh                                                                           | 2     | Catalog: fresh · 19:31                         |
+| 19:45        | Live strategies (approved ideas with pinned code) run against today's data                                                                                            | 5     | Signals: generated 19:52                       |
+| 19:52        | Signals are written, and the paper book queues orders for the next close                                                                                              | 5     | Signals → By stock / Paper book                |
+| 20:00        | The daily brief email lists today's signals with links to each idea's proof pack                                                                                      | 5     | Inbox / email                                  |
+| All night    | The research loop runs: about 40 theories proposed, reviewed, coded and evaluated                                                                                     | 3     | Research Lab board and activity feed           |
+| Next morning | You review new successful ideas, approve one, and schedule a 10-year simulation                                                                                       | 4     | Ideas → T-0233 → Approve → Schedule simulation |
+| Saturday     | Weekly snapshot datasets (estimates, consensus, scores) **append** a new snapshot; statement syncs run "after earnings + 1 day"                                       | 1     | Health: weekly gap strip                       |
 
 ---
 
@@ -1508,6 +1524,8 @@ The live workspace also holds collections from the earlier harness-based sync. M
 - **Saving** creates a version, with diff and restore. Saving is rejected if a non-static output has no `known_at` field.
 - **Runs:** logs, rows written per output, and data-quality counts.
 - **Catalog → Graph:** the lineage from syncs to collections to transforms to collections to agent tools.
+
+**Layer 2 is optional.** Simple Layer 1 collections are used directly through their declared known-at rule; a transform is created only when it's needed.
 
 **Layer 2 means many flat collections, not one.** A complex Layer 1 dataset is broken into several simple collections, each with one grain and one key. For example, a single fundamentals transform can write `fundamentals_pit`, `fundamentals_lines` and `revenue_segments_pit`. Each collection has exactly one producing transform.
 
