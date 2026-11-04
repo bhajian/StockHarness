@@ -17,6 +17,7 @@ import {
   Code2,
   BookOpen,
   Activity,
+  GitBranch,
 } from 'lucide-react';
 import {
   type Data,
@@ -46,6 +47,7 @@ import { ScheduleFields } from './agentFields';
 import { DataGrid } from './DataGrid';
 import { Tabs } from './kit';
 import { TransformsTab } from './TransformsTab';
+import { PipelinesTab } from './PipelinesTab';
 import {
   DATASET_TABS,
   datasetsPath,
@@ -83,6 +85,7 @@ type SyncForm = {
 const TAB_LABELS: Record<DatasetTab, { label: string; icon: React.ReactNode }> = {
   syncs: { label: 'Syncs', icon: <RefreshCw size={15} /> },
   transforms: { label: 'Transforms', icon: <Code2 size={15} /> },
+  pipelines: { label: 'Pipelines', icon: <GitBranch size={15} /> },
   catalog: { label: 'Catalog', icon: <BookOpen size={15} /> },
   health: { label: 'Health', icon: <Activity size={15} /> },
 };
@@ -118,6 +121,8 @@ export function DatasetsPage(props: Props) {
         <SyncsTab {...props} />
       ) : route.tab === 'transforms' ? (
         <TransformsTab item={route.item} go={go} isAdmin={props.isAdmin} />
+      ) : route.tab === 'pipelines' ? (
+        <PipelinesTab item={route.item} go={go} isAdmin={props.isAdmin} data={props.data} />
       ) : route.tab === 'catalog' ? (
         <Empty
           icon={<BookOpen size={28} />}

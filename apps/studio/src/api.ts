@@ -413,3 +413,122 @@ export type DqIssue = {
 };
 export const fetchTransformRunDq = (runId: string) =>
   api<DqIssue[]>(`/transform-runs/${encodeURIComponent(runId)}/dq`);
+
+// Pipelines (#156, #157).
+export type PipelineGate = {
+  min_symbol_coverage?: number;
+  min_rows?: number;
+  max_row_drop_pct?: number;
+  max_dq_error_rate?: number;
+};
+export type PipelineNodeSpec = {
+  id: string;
+  ref: string;
+  after: string[];
+  gate: PipelineGate;
+  on_upstream_failure: 'block' | 'skip' | 'continue_with_warning';
+  params: Record<string, unknown>;
+  retries: number;
+  timeout_minutes: number;
+};
+export type PipelineDraft = {
+  name: string;
+  description: string;
+  schedule?: Record<string, unknown>;
+  period: 'day' | 'week' | 'month' | 'event';
+  deadline_hours?: number;
+  nodes: PipelineNodeSpec[];
+  enabled: boolean;
+};
+export type PipelineNodeStatus =
+  | 'pending'
+  | 'waiting'
+  | 'running'
+  | 'succeeded'
+  | 'gate_failed'
+  | 'failed'
+  | 'blocked'
+  | 'skipped'
+  | 'cancelled';
+export type PipelineNodeRun = {
+  status: PipelineNodeStatus;
+  ref: string;
+  generation: number;
+  attempts?: number;
+  startedAt?: string;
+  finishedAt?: string;
+  stats?: {
+    rows?: number;
+    written?: number;
+    dq?: number;
+    symbols_attempted?: number;
+    symbols_covered?: number;
+  };
+  gate?: { name: string; value: number | string | null; threshold: number | string; pass: boolean }[];
+  error?: string;
+  reason?: string;
+  warning?: string;
+  external?: { type: string; ids: string[] };
+};
+export type PipelineRun = {
+  id: string;
+  pipelineId: string;
+  pipelineName: string;
+  version: number;
+  period: { kind: string; id: string; start: string; end: string };
+  trigger: 'schedule' | 'manual' | 'backfill';
+  status: 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
+  nodes: Record<string, PipelineNodeRun>;
+  graph?: PipelineNodeSpec[];
+  deadlineMissed?: boolean;
+  createdAt: string;
+  startedAt?: string;
+  finishedAt?: string;
+};
+export type Pipeline = PipelineDraft & {
+  id: string;
+  version: number;
+  nextRunAt?: string;
+  updatedAt: string;
+  lastRun?: PipelineRun | null;
+};
+export const fetchPipelines = () => api<Pipeline[]>('/pipelines');
+export const savePipeline = (body: PipelineDraft, id?: string) =>
+  send<Pipeline>(id ? `/pipelines/${encodeURIComponent(id)}` : '/pipelines', body, id ? 'PUT' : 'POST');
+export const deletePipeline = (id: string) =>
+  send<void>(`/pipelines/${encodeURIComponent(id)}`, undefined, 'DELETE');
+export const validatePipeline = (body: PipelineDraft, id?: string) =>
+  send<{ errors: string[]; warnings: string[] }>(
+    `/pipelines/validate${id ? `?id=${encodeURIComponent(id)}` : ''}`,
+    body,
+  );
+export const suggestPipeline = (transforms: string[] = []) =>
+  api<{ nodes: PipelineNodeSpec[] }>(
+    `/pipelines/suggest${transforms.length ? `?transforms=${encodeURIComponent(transforms.join(','))}` : ''}`,
+  );
+export const runPipeline = (id: string, period?: string) =>
+  send<PipelineRun & { created: boolean }>(
+    `/pipelines/${encodeURIComponent(id)}/run`,
+    period ? { period } : {},
+  );
+export const backfillPipeline = (id: string, body: { from: string; to: string; parallelism?: number }) =>
+  send<{ backfillId: string; queued: string[]; skipped: string[] }>(
+    `/pipelines/${encodeURIComponent(id)}/backfill`,
+    body,
+  );
+export const fetchPipelineRuns = (id: string) =>
+  api<PipelineRun[]>(`/pipelines/${encodeURIComponent(id)}/runs`);
+export const fetchPipelineRun = (runId: string) =>
+  api<PipelineRun>(`/pipeline-runs/${encodeURIComponent(runId)}`);
+export const pipelineNodeAction = (
+  runId: string,
+  node: string,
+  action: 'retry' | 'rerun' | 'skip',
+  reason?: string,
+) =>
+  send<PipelineRun>(
+    `/pipeline-runs/${encodeURIComponent(runId)}/nodes/${encodeURIComponent(node)}/${action}`,
+    reason ? { reason } : {},
+  );
+export const cancelPipelineRun = (runId: string) =>
+  send<PipelineRun>(`/pipeline-runs/${encodeURIComponent(runId)}/cancel`, {});

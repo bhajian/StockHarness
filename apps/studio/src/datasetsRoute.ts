@@ -1,5 +1,5 @@
 // Datasets page routing (#73): /datasets/<tab>[/<item>] so every screen is linkable.
-export const DATASET_TABS = ['syncs', 'transforms', 'catalog', 'health'] as const;
+export const DATASET_TABS = ['syncs', 'transforms', 'pipelines', 'catalog', 'health'] as const;
 export type DatasetTab = (typeof DATASET_TABS)[number];
 export type DatasetsRoute = { tab: DatasetTab; item?: string };
 
