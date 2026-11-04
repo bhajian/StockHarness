@@ -1,2 +1,97 @@
 # StockHarness objects (apiVersion stockharness/v1). Import from Settings -> Configuration or the
 # object list pages. References are by name; secrets and data rows are never included.
+apiVersion: stockharness/v1
+kind: Transform
+metadata:
+  name: securities
+  version: "1"
+spec:
+  description: "The securities master: one row per security with an immutable security_id, matched by CIK, then CUSIP, then ticker + name. Tickers, sectors, industries and exchanges are validity intervals (ISO dates)."
+  code: |
+    import oh
+    from pipeline.layer2.securities import compute
+
+    # H4 ISO interval bounds, H5 sector_is_backfilled, H6 ticker valid_from = first observed date (#98).
+    docs = compute(lambda c, f=None, cols=None: oh.read(c, f, columns=cols), oh.aggregate)
+    oh.output("securities").upsert(docs)
+  inputs:
+    - company_profiles
+    - stock_list
+    - delisted_companies
+    - eod_prices
+  outputs:
+    - collection: securities
+      key:
+        - security_id
+      write_mode: upsert
+      static: true
+      description: Security identity and attribute histories. Resolve a ticker on a date through identifiers[type=ticker] valid_from/valid_to.
+      grain: security
+      fields:
+        security_id:
+          description: Immutable StockHarness id (SEC_000001); join key for every Layer 2 table
+        identifiers:
+          description: ticker / cik / cusip / isin with valid_from and valid_to (ISO dates); a ticker is valid from the first date it was observed
+        sector_history:
+          description: Sector intervals; the first is backfilled to the first observed date when sector_is_backfilled
+        sector_is_backfilled:
+          description: The earliest sector interval was backfilled from the current sector, not observed then
+        sector_observed_from:
+          description: When the sector was first actually observed
+  trigger:
+    after:
+      - dataset:company_profiles
+  incremental:
+    mode: full
+    lookback_days: 0
+  params: {}
+  secrets: []
+  enabled: true
+---
+apiVersion: stockharness/v1
+kind: Transform
+metadata:
+  name: trading_calendar
+  version: "1"
+spec:
+  description: NYSE trading sessions from 1990 through the end of next year (open and close in UTC, early closes, previous and next session). Re-built monthly so it always reaches at least 11 months ahead.
+  code: |
+    import oh
+    from pipeline.layer2.trading_calendar import compute
+
+    # NYSE sessions 1990 .. end of next year (exchange_calendars, bounded explicitly: M2, #31).
+    oh.output("trading_calendar").upsert(compute())
+  inputs: []
+  outputs:
+    - collection: trading_calendar
+      key:
+        - date
+      write_mode: upsert
+      static: true
+      description: "One row per NYSE session: date, open_utc, close_utc, is_early_close, prev_trading_day, next_trading_day."
+      grain: trading day
+      fields:
+        date:
+          description: Session date (midnight UTC)
+        open_utc:
+          description: Market open
+          unit: UTC
+        close_utc:
+          description: Market close (13:00 ET on early closes)
+          unit: UTC
+        is_early_close:
+          description: Half day (close at or before 18:30 UTC)
+  trigger:
+    schedule:
+      enabled: true
+      everyMinutes: 43200
+      input: Run the scheduled task.
+      at: 05:00
+      timezone: UTC
+    after: []
+  incremental:
+    mode: full
+    lookback_days: 0
+  params: {}
+  secrets: []
+  enabled: true

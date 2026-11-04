@@ -25,3 +25,23 @@ class TestCalendar(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestCalendarHorizon(unittest.TestCase):
+    """#98 M2: the calendar always reaches the end of next year."""
+
+    def test_compute_reaches_next_year(self):
+        try:
+            import exchange_calendars  # noqa: F401
+        except ImportError:
+            try:
+                import pandas_market_calendars  # noqa: F401
+            except ImportError:
+                self.skipTest("no calendar library here (it is in the executor image)")
+        from datetime import date
+
+        from pipeline.layer2.trading_calendar import compute
+
+        rows = compute(date(date.today().year, 1, 1))
+        self.assertGreaterEqual(rows[-1]["date"].year, date.today().year + 1)
+        self.assertGreaterEqual(rows[-1]["date"].month, 12)

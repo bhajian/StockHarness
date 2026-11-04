@@ -31,7 +31,7 @@ from typing import Any, Iterable
 
 __all__ = [
     "params", "read", "read_df", "write", "write_df", "result", "log", "collections",
-    "window", "output", "upsert", "upsert_df", "dq", "describe", "pit", "duckdb",
+    "window", "output", "upsert", "upsert_df", "dq", "describe", "pit", "duckdb", "aggregate",
 ]
 
 params: dict[str, Any] = json.loads(os.environ.get("OH_PARAMS") or "{}")
@@ -183,6 +183,22 @@ def read(collection: str, filter: dict | None = None, *, limit: int | None = Non
     return rows
 
 
+def aggregate(collection: str, pipeline: list[dict]) -> list[dict]:
+    """Run a read-only aggregation (e.g. the first date each symbol appears). Writing stages are refused."""
+    if any(("$out" in st or "$merge" in st) for st in pipeline):
+        raise PermissionError("oh.aggregate is read-only: use oh.output(...) to write")
+    if _PREVIEW and _SAMPLE:
+        sampled = _sampled(collection, {})
+        if sampled:
+            pipeline = [{"$match": sampled}, *pipeline]
+    rows = list(_db()[collection].aggregate(pipeline, allowDiskUse=True))
+    for doc in rows:
+        if "_id" in doc and not isinstance(doc["_id"], (str, int, float, dict, type(None))):
+            doc["_id"] = str(doc["_id"])
+    _count(collection, "read", len(rows))
+    return rows
+
+
 def read_df(collection: str, filter: dict | None = None, *, chunksize: int | None = None, **kwargs):
     """A collection (or a filtered part of it) as a pandas DataFrame.
 
@@ -314,6 +330,21 @@ def _hash(record: dict) -> str:
     return hashlib.sha1(json.dumps(body, sort_keys=True, default=str).encode()).hexdigest()
 
 
+_indexed: set[tuple] = set()
+
+
+def _ensure_key_index(collection: str, key: list[str]) -> None:
+    """Upserts look rows up by key: without an index each lookup scans the collection (#98)."""
+    ident = (collection, tuple(key))
+    if ident in _indexed:
+        return
+    try:
+        _db()[collection].create_index([(k, 1) for k in key], name="oh_key_" + "_".join(key)[:100])
+    except Exception:  # e.g. an equivalent index under another name already exists
+        pass
+    _indexed.add(ident)
+
+
 def upsert(collection: str, records: Iterable[dict], *, key: list[str], known_at_field: str | None = None) -> dict:
     """Idempotent write on ``key``. Rows whose content did not change are skipped (content hash).
 
@@ -338,6 +369,7 @@ def upsert(collection: str, records: Iterable[dict], *, key: list[str], known_at
         record["_hash"] = _hash(record)
         rows.append(record)
     target = _db()[collection]
+    _ensure_key_index(collection, key)
     written = unchanged = 0
     for start in range(0, len(rows), 1000):
         chunk = rows[start : start + 1000]
