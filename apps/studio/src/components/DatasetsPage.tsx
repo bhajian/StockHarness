@@ -31,6 +31,7 @@ import {
   probeDatasetDepth,
   fetchBackfill,
   fetchSyncStats,
+  fetchTransforms,
   fetchCatalog,
   startBackfill,
   backfillControl,
@@ -54,6 +55,7 @@ import { PipelinesTab } from './PipelinesTab';
 import { CatalogTab } from './CatalogTab';
 import { HealthTab } from './HealthTab';
 import { SyncDetail } from './SyncDetail';
+import { SyncScheduleFields, type SyncTrigger } from './SyncScheduleFields';
 import {
   DATASET_TABS,
   datasetsPath,
@@ -86,6 +88,8 @@ type SyncForm = {
   statementPeriod: '' | 'quarter' | 'annual';
   enabled: boolean;
   schedule: Schedule;
+  /** Event triggers (#82). */
+  trigger?: SyncTrigger;
 };
 
 const TAB_LABELS: Record<DatasetTab, { label: string; icon: React.ReactNode }> = {
@@ -262,6 +266,14 @@ function SyncsTab({
 
   const current = syncs.find((s) => s.id === selected) ?? syncs[0];
   const detail = item ? syncs.find((s) => s.id === item) : undefined;
+  const [transformNames, setTransformNames] = useState<string[]>([]);
+  useEffect(() => {
+    if (editing)
+      void fetchTransforms().then(
+        (t) => setTransformNames(t.map((x) => x.name)),
+        () => undefined,
+      );
+  }, [editing?.id]);
   // List KPIs, filters and the coverage column (#76).
   const [q, setQ] = useState('');
   const [fCategory, setFCategory] = useState('');
@@ -356,6 +368,7 @@ function SyncsTab({
     statementPeriod: s.statementPeriod ?? '',
     enabled: s.enabled ?? true,
     schedule: s.schedule ?? blankForm().schedule,
+    ...(s.trigger ? { trigger: s.trigger as SyncTrigger } : {}),
   });
 
   async function save() {
@@ -368,6 +381,9 @@ function SyncsTab({
       enabled: editing.enabled,
       schedule: editing.schedule,
       symbolsMode: editing.symbolsMode,
+      ...(editing.trigger && (editing.trigger.after.length || editing.trigger.afterEarnings)
+        ? { trigger: editing.trigger }
+        : {}),
     };
     if (item?.perSymbol) {
       if (editing.symbolsMode === 'list')
@@ -1091,10 +1107,22 @@ function SyncsTab({
               </p>
             )}
 
-            <ScheduleFields
-              value={editing.schedule}
-              onChange={(schedule) => setEditing({ ...editing, schedule })}
-            />
+            <Field label="Schedule">
+              <SyncScheduleFields
+                schedule={editing.schedule}
+                trigger={editing.trigger}
+                dataset={catalogById.get(editing.dataset)}
+                upstreams={[
+                  ...syncs
+                    .filter((x) => x.id !== editing.id)
+                    .map((x) => collectionOf(x))
+                    .filter((c, i, a) => c && a.indexOf(c) === i)
+                    .map((c) => ({ value: `dataset:${c}`, label: `sync → ${c}` })),
+                  ...transformNames.map((n) => ({ value: `transform:${n}`, label: `transform ${n}` })),
+                ]}
+                onChange={(schedule, trigger) => setEditing({ ...editing, schedule, trigger })}
+              />
+            </Field>
             <label className="check-row">
               <input
                 type="checkbox"

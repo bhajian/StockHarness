@@ -18,6 +18,7 @@ import { dispatchBackfills, recoverBackfills } from '../../../packages/core/src/
 import { dispatchTransforms, recoverTransformRuns } from '../../../packages/core/src/transformRunner.js';
 import { dispatchTransformTriggers } from '../../../packages/core/src/transformTriggers.js';
 import { dispatchPipelines } from '../../../packages/core/src/pipelineEngine.js';
+import { dispatchSyncTriggers } from '../../../packages/core/src/syncTriggers.js';
 import { safeError } from '../../../packages/core/src/security.js';
 import { dispatchConfigBackup } from './configBackup.js';
 import { refreshAllCatalogs } from './catalog.js';
@@ -52,6 +53,7 @@ async function tick() {
     await dispatchTransforms();
     await dispatchTransformTriggers();
     await dispatchPipelines();
+    await dispatchSyncTriggers();
     await deliverWebhooks();
     await dispatchReflections();
     await dispatchGuardrailEvaluations();

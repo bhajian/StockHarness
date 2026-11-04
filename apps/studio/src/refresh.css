@@ -2907,3 +2907,25 @@ textarea::placeholder {
   margin: 12px 0 4px;
   font-size: 13px;
 }
+/* Sync schedule modes (#79) */
+.sync-schedule-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.schedule-warning {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  color: #8a5a00;
+  font-size: 13px;
+  margin: 0;
+}
+.schedule-preview small {
+  color: var(--muted);
+}
+.event-trigger {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
