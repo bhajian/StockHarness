@@ -16,6 +16,7 @@ import {
   type DatasetSync,
 } from '../../../packages/core/src/datasetSync.js';
 import { z } from 'zod';
+import { syncEvents } from '../../../packages/core/src/eventSubscriptions.js';
 import {
   backfills,
   backfillAction,
@@ -227,6 +228,12 @@ datasetSyncRouter.post('/dataset-syncs/:id/run', async (req, res) => {
   if (!doc) throw new HttpError(404, 'Dataset sync not found');
   const queued = enqueueManualRun(doc);
   res.status(202).json({ started: queued, alreadyQueued: !queued });
+});
+
+// Completion / failure / backfill events for one sync (#81), newest first.
+datasetSyncRouter.get('/dataset-syncs/:id/events', async (req, res) => {
+  const list = await syncEvents(req.principal!.tenantId, String(req.params.id));
+  res.json(list.map(({ _id, ownerId, ...e }) => ({ id: _id, ...e })));
 });
 
 datasetSyncRouter.get('/dataset-syncs/:id/runs', async (req, res) => {

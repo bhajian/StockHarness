@@ -11,6 +11,7 @@ import { HttpError, safeError } from './security.js';
 import { scheduleSchema, type Stored } from './schema.js';
 import { catalogById, UNIVERSE_DATASET_ID, presetById, type DatasetDef } from './datasetCatalog.js';
 import { refreshCatalogEntry } from './schemaCatalog.js';
+import { emitHarnessEvent } from './harnessEvents.js';
 import {
   PriorityRateLimiter,
   SyncWorkQueue,
@@ -299,7 +300,13 @@ export async function probeDatasetDepth(
   };
 }
 
-async function pull(sync: DatasetSync, def: DatasetDef, apikey: string): Promise<number> {
+type PullStats = { symbolsAttempted?: number; symbolsCovered?: number };
+async function pull(
+  sync: DatasetSync,
+  def: DatasetDef,
+  apikey: string,
+  stats: PullStats = {},
+): Promise<number> {
   const wsDb = mongo.db(workspaceDatabase(sync.ownerId));
   const coll = wsDb.collection(sync.targetCollection || def.defaultCollection);
   await coll.createIndex(Object.fromEntries(def.keyFields.map((k) => [k, 1]))).catch(() => undefined);
@@ -309,7 +316,10 @@ async function pull(sync: DatasetSync, def: DatasetDef, apikey: string): Promise
 
   if (def.perSymbol) {
     const symbols = await resolveSymbols(sync, wsDb, apikey);
+    stats.symbolsAttempted = symbols.length;
+    stats.symbolsCovered = 0;
     let errors = 0;
+    let lastSymbolError: string | undefined;
     for (const symbol of symbols) {
       // One symbol's transient throttle (402/429) must never fail the whole dataset.
       try {
@@ -323,12 +333,21 @@ async function pull(sync: DatasetSync, def: DatasetDef, apikey: string): Promise
             // Append-only snapshots: stamp the sync date so each weekly pull adds rows.
             if (def.snapshotDated) (r as Record<string, unknown>).snapshot_date = now;
           }
-        rows += await upsertRows(coll, list, def.keyFields);
+        const n = await upsertRows(coll, list, def.keyFields);
+        rows += n;
+        if (list.length) stats.symbolsCovered!++;
       } catch (error) {
         errors++;
+        lastSymbolError = `${symbol}: ${safeError(error)}`;
         if (errors <= 5) console.warn(`dataset ${def.id} ${symbol}: ${safeError(error)}`);
       }
     }
+    // Some symbols failing is tolerated; all of them failing means the sync itself is broken (#81).
+    if (symbols.length && errors === symbols.length)
+      throw new HttpError(
+        502,
+        `All ${symbols.length} symbols failed (last: ${lastSymbolError ?? 'unknown'})`,
+      );
     if (errors)
       console.warn(`dataset ${def.id}: ${errors}/${symbols.length} symbols errored (kept the rest)`);
   } else if (def.fixedSymbols) {
@@ -463,7 +482,11 @@ export async function runDatasetSync(
   await datasetSyncRuns().insertOne(run);
   try {
     const apikey = await fmpApiKey(sync.ownerId, sync.connectionId);
-    const rows = await syncContext.run({ priority: effectivePriority(sync) }, () => pull(sync, def, apikey));
+    const stats: PullStats = {};
+    const windowFrom = isTimeseries(def) ? sync.cursor || sync.from || addDays(today(), -365) : undefined;
+    const rows = await syncContext.run({ priority: effectivePriority(sync) }, () =>
+      pull(sync, def, apikey, stats),
+    );
     await datasetSyncRuns().updateOne(
       { _id: run._id },
       { $set: { status: 'succeeded', rows, finishedAt: new Date() } },
@@ -479,6 +502,21 @@ export async function runDatasetSync(
         $unset: { lastError: '' },
       },
     );
+    // #81: downstream work (transforms, pipelines, webhooks) starts on completion, not on a timer.
+    await emitHarnessEvent(sync.ownerId, 'dataset.sync.completed', {
+      sync_id: sync._id,
+      sync_name: sync.name,
+      dataset: sync.dataset,
+      collection: sync.targetCollection || def.defaultCollection,
+      run_id: run._id,
+      trigger: opts.trigger,
+      rows,
+      ...(windowFrom ? { date_from: windowFrom, date_to: today() } : {}),
+      ...(stats.symbolsAttempted !== undefined
+        ? { symbols_attempted: stats.symbolsAttempted, symbols_covered: stats.symbolsCovered }
+        : {}),
+      finished_at: new Date().toISOString(),
+    });
     // Keep the Schema Catalog current (#84); never let a stats query fail the sync.
     void refreshCatalogEntry(sync.ownerId, sync.targetCollection || def.defaultCollection).catch(
       () => undefined,
@@ -494,6 +532,14 @@ export async function runDatasetSync(
       { _id: sync._id },
       { $set: { lastRunAt: new Date(), lastError: message } },
     );
+    await emitHarnessEvent(sync.ownerId, 'dataset.sync.failed', {
+      sync_id: sync._id,
+      sync_name: sync.name,
+      dataset: sync.dataset,
+      run_id: run._id,
+      trigger: opts.trigger,
+      error: message,
+    });
     throw error;
   }
 }
