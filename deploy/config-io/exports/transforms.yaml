@@ -328,3 +328,81 @@ spec:
   params: {}
   secrets: []
   enabled: true
+---
+apiVersion: stockharness/v1
+kind: Transform
+metadata:
+  name: universe_daily
+  version: "1"
+spec:
+  description: "The point-in-time tradeable universe: for every security and priced date, whether it passed the price, liquidity (20-day median dollar volume), market cap (as of that date) and exchange filters. Delisted names count while they were listed. universe_counts publishes the size per date."
+  code: |
+    import oh
+    from pipeline.layer2.universe_daily import compute
+
+    # Thresholds are this transform's params; market cap is reported, else close x shares known on that date.
+    read = lambda c, f=None, cols=None, sort=None: oh.read(c, f, columns=cols, sort=sort)
+    for name, rows in compute(read, oh.window, oh.params):
+        oh.output(name).upsert(rows)
+  inputs:
+    - securities
+    - prices_daily
+    - historical_market_cap
+    - fundamentals_pit
+  outputs:
+    - collection: universe_daily
+      key:
+        - security_id
+        - date
+      write_mode: upsert
+      known_at_field: known_at
+      as_of_field: as_of_date
+      static: false
+      description: One row per security and priced date. Use in_universe = true on date D for the universe as of D (never filter by today's market cap).
+      grain: security × trading day
+      fields:
+        in_universe:
+          description: Passed every filter on this date
+        fails:
+          description: "Filters that failed: price, liquidity, market_cap, exchange"
+        adv_20d:
+          description: Median dollar volume over the last 20 trading days
+          unit: USD
+        market_cap:
+          description: Market cap on this date
+          unit: USD
+        market_cap_source:
+          description: reported (historical_market_cap) or estimated (close x shares outstanding as known then)
+        exchange:
+          description: Exchange as of this date (securities.exchange_history)
+    - collection: universe_counts
+      key:
+        - date
+      write_mode: upsert
+      known_at_field: known_at
+      as_of_field: as_of_date
+      static: false
+      description: "Universe size per date: members and priced securities."
+      grain: trading day
+      fields:
+        members:
+          description: Securities in the universe on this date
+        priced:
+          description: Securities with a price on this date
+  trigger:
+    after:
+      - transform:prices_daily
+  incremental:
+    mode: date_range
+    lookback_days: 30
+  params:
+    min_price: 5
+    min_adv_20d: 1000000
+    min_market_cap: 300000000
+    exchanges:
+      - NASDAQ
+      - NYSE
+      - AMEX
+      - NYSE American
+  secrets: []
+  enabled: true
