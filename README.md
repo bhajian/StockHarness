@@ -62,12 +62,12 @@ Three rules hold the system together:
 
 ## What works today
 
-| Area                                                                              | Status                                                                                                                                                                                                                                                                      |
-| --------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Layer 1: dataset syncs**                                                        | ✅ 42 FMP datasets with schedules, a survivorship-aware sync universe, append-only snapshots and statements, bulk actions, and YAML config export/import. See [Datasets](#datasets-layer-1).                                                                                |
-| **Layer 2: pipeline modules**                                                     | 🟡 The **Datasets → Transforms** tab (editor, preview, versions, run history, dependency triggers) and [pipelines](docs/pipelines.md) are live. The five modules in [`pipeline/`](pipeline/README.md) still run from a harness until they move to transforms (M2.10–M2.11). |
-| **Agent platform**                                                                | ✅ Agents, harnesses, schedules, the Python executor (`run_python` and code steps), MongoDB over MCP, knowledge, skills and the API. See [docs/platform.md](docs/platform.md).                                                                                              |
-| **Schema Catalog, trusted evaluator, research loop, Ideas, Simulations, Signals** | ⏳ Planned in milestones M1–M7. See [ROADMAP.md](ROADMAP.md).                                                                                                                                                                                                               |
+| Area                                                                              | Status                                                                                                                                                                                                                                                          |
+| --------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Layer 1: dataset syncs**                                                        | ✅ 42 FMP datasets with schedules, a survivorship-aware sync universe, append-only snapshots and statements, bulk actions, and YAML config export/import. See [Datasets](#datasets-layer-1).                                                                    |
+| **Layer 2: transforms**                                                           | ✅ **Datasets → Transforms** (editor, preview, versions, run history, dependency triggers) and [pipelines](docs/pipelines.md). The five [`pipeline/`](pipeline/README.md) modules run as Transforms after their syncs; more Layer 2 tables come in M2.12–M2.14. |
+| **Agent platform**                                                                | ✅ Agents, harnesses, schedules, the Python executor (`run_python` and code steps), MongoDB over MCP, knowledge, skills and the API. See [docs/platform.md](docs/platform.md).                                                                                  |
+| **Schema Catalog, trusted evaluator, research loop, Ideas, Simulations, Signals** | ⏳ Planned in milestones M1–M7. See [ROADMAP.md](ROADMAP.md).                                                                                                                                                                                                   |
 
 Known data limits on the current FMP plan:
 
@@ -148,7 +148,7 @@ The synced collections can be browsed in the tab, used by agents through the bui
 | `prices_daily`      | Split- and dividend-adjusted daily prices and total returns, with data-quality flags |
 | `macro_daily`       | Treasury curve, VIX, index levels, sector returns                                    |
 
-**Datasets → Transforms** edits, previews (without writing), schedules and versions Python transforms. Each can write several flat output collections, run after its input syncs, and document itself in the Schema Catalog. [Pipelines](docs/pipelines.md) chain syncs → transforms → research as a DAG with completeness gates. Until the five modules move into transforms (M2.10–M2.11), the chain still runs from the "Pipeline Layer 2" harness ([`deploy/pipeline-harness/`](deploy/pipeline-harness)). See [`pipeline/GAPS.md`](pipeline/GAPS.md) for the Layer 1 gap analysis and [`pipeline/docs/replay.md`](pipeline/docs/replay.md) for the simulation and paper-broker design.
+**Datasets → Transforms** edits, previews (without writing), schedules and versions Python transforms. Each can write several flat output collections, run after its input syncs, and document itself in the Schema Catalog. [Pipelines](docs/pipelines.md) chain syncs → transforms → research as a DAG with completeness gates. The five Layer 2 tables (`trading_calendar`, `securities`, `corporate_actions`, `prices_daily`, `macro_daily`) are Transforms, defined in [`deploy/config-io/exports/transforms.yaml`](deploy/config-io/exports/transforms.yaml) and run on dependency triggers after their syncs. See [`pipeline/GAPS.md`](pipeline/GAPS.md) for the Layer 1 gap analysis and [`pipeline/docs/replay.md`](pipeline/docs/replay.md) for the simulation and paper-broker design.
 
 ## Agents and research
 
@@ -172,22 +172,21 @@ The research layers are planned in [ROADMAP.md](ROADMAP.md):
 
 ## Repository layout
 
-| Path                      | Purpose                                                                                                                                              |
-| ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `apps/api`                | Express API: auth, resources, dataset syncs, scheduler, queue dispatcher, SSE, static UI                                                             |
-| `apps/runner`             | RabbitMQ consumer: run execution, checkpoints, agent patterns, document ingestion                                                                    |
-| `apps/studio`             | React studio: Datasets, harness canvas, playground, knowledge, connections, settings                                                                 |
-| `packages/core`           | Shared runtime: schemas, agent runtime, LLM adapters, MCP, dataset catalog and sync engine, storage                                                  |
-| `pipeline/`               | Python Layer 2 library: PIT helpers, securities, prices, corporate actions, macro, tests                                                             |
-| `python-executor/`        | Executor image and the `oh` SDK (`oh.py`)                                                                                                            |
-| `mongodb-mcp/`            | MongoDB MCP server giving agents per-workspace database access                                                                                       |
-| `skills/`                 | Agent skills kept in the repo, e.g. [`strategy-library.md`](skills/strategy-library.md), the 42 strategy cards (also in the config-io skills export) |
-| `deploy/k8s`              | Kustomize base and overlays (`aws`, `nebius`, `generic`) and scripts                                                                                 |
-| `deploy/config-io`        | Config export/import CLI and the committed exports                                                                                                   |
-| `deploy/pipeline-harness` | Builder for the current Layer 2 harness (to be replaced by Transforms)                                                                               |
-| `gateway`, `connector-*`  | Device gateway and connectors (inherited from OpenHarness; not used in the StockHarness UI)                                                          |
-| `tests/`                  | Unit, real-stack integration, fault-injection and browser tests                                                                                      |
-| `docs/`                   | Platform documentation ([platform reference](docs/platform.md))                                                                                      |
+| Path                     | Purpose                                                                                                                                              |
+| ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `apps/api`               | Express API: auth, resources, dataset syncs, scheduler, queue dispatcher, SSE, static UI                                                             |
+| `apps/runner`            | RabbitMQ consumer: run execution, checkpoints, agent patterns, document ingestion                                                                    |
+| `apps/studio`            | React studio: Datasets, harness canvas, playground, knowledge, connections, settings                                                                 |
+| `packages/core`          | Shared runtime: schemas, agent runtime, LLM adapters, MCP, dataset catalog and sync engine, storage                                                  |
+| `pipeline/`              | Python Layer 2 library: PIT helpers, securities, prices, corporate actions, macro, tests                                                             |
+| `python-executor/`       | Executor image and the `oh` SDK (`oh.py`)                                                                                                            |
+| `mongodb-mcp/`           | MongoDB MCP server giving agents per-workspace database access                                                                                       |
+| `skills/`                | Agent skills kept in the repo, e.g. [`strategy-library.md`](skills/strategy-library.md), the 42 strategy cards (also in the config-io skills export) |
+| `deploy/k8s`             | Kustomize base and overlays (`aws`, `nebius`, `generic`) and scripts                                                                                 |
+| `deploy/config-io`       | Config export/import CLI and the committed exports                                                                                                   |
+| `gateway`, `connector-*` | Device gateway and connectors (inherited from OpenHarness; not used in the StockHarness UI)                                                          |
+| `tests/`                 | Unit, real-stack integration, fault-injection and browser tests                                                                                      |
+| `docs/`                  | Platform documentation ([platform reference](docs/platform.md))                                                                                      |
 
 ## Deployment
 

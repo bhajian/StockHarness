@@ -1,4 +1,1 @@
-"""Market data pipeline (Layers 2-3). See README.md and the pipeline spec."""
-from .core.runner import run, transform  # noqa: F401
-
-__all__ = ["run", "transform"]
+"""Market data pipeline library (Layer 2). Each module is run by a Transform; see README.md."""

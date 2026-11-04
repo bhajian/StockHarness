@@ -6,7 +6,6 @@ from __future__ import annotations
 
 from datetime import date
 
-from ..core.runner import transform
 from .calendar_logic import shape_calendar
 
 
@@ -37,18 +36,3 @@ def compute(start=None, end=None):
     start = start or date(1990, 1, 1)
     end = end or date(date.today().year + 1, 12, 31)
     return shape_calendar(_sessions(start, end))
-
-
-@transform("build_trading_calendar")
-def build(ctx):
-    from pymongo import ReplaceOne
-
-    from ..core.db import coll
-
-    rows = compute(ctx.start, ctx.end)
-    ctx.rows_read = len(rows)
-    c = coll("trading_calendar")
-    c.create_index("date", unique=True)
-    if rows:
-        res = c.bulk_write([ReplaceOne({"date": r["date"]}, r, upsert=True) for r in rows], ordered=False)
-        ctx.rows_written = (res.upserted_count or 0) + (res.modified_count or 0)
