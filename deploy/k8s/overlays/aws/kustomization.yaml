@@ -82,6 +82,8 @@ patches:
       data:
         PUBLIC_URL: https://openharness.faberiq.ai
         CONFIG_BACKUP_REPO: bhajian/StockHarness
+        # Nodes are 2 vCPU and shared; a full-CPU request never schedules. No CPU limit, so Jobs still burst.
+        EXECUTOR_JOB_CPU: 500m
         GATEWAY_PUBLIC_URL: wss://openharness.faberiq.ai
   # Persistent EBS for the shared files claim and every StatefulSet volume.
   - target:
