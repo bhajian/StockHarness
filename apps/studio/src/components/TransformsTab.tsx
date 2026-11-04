@@ -36,6 +36,7 @@ import {
   fetchTransformRun,
   fetchTransformRuns,
   fetchTransforms,
+  fetchPipelines,
   runTransform,
   saveTransform,
   timestamp,
@@ -429,6 +430,21 @@ function TransformEditor({
 
   // Preview (#95): the current draft on a sample, nothing written. Its traceback matches the editor's code.
   const [bottom, setBottom] = useState<'latest' | 'runs' | 'versions'>('latest');
+  // Pipelines this transform is part of (#157), with the latest node-run status.
+  const [partOf, setPartOf] = useState<{ name: string; status?: string }[]>([]);
+  useEffect(() => {
+    if (!transform) return;
+    void fetchPipelines().then(
+      (ps) =>
+        setPartOf(
+          ps.flatMap((p) => {
+            const n = p.nodes.find((x) => x.ref === `transform:${transform.name}`);
+            return n ? [{ name: p.name, status: p.lastRun?.nodes[n.id]?.status }] : [];
+          }),
+        ),
+      () => undefined,
+    );
+  }, [transform]);
   const [preview, setPreview] = useState<TransformPreview | null>(null);
   const [previewCode, setPreviewCode] = useState('');
   const previewing = preview?.status === 'running';
@@ -527,6 +543,24 @@ function TransformEditor({
           {transform && <span className="muted-line"> v{transform.version}</span>}
         </h2>
         {dirty && !isNew && <StatusPill status="draft" label="unsaved changes" />}
+        {partOf.length > 0 && (
+          <span className="part-of">
+            Part of pipelines:{' '}
+            {partOf.map((p) => (
+              <a
+                key={p.name}
+                href={`/datasets/pipelines/${p.name}`}
+                onClick={(e) => {
+                  e.preventDefault();
+                  go({ tab: 'pipelines', item: p.name });
+                }}
+              >
+                {p.name}
+                {p.status ? ` (${p.status.replace('_', ' ')})` : ''}
+              </a>
+            ))}
+          </span>
+        )}
         <div className="transform-editor-actions">
           {transform && isAdmin && (
             <ObjectTransfer kinds={['Transform']} names={[transform.name]} onImported={onSaved} compact />
