@@ -1,6 +1,7 @@
 // Schema Catalog API (#84). Mounted under /api with requireSession.
 import { Router } from 'express';
 import { z } from 'zod';
+import { collectionCoverage } from '../../../packages/core/src/catalogCoverage.js';
 import { collection } from '../../../packages/core/src/db.js';
 import { HttpError, safeError } from '../../../packages/core/src/security.js';
 import {
@@ -42,6 +43,17 @@ catalogRouter.post('/catalog/export', async (req, res) => {
 });
 catalogRouter.get('/catalog/:collection', async (req, res) => {
   res.json(publicEntry(await entryOr404(req.principal!.tenantId, String(req.params.collection))));
+});
+// Rows and symbols per day plus a year × week grid (#87); 202 while it is computed in the background.
+catalogRouter.get('/catalog/:collection/coverage', async (req, res) => {
+  const name = String(req.params.collection);
+  await entryOr404(req.principal!.tenantId, name);
+  const { coverage, computing } = await collectionCoverage(req.principal!.tenantId, name, {
+    refresh: req.query.refresh === '1',
+  });
+  if (!coverage) return void res.status(202).json({ computing: true });
+  const { _id, ownerId, ...rest } = coverage;
+  res.json({ ...rest, computing });
 });
 catalogRouter.get('/catalog/:collection/agent-view', async (req, res) => {
   res.json(agentView(await entryOr404(req.principal!.tenantId, String(req.params.collection))));
