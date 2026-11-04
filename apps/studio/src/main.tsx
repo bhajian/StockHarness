@@ -23,16 +23,7 @@ import {
   Sparkles,
   X,
 } from 'lucide-react';
-import {
-  api,
-  collections,
-  emptyData,
-  errorMessage,
-  send,
-  type Data,
-  type Entity,
-  type User,
-} from './api';
+import { api, collections, emptyData, errorMessage, send, type Data, type Entity, type User } from './api';
 import { Button, ErrorNotice, UpdateNotice } from './components/ui';
 import { ConnectionEditor, KnowledgeEditor, ProviderEditor } from './components/editors';
 import { WorkflowStarter } from './components/WorkflowStarter';
@@ -54,7 +45,7 @@ const nav = [
   { id: 'skills', label: 'Skills', icon: Sparkles },
   { id: 'connections', label: 'MCP connections', icon: Plug },
   { id: 'knowledge', label: 'Knowledge', icon: BookOpen },
-  { id: 'datasets', label: 'Dataset', icon: Database },
+  { id: 'datasets', label: 'Datasets', icon: Database },
   { id: 'inbox', label: 'Inbox', icon: ShieldCheck },
   { id: 'executions', label: 'Executions', icon: Activity },
   { id: 'integrations', label: 'Integrations', icon: Code2 },
@@ -338,7 +329,13 @@ function App() {
     if (next === 'knowledge') setKnowledgeViewState('documents');
     if (newTarget) setTarget(newTarget);
     setSidebar(false);
-    history.pushState({}, '', `/${next === 'workflows' ? 'harnesses' : next}`);
+    history.pushState(
+      {},
+      '',
+      next === 'datasets' ? '/datasets/syncs' : `/${next === 'workflows' ? 'harnesses' : next}`,
+    );
+    // Pages that route internally (Datasets tabs) re-read the URL.
+    if (next === 'datasets') dispatchEvent(new PopStateEvent('popstate'));
   };
   const edit = (type: string, value?: Entity) =>
     setEditor({ type: type === 'workflows' && !value ? 'starter' : type, value });

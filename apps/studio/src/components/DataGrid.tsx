@@ -1,5 +1,15 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ChevronLeft, ChevronRight, ArrowUp, ArrowDown, LoaderCircle, RefreshCw } from 'lucide-react';
+import {
+  ChevronLeft,
+  ChevronRight,
+  ArrowUp,
+  ArrowDown,
+  LoaderCircle,
+  RefreshCw,
+  Columns3,
+  Download,
+} from 'lucide-react';
+import { toCsv } from '../datasetsRoute';
 import { api } from '../api';
 import { IconButton } from './ui';
 
@@ -14,6 +24,8 @@ export function DataGrid({ connectionId, collection }: { connectionId: string; c
   const [sort, setSort] = useState<{ field: string; dir: 1 | -1 } | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [hidden, setHidden] = useState<Set<string>>(new Set());
+  const [picking, setPicking] = useState(false);
 
   const base = `/mongodb/${encodeURIComponent(connectionId)}/collections/${encodeURIComponent(collection)}`;
   const load = useCallback(async () => {
@@ -35,6 +47,7 @@ export function DataGrid({ connectionId, collection }: { connectionId: string; c
   useEffect(() => {
     setSkip(0);
     setSort(null);
+    setHidden(new Set());
   }, [connectionId, collection]);
   useEffect(() => {
     void load();
@@ -54,6 +67,24 @@ export function DataGrid({ connectionId, collection }: { connectionId: string; c
     return [...(seen.has('_id') ? ['_id'] : []), ...rest, ...(seen.has('_syncedAt') ? ['_syncedAt'] : [])];
   }, [docs]);
 
+  const visible = columns.filter((c) => !hidden.has(c));
+  const toggleColumn = (c: string) =>
+    setHidden((prev) => {
+      const next = new Set(prev);
+      if (next.has(c)) next.delete(c);
+      else next.add(c);
+      return next;
+    });
+  const exportCsv = () => {
+    const url = URL.createObjectURL(new Blob([toCsv(docs, visible)], { type: 'text/csv' }));
+    const a = Object.assign(document.createElement('a'), {
+      href: url,
+      download: `${collection}-${skip + 1}.csv`,
+    });
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   const toggleSort = (field: string) =>
     setSort((s) => (s?.field === field ? { field, dir: s.dir === 1 ? -1 : 1 } : { field, dir: 1 }));
 
@@ -65,13 +96,37 @@ export function DataGrid({ connectionId, collection }: { connectionId: string; c
     <div className="data-grid">
       <div className="data-grid-toolbar">
         <span className="data-grid-count">
-          {loading ? 'Loading…' : `${from.toLocaleString()}–${to.toLocaleString()} of ${total.toLocaleString()}`}
+          {loading
+            ? 'Loading…'
+            : `${from.toLocaleString()}–${to.toLocaleString()} of ${total.toLocaleString()}`}
         </span>
         <div className="data-grid-pager">
+          <div className="data-grid-columns">
+            <IconButton title="Columns" disabled={!columns.length} onClick={() => setPicking(!picking)}>
+              <Columns3 size={15} />
+            </IconButton>
+            {picking && (
+              <div className="data-grid-column-menu" role="menu">
+                {columns.map((c) => (
+                  <label key={c}>
+                    <input type="checkbox" checked={!hidden.has(c)} onChange={() => toggleColumn(c)} />
+                    {c}
+                  </label>
+                ))}
+              </div>
+            )}
+          </div>
+          <IconButton title="Export this page as CSV" disabled={!docs.length} onClick={exportCsv}>
+            <Download size={15} />
+          </IconButton>
           <IconButton title="Refresh" onClick={() => void load()}>
             <RefreshCw size={15} />
           </IconButton>
-          <IconButton title="Previous" disabled={skip === 0} onClick={() => setSkip(Math.max(0, skip - PAGE))}>
+          <IconButton
+            title="Previous"
+            disabled={skip === 0}
+            onClick={() => setSkip(Math.max(0, skip - PAGE))}
+          >
             <ChevronLeft size={16} />
           </IconButton>
           <IconButton title="Next" disabled={to >= total} onClick={() => setSkip(skip + PAGE)}>
@@ -90,7 +145,7 @@ export function DataGrid({ connectionId, collection }: { connectionId: string; c
           <table>
             <thead>
               <tr>
-                {columns.map((col) => (
+                {visible.map((col) => (
                   <th key={col}>
                     <button className="data-grid-sort" onClick={() => toggleSort(col)}>
                       {col}
@@ -104,7 +159,7 @@ export function DataGrid({ connectionId, collection }: { connectionId: string; c
             <tbody>
               {docs.map((doc, i) => (
                 <tr key={(doc._id as string) ?? i}>
-                  {columns.map((col) => (
+                  {visible.map((col) => (
                     <td key={col}>
                       <Cell value={doc[col]} />
                     </td>

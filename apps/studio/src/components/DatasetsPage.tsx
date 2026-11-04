@@ -13,6 +13,10 @@ import {
   Download,
   Upload,
   History,
+  RefreshCw,
+  Code2,
+  BookOpen,
+  Activity,
 } from 'lucide-react';
 import {
   type Data,
@@ -40,6 +44,14 @@ import type { Schedule } from '../../../../packages/core/src/schema.js';
 import { Button, IconButton, Field, Modal, SaveForm, Empty, PageTitle, Status } from './ui';
 import { ScheduleFields } from './agentFields';
 import { DataGrid } from './DataGrid';
+import { Tabs } from './kit';
+import {
+  DATASET_TABS,
+  datasetsPath,
+  parseDatasetsPath,
+  type DatasetTab,
+  type DatasetsRoute,
+} from '../datasetsRoute';
 
 type Props = {
   data: Data;
@@ -67,7 +79,66 @@ type SyncForm = {
   schedule: Schedule;
 };
 
-export function DatasetsPage({ data, refresh, act, isAdmin }: Props) {
+const TAB_LABELS: Record<DatasetTab, { label: string; icon: React.ReactNode }> = {
+  syncs: { label: 'Syncs', icon: <RefreshCw size={15} /> },
+  transforms: { label: 'Transforms', icon: <Code2 size={15} /> },
+  catalog: { label: 'Catalog', icon: <BookOpen size={15} /> },
+  health: { label: 'Health', icon: <Activity size={15} /> },
+};
+
+/** Datasets: Syncs (Layer 1) | Transforms (Layer 2) | Catalog | Health, routed as /datasets/<tab>[/<item>]. */
+export function DatasetsPage(props: Props) {
+  const [route, setRoute] = useState<DatasetsRoute>(() => parseDatasetsPath(location.pathname));
+  useEffect(() => {
+    const onPop = () => setRoute(parseDatasetsPath(location.pathname));
+    addEventListener('popstate', onPop);
+    // Normalise /datasets to /datasets/syncs so the tab is always in the URL.
+    if (location.pathname !== datasetsPath(route)) history.replaceState({}, '', datasetsPath(route));
+    return () => removeEventListener('popstate', onPop);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const go = (next: DatasetsRoute) => {
+    setRoute(next);
+    history.pushState({}, '', datasetsPath(next));
+  };
+  return (
+    <>
+      <PageTitle
+        eyebrow="Data"
+        title="Datasets"
+        text="Layer 1 syncs pull raw data; optional Layer 2 transforms (Python) turn it into flat point-in-time collections. Everything is exportable as YAML."
+      />
+      <Tabs
+        tabs={DATASET_TABS.map((id) => ({ id, ...TAB_LABELS[id] }))}
+        value={route.tab}
+        onChange={(tab) => go({ tab })}
+      />
+      {route.tab === 'syncs' ? (
+        <SyncsTab {...props} />
+      ) : route.tab === 'transforms' ? (
+        <Empty
+          icon={<Code2 size={28} />}
+          title="Transforms"
+          text="Layer 2 Python transforms: inputs, outputs, schedule and runs."
+        />
+      ) : route.tab === 'catalog' ? (
+        <Empty
+          icon={<BookOpen size={28} />}
+          title="Catalog"
+          text="Every collection with its schema, time semantics and caveats."
+        />
+      ) : (
+        <Empty
+          icon={<Activity size={28} />}
+          title="Health"
+          text="Freshness and failures across syncs and transforms."
+        />
+      )}
+    </>
+  );
+}
+
+function SyncsTab({ data, refresh, act, isAdmin }: Props) {
   const [catalog, setCatalog] = useState<DatasetCatalogItem[]>([]);
   const [presets, setPresets] = useState<TickerPreset[]>([]);
   const [selected, setSelected] = useState<string>('');
@@ -323,12 +394,13 @@ export function DatasetsPage({ data, refresh, act, isAdmin }: Props) {
 
   return (
     <>
-      <PageTitle
-        eyebrow="Data"
-        title="Dataset"
-        text="Sync raw market data from FMP into MongoDB collections you can browse here and reuse in harnesses (as a MongoDB tool or via oh.read in Python nodes)."
-        action={addBtn}
-      />
+      <div className="tab-head">
+        <p>
+          Layer 1: raw market data synced from FMP into MongoDB collections, browsable here and reusable by
+          transforms and agents.
+        </p>
+        {addBtn}
+      </div>
       {!syncs.length ? (
         <Empty
           icon={<Database size={28} />}
