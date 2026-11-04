@@ -274,4 +274,4 @@ Agent memory, execution plans, file metadata and skill versions persist in owner
 
 Shared model providers, skills and MCP connections belong to the workspace. Every external tool remains MCP-based. The adapter never executes uploaded code, launches arbitrary host processes, or bypasses bound tool permissions. API child agents inherit the parent configuration and receive bounded independent execution budgets.
 
-See [the main architecture guide](../README.md#architecture), [API behavior and limits](openharness-api.md), [generated support matrix](openharness-support.md), and [verification](conformance.md).
+See [the main architecture guide](platform.md#architecture), [API behavior and limits](openharness-api.md), [generated support matrix](openharness-support.md), and [verification](conformance.md).
