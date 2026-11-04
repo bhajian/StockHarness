@@ -9,7 +9,7 @@ Reviewed against `bhajian/stockharness` at `ae32742` (2026-11-03). Implementatio
 ```
  Layer 1  DATA SYNC        FMP (later: other vendors) -> raw Mongo collections, historic + scheduled
               |  contract: Schema Catalog + point-in-time fields
- Layer 2  DATA PREP        Python transforms (UI, scheduled) -> many clean, flat, joined collections
+ Layer 2  DATA PREP        (optional) Python transforms -> clean, flat, joined collections, only where needed
               |  contract: Schema Catalog + Data Access tools (as_of enforced)
  Layer 3  RESEARCH AGENTS  Theorist -> Judge -> Coder -> trusted Evaluator -> Judge -> verdict loop
               |  contract: Theory record + Proof Pack
@@ -108,6 +108,12 @@ Definitions round-trip fully. Records can be exported for audit and imported to 
 - Run on demand, on a schedule, or periodically.
 - Detailed schema for every output collection.
 
+### Layer 2 is optional
+
+Layer 2 exists **only where it's needed**. A Layer 1 collection with a simple schema is used **directly** by agents, backtests, collection bindings, pipelines and live runs. A transform is built only when the raw data needs cleaning, joining, flattening, mapping to `security_id`, or point-in-time versioning (restatements, TTM).
+
+What makes direct use safe is a **known-at rule declared on every Layer 1 dataset** (e.g. `insider_trades` → `filingDate`, statements → `acceptedDate` with a lag fallback, prices → `date` at 16:00 ET). It's stored in the catalog and applied by every as_of reader (M1.12 #84, M3.01 #103, M3.06 #108). Current-only datasets (profiles, float, …) are refused for historical reads.
+
 ### Layer 2 produces many flat collections, not one
 
 Layer 1 often holds complex, nested vendor data. Layer 2 simplifies it into **many simple, flat collections**, each with a clear grain, primary key and point-in-time fields, purpose-built for one use. "Flat" does **not** mean one collection holding all the data.
@@ -176,9 +182,9 @@ The full screen designs are in §8.4.
 
 Keep it as a **library** baked into the executor image (`import pipeline`). The five current Layer 2 modules (`securities`, `corporate_actions`, `prices_daily`, `macro_daily`, `trading_calendar`) become the first five Transforms, each a few lines calling the library. Remove the "Pipeline Layer 2" harness workflow once Transforms run them. Fix H1, H2, H4, H5, H6 and M2 as part of the migration.
 
-### The one rigor rule Layer 2 must keep
+### The one rigor rule for every collection agents read
 
-Every Layer 2 output that agents may backtest on **must** have `known_at`/`as_of_date`. When a transform is saved, any output without a `known_at_field` is rejected, unless the collection is marked `static` (e.g., a calendar). Without this, Layer 3 backtests leak the future and every "successful" idea is suspect.
+Every collection that agents may backtest on must be point-in-time: a **Layer 1 collection** through its declared known-at rule, a **Layer 2 output** through `known_at`/`as_of_date`. When a transform is saved, any output without a `known_at_field` is rejected, unless the collection is marked `static` (e.g., a calendar). Without this, Layer 3 backtests leak the future and every "successful" idea is suspect.
 
 ### First transforms to ship
 
@@ -195,6 +201,17 @@ Every Layer 2 output that agents may backtest on **must** have `known_at`/`as_of
 - Every output collection has a complete catalog entry.
 
 ---
+
+## 3b. Pipelines: every layer runs as one DAG
+
+Scheduled work across the layers runs as **pipelines** (M2.15 #156, UI M2.16 #157). A pipeline is a DAG of nodes: Layer 1 syncs, Layer 2 transforms (only where they exist), Layer 3 research runs, Layer 5 live runs, and harnesses such as the daily brief. It runs **once per period** (day, week, month or event).
+
+- **A node starts only when all its upstream nodes for the same run have succeeded and passed their completeness gate.** "The sync finished" isn't enough: the gate checks things like symbol coverage, every expected trading day present, the row-count drop versus the last period, schema drift, and the DQ error rate.
+- By default, a failed or incomplete upstream **blocks** everything downstream, with an alert. Per edge you can instead skip or continue with a warning.
+- **Example, weekly:** pull this week's Layer 1 snapshots and statements and pass the gates → run the Layer 2 transforms → run the Layer 3 research loop on that week's data epoch → generate Layer 5 signals → send the brief. A Layer 3 or Layer 5 node can follow a Layer 1 sync directly when no Layer 2 step is needed.
+- **Each run carries a data epoch** (`period_end`/`as_of`), so research and signals for a period use exactly that period's data, which makes them reproducible.
+- Retries, deadlines, re-run from a node, backfill over past periods, and nodes shared between pipelines run once per period.
+- **The UI:** the DAG in layer swimlanes with live status per node, run history, a Gantt timeline and node controls. Pipelines are YAML objects (kind `Pipeline`).
 
 ## 4. Layer 3: Research Agents (the core)
 
@@ -894,6 +911,8 @@ Work top to bottom. Each item is one PR-sized issue, and later items depend on e
 | M2.12 | #100  | Transform: fundamentals_pit (merge statements, restatement versions, TTM)                                         |
 | M2.13 | #101  | Transform: universe_daily (point-in-time tradeable universe)                                                      |
 | M2.14 | #102  | Transforms: features_daily + features_ranked                                                                      |
+| M2.15 | #156  | Cross-layer pipelines: DAG orchestration (L1 → L2 → L3 → L5) with completeness gates, period runs and retries     |
+| M2.16 | #157  | Pipelines UI: DAG visualization with live run status, run history, Gantt timeline and node controls               |
 
 ### M3 · Trusted evaluator + data tools
 

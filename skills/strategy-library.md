@@ -11,7 +11,7 @@ This skill is the shared map of strategy ideas for the StockHarness research age
 - **Coder:** use the card's **Signal** and **Data** sections to write the plugin, using the field names exactly as listed.
 - **Judge:** use **Status** and **Point-in-time traps** to decide testability and lookahead risk.
 
-Every field name below is real. It exists in the StockHarness workspace today, or it is marked _(Layer 2, planned)_ with the collection that will provide it.
+Every field name below is real. It exists in the StockHarness workspace today, or it is marked _(Layer 2, planned)_ with the collection that will provide it. **Reading Layer 1 collections directly is normal.** The as_of reader applies each dataset's known-at rule (Part 1, rule 3); use a Layer 2 collection only when one exists and adds something (e.g. `security_id` joins, adjusted prices, restatement versions).
 
 ---
 
