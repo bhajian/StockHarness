@@ -52,6 +52,17 @@ const patchInput = z.object({
   fields: z
     .record(z.object({ description: z.string().max(2000).optional(), unit: z.string().max(60).optional() }))
     .optional(),
+  caveats: z
+    .array(
+      z.object({
+        id: z.string().regex(/^[a-z0-9-]{2,60}$/),
+        severity: z.enum(['info', 'warn', 'blocking']),
+        text: z.string().min(1).max(1000),
+      }),
+    )
+    .max(50)
+    .optional(),
+  dismissedCaveats: z.array(z.string().max(60)).max(50).optional(),
 });
 catalogRouter.patch('/catalog/:collection', async (req, res) => {
   if (req.principal!.user.role !== 'admin')
