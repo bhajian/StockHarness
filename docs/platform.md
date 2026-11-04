@@ -1,0 +1,610 @@
+# OpenHarness platform reference
+
+StockHarness is built on a fork of [OpenHarness](https://github.com/deepfinery/OpenHarness), a self-hosted studio for agent harnesses, MCP tools and knowledge. This page is the upstream platform reference, kept because it still describes the engine StockHarness runs on: agents, harnesses, the runner, the Python executor, MCP, knowledge, schedules, the API, configuration and operations.
+
+> **Differences in StockHarness.**
+>
+> - The **Inventory**, **OpenShell** and **Guardrails** pages were removed from the studio (#1). Their sections below describe upstream behavior. The backend code still exists, but StockHarness doesn't use it.
+> - StockHarness adds the **Datasets** tab (FMP → MongoDB syncs) and the `pipeline/` package. See the [README](../README.md) and the [roadmap](../ROADMAP.md).
+> - The "Quick start" below clones upstream. Use `https://github.com/bhajian/StockHarness.git` instead.
+
+A self-hosted studio for agent harnesses, MCP tools, and knowledge, implementing the [Open Harness API](https://github.com/jeffrschneider/OpenHarness). Build agents from templates, wire them into visual multi-agent harnesses, watch every step stream in the playground, and expose the result through an API, a conversation, a webhook, an email, or an embedded chat — all on your own infrastructure.
+
+- **One tool protocol.** Every external capability arrives through MCP: paste a server URL, sign in or add a key, pick the tools each agent may call.
+- **Durable by design.** Runs are queued through RabbitMQ, checkpointed in MongoDB, and resumed on another runner if a process dies — without ever blindly replaying a step that may have acted on the outside world.
+- **Self-contained.** API, runner, studio, configuration and deployment assets live in this repository. No cloud account, managed database, or external login is required.
+
+[Read the OpenHarness overview (PDF, 15 pages)](../OpenHarness.pdf)
+
+[Detailed agentic capabilities guide](agentic-guide/README.md) — agent loops,
+orchestration patterns, experiment storage, scalability and recovery, with PDF
+and editable Word editions.
+
+## Product tour
+
+Explore the studio: organize harnesses, follow agent activity, retain knowledge, and share reusable skills. Select any screenshot to view it at full size.
+
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <a href="../product-screenshots/workflows.png"><img src="../product-screenshots/workflows.png" alt="Harness library with saved agents and run controls" width="480"></a>
+      <br><strong>Harness library</strong><br>Organize and launch your saved harnesses.
+    </td>
+    <td width="50%" valign="top">
+      <a href="../product-screenshots/playground.png"><img src="../product-screenshots/playground.png" alt="Playground conversation with a live agent execution trace" width="480"></a>
+      <br><strong>Playground</strong><br>Chat with agents and follow their tools and memory in the live trace.
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <a href="../product-screenshots/knowledge.png"><img src="../product-screenshots/knowledge.png" alt="Knowledge notebook listing saved findings, lessons, and experiments" width="480"></a>
+      <br><strong>Knowledge notebooks</strong><br>Keep documents, findings, and lessons available for future runs.
+    </td>
+    <td width="50%" valign="top">
+      <a href="../product-screenshots/skills.png"><img src="../product-screenshots/skills.png" alt="Skills library with reusable instructions and agent usage counts" width="480"></a>
+      <br><strong>Reusable skills</strong><br>Manage instructions that agents can load when a task needs them.
+    </td>
+  </tr>
+</table>
+
+_These screenshots show the earlier “Workflows” label, now called “Harnesses.”_
+
+<details>
+<summary>Preview the product overview PDF</summary>
+
+[![First-page preview of the OpenHarness overview](images/openharness-preview.png)](../OpenHarness.pdf)
+
+</details>
+
+## Contents
+
+- [Product tour](#product-tour)
+- [Quick start](#quick-start)
+- [What you get](#what-you-get)
+- [Concepts](#concepts): [agents and patterns](#agents-and-agentic-patterns) · [harnesses](#harnesses) · [runs and conversations](#runs-conversations-and-traces)
+- [Guides](#guides): [model provider](#1-connect-a-model-provider) · [MCP tools](#2-connect-mcp-tools) · [agents](#3-configure-an-agent) · [harnesses](#4-start-a-harness-from-a-template) · [knowledge](#5-knowledge-bases) · [email](#6-outgoing-email) · [skills](#7-give-agents-skills) · [machines & OpenShell](#7b-operate-a-machine) · [schedules](#8-run-it-on-a-schedule) · [API, webhooks, embeds](#9-use-it-from-outside-the-studio)
+- [Architecture](#architecture): [components](#components) · [run lifecycle](#run-lifecycle) · [run states](#run-states) · [resilience and idempotency](#resilience-idempotency-and-resume) · [design principles](#design-principles) · [in context](#agentic-architecture-in-context)
+- [Configuration](#configuration) · [Operations and limits](#operations-and-limits) · [Upgrade](#upgrade)
+- [Development and verification](#development-and-verification) · [License](#license)
+
+## Quick start
+
+For a Kubernetes installation, follow the [step-by-step Kubernetes installation guide](../deploy/k8s/INSTALL.md).
+The [Kubernetes / Nebius reference](../deploy/k8s/README.md) covers the existing deployment tooling.
+
+Install Docker with Docker Compose and OpenSSL, then run:
+
+```sh
+git clone https://github.com/deepfinery/OpenHarness.git
+cd OpenHarness
+./start.sh
+```
+
+Open the address printed by `./start.sh` (**http://localhost:8088** by default) and create the first administrator account with the `SETUP_TOKEN` written to `.env`. On an existing installation, this is the configured `PUBLIC_URL`, including its scheme and port. There is no default account or password. Later starts reuse the same configuration and persistent volumes:
+
+```sh
+docker compose up --build -d --wait      # rebuild and restart after pulling changes
+STUDIO_PORT=8090 ./start.sh              # choose a different port on first launch
+```
+
+Allow about 4 GB of memory for the stack, plus whatever your locally hosted models need. A CPU-only laptop runs the studio with a remote model provider; Ollama or another inference server is configured separately and no model is downloaded automatically.
+
+## Open Harness API
+
+Open **Integrations → API explorer** to browse endpoints, select a harness, fill request fields, upload files, send requests, inspect streaming responses, and copy cURL examples. The explorer uses your studio session or an API key you enter for the current page. Download its OpenAPI 3.0 document for other tools.
+
+Each saved harness contains its agent cards. Existing graphs and IDs carry over automatically; `/api/workflows` and `/workflows` remain compatibility aliases. See the [API guide](openharness-api.md), [generated support matrix](openharness-support.md), and [conformance evidence](conformance.md) for the supported contract and limitations.
+
+## What you get
+
+See the [NeMo Guardrails setup](guardrails.md) for safety policies and harness attachments, and the [GPU cluster guide](gpu-clusters.md) for shared enrollment, scheduled node agents, privileged diagnostics and controlled remediation.
+
+| Area                | What is included                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Agents**          | Agents live on the harness canvas as cards: instructions, model, an effort level (light, medium, high, extra high, max or auto) that sets loop and token budgets, one of four agentic patterns (ReAct, plan-and-execute, reflection, autonomous loop), seven templates, explicit tool permissions, knowledge bindings.                                                                                                                           |
+| **Harnesses**       | Visual designer with a thin toolbox that lists your MCP servers and knowledge bases, drag-and-drop onto the canvas or straight onto an agent, settings in popups instead of a side panel, conditions, parallel agent groups, explicit MCP actions, Email steps, bounded cycles, undo/redo, YAML view.                                                                                                                                            |
+| **Runner**          | Durable RabbitMQ jobs, immutable execution snapshots, per-step checkpoints, automatic resume on a replacement runner under a per-harness policy, idempotency keys on every tool call, context-window compaction with automatic recovery from provider limit errors, cancellation.                                                                                                                                                                |
+| **Schedules**       | Run a harness every N minutes, hourly, daily or weekly at a wall-clock time in your time zone; deduplicated so a restart never double-fires.                                                                                                                                                                                                                                                                                                     |
+| **Skills**          | A workspace library of skills — a name, a one-line “when to use it”, and full instructions. Give an agent several; it sees only the descriptions, loads the matching skill with a built-in `load_skill` tool, and follows it. Skills are snapshotted per run and each load appears in the trace.                                                                                                                                                 |
+| **Inventory**       | Register Linux machines, OpenShell managed machines, Windows hosts and Chrome browsers that have no public IP: each runs a connector that dials out to the bundled gateway. Pick a resource in the playground and the harness's agents get its tools (`run_command`, files, processes, sandboxes …) with per-resource allow-lists, audit and optional approvals.                                                                                 |
+| **OpenShell**       | One compose file deploys the NVIDIA OpenShell gateway and the OpenHarness edge on a private host; the edge dials out to the harness and exposes sandboxes, policies, revision history and the advisor's rule proposals as MCP tools. **Executors** are sandboxes that run the Go connector under an OpenShell policy (Landlock, seccomp, egress rules) and appear in the inventory as sandboxed machines. See [docs/openshell.md](openshell.md). |
+| **Playground**      | The harness selector sits in the top bar; saved conversations per harness, token-by-token streaming, live execution trace, memory, and a single History tab for saved chats and runs.                                                                                                                                                                                                                                                            |
+| **MCP connector**   | Streamable HTTP or legacy SSE; no auth, API key, or OAuth with PKCE, dynamic registration or a pre-registered client ID (for servers such as Finnhub); discovered tools shown on the connection card with their schemas; every call validated against the schema before it is sent.                                                                                                                                                              |
+| **Model providers** | Guided setup for OpenAI, Anthropic, Gemini, Ollama, or any OpenAI-compatible server; a workspace default provider that new agents start with; explicit LLM, vision and embedding model entries; a connection test that reports the provider's exact error before you save.                                                                                                                                                                       |
+| **Knowledge bases** | A notebook view: write Markdown notes in place (indexed on every save) or upload TXT, Markdown, CSV, JSON, YAML, text PDF and DOCX; background indexing, Weaviate hybrid search, cited passages in the prompt, an **Ask** dialog that shows the exact passages an agent would get.                                                                                                                                                               |
+| **Outgoing email**  | Workspace SMTP settings (Amazon SES, Google Workspace, SendGrid, Mailgun, Postmark or any relay), `.env` defaults, a test send, and an Email harness step.                                                                                                                                                                                                                                                                                       |
+| **Workspaces**      | Local accounts, administrator-managed teammates, shared resources and run history per tenant, tenant isolation, edit-conflict detection.                                                                                                                                                                                                                                                                                                         |
+| **Integrations**    | Target-scoped API keys, conversational API, server-sent event stream per run, authenticated JSON webhooks, revocable iframe embeds with allowed origins.                                                                                                                                                                                                                                                                                         |
+
+Deliberately not included: provider-specific tool catalogs, external account login, website builders, business wizards, reports, CRM, product catalogs, billing, or customer portals.
+
+## Concepts
+
+### Agents and agentic patterns
+
+An **agent** is a card on a harness canvas: a model provider, instructions, an allow-list of MCP tools, optional knowledge bases, an **effort level**, and a **pattern** that decides how it organizes its passes over the model. Tools and knowledge are available in every pattern. There is no separate agent registry to maintain; a one-agent harness (Start → Agent → Finish) is the simplest assistant.
+
+| Effort         | Turns per pass                                                                                                                                                                   | Token budget | Time limit | Plan steps | Critique rounds | Loop iterations |
+| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ | ---------- | ---------- | --------------- | --------------- |
+| **Light**      | 4                                                                                                                                                                                | 30k          | 90 s       | 3          | 1               | 2               |
+| **Medium**     | 12                                                                                                                                                                               | 120k         | 5 min      | 5          | 1               | 3               |
+| **High**       | 24                                                                                                                                                                               | 400k         | 10 min     | 8          | 2               | 6               |
+| **Extra high** | 36                                                                                                                                                                               | 1M           | 15 min     | 8          | 3               | 8               |
+| **Max**        | 40                                                                                                                                                                               | 5M           | 15 min     | 8          | 3               | 10              |
+| **Auto**       | light, medium or high per request: light for short requests without tools, medium when tools are attached or the pattern makes several passes, high for long requests with tools |
+
+Choosing a level sets these budgets in one move; **Limits** in the agent settings still allow individual overrides, including the token budget. Any limit set to **0 means no limit**: turns, token budget, time limit, loop iterations and the harness step budget can all be switched off for jobs that run for hours (for example working through thousands of tickers), and the runner, broker and model-request timeouts no longer cut such runs short (see `RUN_TIMEOUT_SECONDS` and `MODEL_REQUEST_TIMEOUT_SECONDS`). The **loop budget** is the number of model turns per pass (multi-pass patterns get up to four passes). The **token budget** counts prompt and completion tokens across the whole run — from the provider's usage report when it sends one, otherwise estimated. When it runs out the agent gets one final call without tools and must answer with what it has; the trace shows a `budget_exhausted` event (and, for auto, an `effort` event naming the level chosen and why).
+
+| Pattern              | How it works                                                                                                                                | Use it for                                       |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------ |
+| **ReAct** (default)  | Each turn the model either calls tools or answers. Tool results feed the next turn, bounded by the agent's turn limit.                      | Assistants, most harness steps                   |
+| **Plan and execute** | One pass writes a short numbered plan without tools; each step then runs with tools and records its result; a final pass writes the answer. | Multi-step research, comparisons, reports        |
+| **Reflection**       | Draft, critique as a strict reviewer, revise with tools for verification. One to three rounds.                                              | Writing, analysis, anything that must be checked |
+| **Autonomous loop**  | Carry saved assistant progress forward until completion, a terminal blocker, a mandatory skill stop condition, or the iteration limit.      | Long tasks with a clear completion condition     |
+
+Patterns beyond ReAct receive up to four times the agent's turn limit in total model calls. Every pass is visible in the trace as `plan`, `plan_step`, `reflection`, and `iteration` events.
+
+Autonomous iterations distinguish `continue`, `done`, and `blocked` outcomes. A loaded skill's final `RUN INCOMPLETE` report ends the loop without another summarizing pass. This recognizes the reporting contract; it does not independently validate the model's domain calculations. Intermediate reports and control footers stay out of the streamed chat answer; full iteration outputs are available in the run's activity history. Prior progress remains assistant-authored context, rather than becoming a new user instruction.
+
+### Harnesses
+
+A **harness** is a graph of steps executed in order from Start to Finish, plus resource cards (MCP tools, knowledge bases) attached to agents. Steps pass results through templates: `{{input}}` is the run input, `{{last}}` the previous step's result, `{{steps.<id>}}` any earlier step, and `{{payload.<field>}}` structured webhook or API data.
+
+| Step        | Behavior                                                                                                                                                  | Outgoing connections                                         |
+| ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
+| `start`     | Entry point of the harness                                                                                                                                | one `next`                                                   |
+| `agent`     | Runs an agent's pattern; the model chooses when to call its bound MCP tools                                                                               | one `next`, plus bottom-port MCP tool / knowledge bindings   |
+| `tool`      | Makes one fixed MCP call with templated arguments, no model involved                                                                                      | one `next`                                                   |
+| `code`      | Runs Python in a fresh executor container with templated parameters; reads and writes the workspace's MongoDB collections ([details](python-executor.md)) | one `next`                                                   |
+| `parallel`  | Runs up to 8 agent cards from the same harness concurrently on one prompt, waits for all                                                                  | one `next`, plus a bottom **Runs** port to its member agents |
+| `email`     | Sends a templated email through the workspace SMTP settings                                                                                               | one `next`                                                   |
+| `condition` | Evaluates a templated comparison                                                                                                                          | `onTrue` and `onFalse`                                       |
+| `finish`    | Renders a template from accumulated state and ends the run (`output` is a legacy alias)                                                                   | none                                                         |
+
+Resource cards never advance execution: an agent's bound tools are available throughout its own turn budget, and the model decides when to call them. Use a `tool` step when a call must happen in a fixed order. One agent can attach several MCP servers and knowledge bases, and one card can serve several agents.
+
+### Runs, conversations and traces
+
+Every trigger — playground, API, conversation, webhook, schedule or embed — creates a **run**: an immutable snapshot of the agents and tool grants at submission time, queued to a runner. The run's **trace** records model turns, tool calls and results, retrieved passages, pattern passes, and step outputs as they happen; the playground shows it live and the Executions page keeps it. A **conversation** keeps server-side history across turns for one target, so follow-up questions work from the studio or the API.
+
+In **Playground**, use **Copy message** for one answer or the **Copy conversation** icon in the top header
+for the whole chat. Hover over the compact header icons to see their labels.
+Pasting into a rich-text editor preserves headings, lists, and tables; plain-text editors receive
+Markdown. **Download Markdown** saves the conversation as a `.md` file (attached images are links
+that require access to this installation). **Print / Save as PDF** opens the browser print dialog
+with only the conversation, excluding both side panels and chat controls. Open the header's **Print options**
+and select **Landscape (wide tables)** for wider reports, then choose your printer or **Save as PDF**. The browser's normal Print
+shortcut uses the same clean layout. Messages and tables expand with the window; on narrow screens,
+wide tables scroll horizontally. Conversation exports become available when the response finishes.
+
+## Guides
+
+### 1. Connect a model provider
+
+**Settings → Model providers → Add provider.** Pick where your models run (OpenAI, Anthropic, Gemini, Ollama, or another OpenAI-compatible server), paste the key, select **Model type** (**LLM**, **Vision**, or **Embedding**) and enter one **Model ID**. Create separate entries even when models share an endpoint and API key. **Test connection** checks the selected role against the real endpoint: a text request for LLMs, an image for vision models, or an embedding request for embedding models. It shows the provider's error if the request fails.
+
+| Type              | Example base URL                                   | Notes                                                                                                      |
+| ----------------- | -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| OpenAI compatible | `https://api.openai.com/v1`                        | Also vLLM, LM Studio, Azure OpenAI, DeepSeek, Mistral, Groq, OpenRouter. Use the service's exact base URL. |
+| Anthropic         | `https://api.anthropic.com/v1`                     | Chat and tool use. No embeddings: pair with another provider for knowledge bases.                          |
+| Gemini            | `https://generativelanguage.googleapis.com/v1beta` | Chat, tool use and embeddings with an API key. Unrelated to UI login.                                      |
+| Ollama            | `http://host.docker.internal:11434`                | Native chat and embedding APIs. Pull the models first. The host gateway is configured in Compose.          |
+
+Mark one provider as the **default** (Settings → Model providers → Make default): every new agent card starts with it, and each agent can still pick another, so one harness can mix a fast model with a careful one. A knowledge base is bound to one embedding provider for its lifetime. Streaming is on by default per provider and falls back to a single response when a server ignores the `stream` flag.
+
+For images, select a **Vision** entry under **Harness vision model** in the agent's General settings. The primary model handles text-only conversations; conversations containing images use the vision model, including follow-ups and sub-agents. A vision model can also be the primary model. Notebook selectors only offer embedding entries. Image requests fail with a configuration error when no vision model is selected; they do not silently fall back to another provider.
+
+In **Playground**, click **Attach images** or drop PNG, JPEG or WebP files into the chat, add your question, and send. For a screenshot of a table, ask “Extract this table as Markdown, preserving all rows and columns.” The selected VLM receives the pixels directly; no Docling or separate OCR service is required. Check the run's `model_request` and `model_response` events to see the configured endpoint and requested/reported model IDs.
+
+Limits: four images per message, 10 MB and 25 megapixels per image, and 20 distinct images in the retained conversation context. Uploads are decoded, metadata is stripped, and images are normalized to JPEG with a maximum 2048-pixel edge. Small text may need a closer crop. Images are private to the workspace and stored on the existing files volume; MongoDB stores references, not base64 payloads. Image bytes are sent to the selected hosted vision endpoint when used. Uploads currently remain in workspace storage (including removed drafts), with a 1 GB soft quota; deleting a conversation does not reclaim them. Back up both MongoDB and the files volume.
+
+On upgrade, combined legacy providers are split automatically: the original ID keeps its chat model, a separate `· Embedding` entry keeps the embedding model and encrypted credentials, and notebook references move to that entry. Existing entries start as LLMs; classify image-capable models as Vision and select them on the harness. Old unused embedding placeholders are preserved as separate entries and can be removed if unreferenced. Older API clients may still omit `modelType` for compatibility; new integrations should send `llm`, `vision`, or `embedding` and leave `embeddingModel` empty.
+
+Each provider also has a **context window** (default 128k tokens, under Advanced). Before every model call the runner trims the conversation to fit — older tool results first, then completed turns, never the current question or a tool call without its result. If a provider still rejects a request with a context-length error (the familiar _"maximum context length is 32768 tokens"_), the runner reads the real limit from the message, stores it on the provider, compacts harder and retries; the trace records a `context_compacted` event. Long multi-turn conversations therefore keep working instead of failing with HTTP 400.
+
+### 2. Connect MCP tools
+
+**MCP connections → Connect a server.** Paste the server's MCP endpoint (Streamable HTTP, or legacy SSE), choose no auth, an API key, or **OAuth**. For OAuth, save and click **Authorize**: a window opens for the provider's login, returns to the studio, and tools are discovered automatically. The connection form shows the callback URL (`PUBLIC_URL/api/mcp/oauth/callback`) with a copy button for providers that require registration; providers that publish a fixed client ID (for example Finnhub's remote server at `https://mcp.finnhub.io/mcp`) take it in the **Client ID** field with an empty secret.
+
+Discovered tools appear as chips on the connection card; click one to see its input schema. Agents receive that schema with the tool, and every call is checked against it before it leaves the runner — a wrong enum or missing field comes back to the model as a correctable error instead of an opaque server failure.
+
+MCP functions use connection-specific aliases. Before executing a model's batch, the runner checks every name against the tools offered for that turn, including built-in tools. An unavailable name or a batch larger than 20 calls rejects the entire batch; earlier successful calls are retained. The model receives the current names and descriptions to correct its selection. Three rejected batches across the agent's passes end analysis and reserve a final summary of the available evidence. The trace records `tool_selection_error` with rejected names and counts, without recording rejected arguments or granting additional permissions.
+
+Private endpoints are denied unless their hostname is listed in `ALLOWED_PRIVATE_HOSTS` (default: `host.docker.internal,ollama`). A stdio-only MCP server should be exposed through an HTTP/SSE gateway; the studio never runs shell commands from the UI.
+
+### 3. Configure an agent
+
+Model-generated replies follow the current request’s language unless that request explicitly asks for another output language. A bounded reference to the original request stays available through context compression, workflow templates, reflection, delegation and final synthesis; earlier conversation, source material and timezone do not select the response language. This is a provider prompt policy, not automatic translation or language validation. The retained reference counts against the context and token budget; requests over 1,200 characters retain their opening and trailing text in this reference, alongside the normal task context and saved checkpoints. Small remaining budgets shorten the reference further to leave room for the answer.
+
+Provider context windows support up to 4,000,000 tokens. After upgrading a model server (for example Nemotron to 1M), set **Settings → Model providers → Advanced → Context window** to `1000000`; a previously learned smaller limit does not increase automatically. All harness agents using that provider read the setting on execution. Prompt and output share the window with tokenizer headroom, while total job token budgets remain separate. Older in-flight requests cannot overwrite a subsequently edited provider limit.
+
+**Max output tokens** is the initial allowance for one model response, including reasoning when the provider counts it there; it is separate from the agent's total token budget. Truncated responses get up to two retries with a larger allowance (at most 32,768 tokens, still bounded by remaining job and context capacity). Truncated tool calls never execute. If recovery is exhausted, the agent switches to a tool-free answer using saved evidence and earlier conversation scope. Long final answers can continue from their visible draft; if bounded continuation cannot finish, the available text is preserved with an explicit incomplete notice. Traces include the requested output allowance and provider-reported usage, including truncated completions.
+
+Agents receive a server clock at execution start: UTC timestamp, local date/time with offset, timezone, and the previous completed Monday–Sunday calendar week. Set **Timezone** to an IANA name such as `America/New_York` to pin it; otherwise the timezone sent with the request applies (the Playground and embedded chat send the browser's zone; `POST /runs`, `POST /chat` and the Open Harness `x-openharness.timezone` extension accept one), then the harness schedule timezone, then UTC. Without any of these the clock falls back to UTC, whose calendar date can differ from the user's for several hours a day; the model is told so and the `runtime_clock` trace event marks the fallback. The same reference instant is shared across harness steps and sub-agents, remains protected during context compression and final synthesis, and is refreshed for new or resumed executions. A `runtime_clock` trace event records it. The runner instructs models to resolve relative dates, use dated queries and schema-supported MCP search filters, check publication and event dates, and disclose missing current evidence. Search tools still need to retrieve timely sources; a clock alone cannot guarantee the accuracy of a model's answer.
+
+Agents are configured where they run: double-click an agent card (or its gear icon, or **Settings** in the selection bar) to open its settings. Pick a model (the workspace default is preselected), an **effort** level, a template to start the instructions from, the pattern and its options, and the message the agent receives (`{{input}}`, `{{last}}`, `{{steps.id}}`). **Tools & knowledge** lists what is attached and adds more. Try the harness in the **Playground**: conversations are saved per harness, answers stream as they are written, and the right panel switches between **Trace**, **History**, and **Memory**. Reopen saved chats from **History**, or use **New conversation** above the chat to start fresh. Leaving the page or reloading restores the selected conversation and reconnects to its running job.
+
+### 4. Start a harness from a template
+
+**Harnesses → Create harness**, then a starter. Each opens a connected canvas you can edit.
+
+| Starter               | Shape                                                  | Agents | Needs               |
+| --------------------- | ------------------------------------------------------ | ------ | ------------------- |
+| Knowledge research    | Start → Researcher → Finish                            | 1      | a knowledge base    |
+| MCP tool assistant    | Start → Tool assistant → Finish                        | 1      | an MCP connection   |
+| Research and review   | Start → Researcher → Reviewer → Finish                 | 2      | a knowledge base    |
+| Plan, research, write | Start → Planner → Researcher → Writer → Finish         | 3      | an MCP connection   |
+| Route to a specialist | Start → Triage → Condition → Specialist A / B → Finish | 3      | nothing             |
+| Research and email    | Start → Analyst → Email → Finish                       | 1      | MCP + SMTP settings |
+| Blank canvas          | Start → Finish                                         | 0      | nothing             |
+
+The designer has a thin **toolbox** on the left and nothing on the right: every setting opens in a popup.
+
+- **Steps** (agent, condition, parallel agents, MCP action, email, finish): click to insert after the selected step, or drag to a spot on the canvas.
+- **MCP tools** lists your connected servers with their tool counts; **Knowledge** lists your knowledge bases. Drag one **onto an agent card** to attach it to that agent (all discovered tools are granted to begin with — trim them in the card's settings), or onto empty canvas to attach it to the selected agent. The **+** next to each heading connects a new server or creates a knowledge base without leaving the canvas.
+- Double-click any card, click its gear, or press Enter to open its settings; the floating selection bar offers **Settings** and delete. Select a connection line to disconnect it.
+- **Settings** in the header holds the description, step budget, **resume policy** (see [Resilience](#resilience-idempotency-and-resume)) and the **schedule**; **Use in your app** shows the exact API calls for this harness.
+- A **Parallel agents** step points at agent cards in the same harness (its bottom **Runs** port, or checkboxes in its settings); **New agent in this group** adds one.
+
+**Save & test** opens the harness in the playground.
+
+For example, **Research and review** wires two agents and a knowledge binding like this:
+
+```mermaid
+flowchart LR
+  Start([Start]) --> Researcher[["Researcher (agent)"]]
+  Researcher --> Reviewer[["Reviewer (agent)"]]
+  Reviewer --> Finish([Finish])
+  Knowledge[("Knowledge base")] -. bound to .-> Researcher
+```
+
+### 5. Knowledge bases
+
+**Knowledge → New knowledge base**: name it and choose the embedding provider. The page then works like a notebook: knowledge bases on the left, files in the middle, the open file on the right.
+
+- **New note** opens an editor. Write Markdown, press **Save** (or ⌘S / Ctrl+S); the note is stored as a `.md` document and indexed in the background, so agents can search it a few seconds later. Reopen a note to edit it; every save re-indexes.
+- **Upload** or drop files anywhere on the panel (TXT, Markdown, CSV, JSON, YAML, text PDF, DOCX). Text files open in the editor too; PDFs and DOCX show their status and a download link.
+- **Ask** searches the knowledge base and returns the exact passages an agent would receive. Retrieved passages are placed in the agent's system prompt as reference data with source titles, never as instructions.
+
+On the canvas, drag the knowledge base from the toolbox onto an agent to give it access.
+
+Agents can also **run Python** they write themselves (the `run_python` tool, enabled per agent), and harnesses have a **Python code** step for ETL and preprocessing. Code runs in a fresh container with pandas, numpy, polars, duckdb, scikit-learn, TA-Lib and more, and reaches the workspace's MongoDB collections through `oh.read`/`oh.write`. See [Python executor](python-executor.md).
+
+**Knowledge → Collections** holds MongoDB collections reached through the MongoDB MCP server: create collections, insert any JSON, filter, edit, delete and index fields, and give agents the same collections through the connection's tools. Each workspace gets its own database. See [MongoDB collections](mongodb-collections.md).
+
+### 6. Outgoing email
+
+**Settings → Email (SMTP)** configures one outgoing mail server per workspace, with presets for Amazon SES, Google Workspace, SendGrid, Mailgun and Postmark, a **Send test** action, and the same private-network rules as other endpoints. Operators can preconfigure every workspace through `.env` (see [Configuration](#configuration)); settings saved in the studio take precedence.
+
+Email is sent by the **Email** harness step. Recipients, subject and body are templates (`{{last}}`, `{{steps.analyst}}`, `{{payload.email}}`). Because sending is an external side effect, a run that crashes inside an Email step is not replayed under the default resume policy.
+
+### 6b. Give a harness a knowledge workspace
+
+In **Harness settings → Knowledge workspace**, pick a knowledge base. The harness's agents then search it (`kb_search`), read only what they need (`kb_read`), and record findings, decisions with their reasons, and feedback (`kb_write`) as notes in folders such as `research/` and `decisions/`. Completed experiments are saved automatically under `experiments/`. Large tool results remain in the temporary task notebook. A knowledge card is read only unless **Use as harness long-term memory** is enabled; individual agents can also choose a dedicated memory workspace. See [docs/knowledge-workspace.md](knowledge-workspace.md).
+
+### 6c. Let an agent start sub-agents
+
+Turn on **Can hand focused tasks to sub-agents** in an agent's settings. The agent can then call `spawn_agents` to run up to four focused sub-agents in parallel. Each gets a fresh context, optionally one of its skills, and a share of its remaining token budget. Each writes its findings to the knowledge workspace and reports back a summary and note ids. See [docs/subagents.md](subagents.md).
+
+### 6d. Learn from experience
+
+With a workspace set, turn on **Learn from experience** in the harness settings. A thumbs up or down in the playground, or `POST /api/runs/:id/feedback`, becomes a short lesson in the workspace's `experience/` folder, and so does a failed run. Later runs recall the most relevant lessons into their agents' instructions. The Memory panel shows saved experiments and lesson status. Recall works before indexing completes and during a vector-store outage; repeated feedback replaces the earlier lesson. `GET /api/harnesses/:id/experience.jsonl` exports experiments, feedback and lessons. This is learning through retrieved context, not automatic training of model weights. See [docs/experience.md](experience.md).
+
+### 7. Give agents skills
+
+Skill instructions can contain up to **256,000 characters**. The editor displays the character count; saves and imports reject larger instructions instead of truncating them. The full loaded skill still needs to fit the selected model's context window alongside the request and other instructions.
+
+**Skills → New skill**: name it, write one line saying _when_ it applies (“Use when someone reports an outage or error spike”), and the instructions to follow — steps, checklists, output formats, examples. In any agent's settings, **Skills** lists the library; tick as many as the agent should have, or create one in place.
+
+At run time the agent's system prompt lists only each skill's name and description, and the agent gets a built-in `load_skill` tool. When a request matches, the model loads that skill's full instructions and follows them; when nothing matches, no skill is loaded. This keeps prompts short with many skills attached. Each load is recorded as a `skill_loaded` trace event, skills are snapshotted when the run is accepted (editing one never changes a run in flight), disabled skills are not offered, and a skill cannot be deleted while an agent uses it.
+
+Once loaded, skill instructions remain protected through context compression, pattern passes, runner continuation and final reporting. They count against the context and job budget; they are never silently shortened to fit. Final reporting receives authored task findings before recent raw tool snippets and bounded contents of workspace files used by the agent. `workspace_read` returns `content`, `total_chars` and `next_offset` so large state files can be read in pages. Omitted evidence is marked explicitly. A skill task forced to report at an execution limit is labeled **RUN INCOMPLETE** and emits `skill_incomplete`. Domain completion rules remain in the skill and guide the model's audit; they are not a deterministic validator of every generated claim. See the [watchlist run-contract example](watchlist-run-contract.md) for coverage gates and restrictions on incomplete reports.
+
+### 7b. Operate a machine
+
+**Inventory → Add resource** registers one of four resource types: a Linux machine (service or container), an
+OpenShell managed machine, a Chrome browser or a Windows host. Choose the tools the agent may use (deny by default;
+tools that change state are marked **acts**), click **Create token**, and paste the shown install command on the
+machine — a systemd service, a `docker run`, or the Windows/Chrome connector. The machine dials **out** to the
+gateway (`GATEWAY_PUBLIC_URL`), so it needs no public IP; the dialog turns green when it connects.
+
+Linux machines and containers run the **Go connector** (`connector-go`): one small image, started with a single
+`docker run`, no host install. An **OpenShell managed machine** enrolls the same way but deploys
+`deploy/openshell/compose.yaml` on the private host: the NVIDIA OpenShell gateway plus the OpenHarness edge, which
+exposes sandboxes, execution inside them, logs and policies as MCP tools. From the **OpenShell** page you manage
+policies and the advisor's rule proposals and **launch executors**: sandboxes that run the same Go connector under
+an OpenShell policy and appear in the inventory as sandboxed machines. Denials come from the sandbox policy, in the
+kernel and the egress proxy, and show up as such in the trace. See [docs/openshell.md](openshell.md).
+
+For a server on a public address, `./scripts/enable-tls.sh <host-or-ip>` creates a self-signed certificate and
+serves the studio over HTTPS and the device gateway over WSS on one port (8443 by default); connectors, the edge and
+executors trust it through `GATEWAY_CA_FILE`.
+
+Then, in the **Playground**, pick a harness and a machine in the top bar. Every agent in the run receives
+the machine's tools and an instruction naming it, and each command and result shows up in the trace. Machines
+also appear in the designer toolbox under **Machines** for harnesses that should always use a specific one,
+and the API takes `"deviceId"` on `/api/runs` and `/api/chat`.
+
+Details, hardening and troubleshooting: [INSTALL.md](INSTALL.md), [SECURITY.md](SECURITY.md),
+[ARCHITECTURE.md](ARCHITECTURE.md), [PROTOCOL.md](PROTOCOL.md).
+
+### 8. Run it on a schedule
+
+**Settings** in the harness header → **Run on a schedule**. Choose every minute, every 5/15/30 minutes, hourly, every 6 hours, **every day at a time**, **every week on a weekday at a time**, or a custom interval in minutes. Daily and weekly schedules use the time zone of your browser (changeable), including daylight-saving changes. Set the message the harness receives; the next run time is shown once saved. Scheduled runs appear in **Executions** with trigger `schedule` and are deduplicated per slot, so an API restart never fires the same slot twice.
+
+### 9. Use it from outside the studio
+
+**Use in your app** in the harness header shows the exact calls for that harness. Create an API key in **Integrations** for the harness, then:
+
+```sh
+curl -X POST http://localhost:8088/api/runs \
+  -H 'Authorization: Bearer YOUR_API_KEY' \
+  -H 'Content-Type: application/json' \
+  -H 'Idempotency-Key: a-unique-request-id' \
+  -d '{"workflowId":"YOUR_WORKFLOW_ID","input":"Summarize the available knowledge."}'
+```
+
+The response is `202 Accepted` with an `id`. Poll `GET /api/runs/:id`, or open `GET /api/runs/:id/stream` for server-sent events that deliver the status, the trace, and the answer text as it streams. Terminal statuses are `succeeded`, `failed`, `cancelled`, and `interrupted`; cancel with `POST /api/runs/:id/cancel`.
+
+- **Conversations:** `POST /api/chat` with a target and `message` returns a run and a `conversationId`; send the same `conversationId` for follow-ups. `GET /api/conversations?workflowId=…` lists the caller's conversations.
+- **Webhooks:** **Integrations → Webhooks** creates an authenticated URL. Send JSON with the bearer secret; the chosen field becomes `{{input}}` and every field is available as `{{payload.field}}`. Poll `/api/hooks/:id/runs/:runId` with the same secret. Retries may carry an `Idempotency-Key`.
+- **Embeds:** **Integrations → Embedded chat** issues an iframe snippet scoped to one target and your site's origins. Visitors see the conversation only — never traces, prompts or your studio. Treat the link as a credential; revoke it any time.
+
+- **Open Harness API:** OpenHarness implements the open [Open Harness API](https://github.com/jeffrschneider/OpenHarness) under `/openharness/v1`, so clients written for that spec can drive it. An administrator creates a workspace key (`oh_sk_…`) under **Integrations → API key**. The capability manifest at `/openharness/v1/harnesses/openharness/capabilities` lists what is supported; see [the adapter guide](openharness-api.md). The spec's own conformance suite runs in CI against it ([results](conformance.md)).
+
+See [the API reference](api.md) for every request shape and permission.
+
+## Architecture
+
+### Components
+
+```mermaid
+flowchart LR
+  subgraph Clients
+    Browser[Browser: React agent studio]
+    External[API key / chat / webhook / iframe caller]
+  end
+
+  subgraph "apps/api"
+    API[Express API<br/>auth · resources · scheduler · queue dispatcher · static UI hosting]
+  end
+
+  subgraph "Shared state"
+    Mongo[(MongoDB<br/>metadata + outbox)]
+    MQ[(RabbitMQ)]
+    Files[(Shared filesystem)]
+  end
+
+  subgraph "apps/runner"
+    Runner[Queue consumer<br/>run execution · document ingestion/deletion]
+  end
+
+  subgraph "External services"
+    Vector[(Weaviate)]
+    LLM[Configured model providers]
+    MCP[MCP servers]
+    SMTP[SMTP relay]
+  end
+
+  Browser --> API
+  External --> API
+  API --> Mongo
+  API --> MQ
+  API --> Files
+  MQ --> Runner
+  Runner --> Mongo
+  Runner --> Files
+  Runner --> Vector
+  Runner --> LLM
+  Runner --> MCP
+  Runner --> SMTP
+  API -. provider test .-> LLM
+  API -. tool discovery .-> MCP
+  API -. retrieval test .-> Vector
+  API -. test email .-> SMTP
+```
+
+| Path              | Purpose                                                                                                                                                                                                                                              |
+| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `apps/api`        | Local authentication, resource APIs, integrations, email settings, scheduler, queue dispatcher, SSE streams, static UI hosting                                                                                                                       |
+| `gateway`         | Device gateway: machines dial in over WebSocket; the orchestrator reaches each as a Streamable HTTP MCP server (`/mcp/{device}`), plus registry, allow-lists, audit, approvals                                                                       |
+| `connector-core`  | Shared connector library: WebSocket MCP transports, framing, reconnect/resume, local policy (command allow-list, path jail, caps), audit                                                                                                             |
+| `connector-linux` | The Linux/container connector: MCP server with `run_command`, file, search, system and process tools; systemd unit, install script, Docker image                                                                                                     |
+| `connector-go`    | Go connector and OpenShell edge: the device protocol client, a small MCP server, the Linux tools with their local policy, and the edge that drives the OpenShell gateway over its gRPC SDK and launches executors; one Dockerfile builds both images |
+| `apps/runner`     | RabbitMQ consumer, run leases and checkpoints, agent patterns, streaming, document ingestion and deletion                                                                                                                                            |
+| `apps/studio`     | React studio: canvas, playground, knowledge, connections, settings                                                                                                                                                                                   |
+| `packages/core`   | Shared schemas, agent runtime, provider adapters, MCP/OAuth, email, storage, retrieval, queue                                                                                                                                                        |
+| `tests`           | Unit, real-stack integration, fault-injection, and browser tests with test-only provider/MCP fixtures                                                                                                                                                |
+
+The dotted edges are administrative, not execution: the API calls a model provider directly only to verify credentials, calls an MCP server directly only to list its tools, calls Weaviate directly only for the Knowledge Base's retrieval test, and the SMTP relay only for the test email. Every agent turn, harness step, email send, and document ingestion runs in the runner, reached only through RabbitMQ.
+
+MongoDB, RabbitMQ, and Weaviate use their community distributions, run locally, and have independent persistent volumes. Only the studio HTTP port is published by the default Compose stack.
+
+### Run lifecycle
+
+```mermaid
+sequenceDiagram
+  participant C as Client (UI / API key / webhook)
+  participant A as API
+  participant M as MongoDB
+  participant Q as RabbitMQ
+  participant R as Runner
+  participant X as Model providers / MCP / Weaviate
+
+  C->>A: POST /runs (or /chat)
+  A->>M: insert run, status = queued (the outbox row)
+  A->>Q: publish (kind: run, id) - best effort
+  alt broker reachable
+    A->>M: set publishedAt
+  else broker unreachable
+    Note over A,M: run stays queued with no publishedAt, the periodic dispatcher republishes it later
+  end
+  A-->>C: 202 Accepted (id)
+  Q->>R: deliver job
+  R->>M: claim atomically: queued to running, leaseId, leaseUntil = now + 30s
+  loop every 5s while running
+    R->>M: refresh leaseUntil
+  end
+  R->>X: agent turns, tool calls, retrieval
+  X-->>R: results
+  R->>M: append trace events, checkpoint each node's output
+  R->>M: set terminal status: succeeded / failed / cancelled / interrupted
+  R->>Q: ack
+  C->>A: GET /runs/:id (poll)
+  A->>M: read run
+  A-->>C: status + output + trace
+```
+
+Streamed model text is buffered into the run's `partial` field a few times a second and cleared when the answer is final; `GET /runs/:id/stream` pushes every change as a server-sent event.
+
+### Run states
+
+```mermaid
+stateDiagram-v2
+  [*] --> queued : createRun (dedups on Idempotency-Key or schedule)
+  queued --> running : a runner claims it
+  queued --> cancelled : cancelled before any runner claims it
+  running --> succeeded : executeRun resolves
+  running --> failed : executeRun throws
+  running --> cancelled : cancellation observed by the runner
+  running --> queued : lease expires and the resume policy allows it - resumeCount + 1
+  running --> interrupted : lease expires and the in-flight step may have acted externally
+  succeeded --> [*]
+  failed --> [*]
+  cancelled --> [*]
+  interrupted --> [*]
+```
+
+### Resilience, idempotency and resume
+
+Six mechanisms cover this, each with a stated limit:
+
+- **Submission idempotency.** `POST /runs` and webhook deliveries accept an `Idempotency-Key`. The same key with the same payload returns the original run; the same key with a different payload is rejected with `409`. Scheduled harnesses dedup on a `scheduleKey`, so a scheduler restart cannot double-fire an interval.
+- **Durable delivery (the outbox).** A run is written to MongoDB with `status: queued` _before_ anything is published to RabbitMQ. If the broker is down at that instant, the write still succeeds and the periodic dispatcher republishes once the broker is back. The fault-injection test stops the RabbitMQ container mid-submission to verify exactly this.
+- **Exclusive execution.** A runner claims a run with an atomic `findOneAndUpdate` (`queued → running`, tagged with a `leaseId`). A duplicate delivery finds the run already claimed and no-ops. A 5-second heartbeat keeps the lease alive; if the runner dies, the lease stops renewing.
+- **Checkpointed resume.** Before each harness step, the runner writes a checkpoint (`cursor`, previous result, step count, per-step attempts); after it, the step's output. When a lease expires, the sweep re-queues the run and a replacement runner rebuilds its scope from the checkpoint and continues at the cursor, so completed steps are never repeated. A `resumed` event names the reason; `MAX_RESUMES` caps crash loops.
+- **Side-effect-aware policy.** A checkpoint cannot prove whether the step in flight already acted on the outside world, and MCP defines no generic way to ask. The default `safe` policy therefore resumes only when that step has no external side effects (`start`, `condition`, `finish`, agents without tools) and otherwise fails to `interrupted` with the reason spelled out. Harnesses calling idempotent tools can opt into `always`; audited pipelines can choose `never`.
+- **Idempotency keys on every tool call.** Each MCP call carries `_meta.idempotencyKey = runId:nodeId:callNumber` so a server that deduplicates on it can make a replay harmless. Servers that ignore `_meta` are unaffected, which is why the default policy stays conservative.
+
+This is the saga shape without pretending to have compensations the tools cannot offer: forward recovery for everything the platform controls, an explicit stop with a reason for the one step it cannot vouch for, and the key an external system needs to close the gap.
+
+### Design principles
+
+- **One tool protocol, not N connectors.** Search, market data, ticketing, files — everything arrives through MCP. One auth model, one discovery mechanism, one place (`toolValidation.ts`) where every call is checked against the server's live schema. A new integration is a new MCP server, not new orchestrator code.
+- **The tool loop is explicit and inspectable.** Each turn the model sees the full tool list with schemas; each call is validated locally, dispatched inside a claimed and heartbeating run, and written to the trace as it happens. Schema violations and MCP-side errors return to the model as tool results so it can correct itself within its turn budget instead of killing the run.
+- **Bounded everywhere.** Agent turns, per-turn tool calls, pattern passes, harness step budgets, context size, and wall-clock timeouts are all capped. An agent cannot run away with your token budget or your infrastructure.
+- **Least privilege by default.** Tool access is an explicit allow-list per agent; an empty list grants nothing. Provider, MCP and SMTP credentials are write-only, even to administrators. Nothing the model says grants it authorization: which tools exist, which knowledge base is searched, and which tenant's data is reachable are decided by configuration before it runs.
+- **Retrieval is a context stage, not a tool the model can misuse.** Knowledge lookups happen before the model sees the prompt, are cited by source, and are labeled as reference data rather than instructions.
+- **Tested against real infrastructure.** Integration tests run against real MongoDB, RabbitMQ and Weaviate containers with deterministic MCP/model fixtures, including fault injection: killed containers, expired OAuth tokens, interrupted and resumed runs. A passing suite means the failure mode was exercised, not mocked away.
+
+### Agentic architecture in context
+
+This project does not use LangChain or any agent framework — there is no such dependency, and `packages/core/src/runtime.ts` talks to each model provider's native API directly. It is still useful to place the design against the loop most agent frameworks (LangChain's `AgentExecutor` and its equivalents) converge on:
+
+```mermaid
+flowchart LR
+  U[User input] --> L["LLM: decide next action"]
+  L -->|tool call| T[Tool executor]
+  T -->|observation| L
+  L -->|final answer| O[Response]
+  Mem[("Conversation memory / chat history")] -.-> L
+```
+
+_A generic ReAct-style agent-executor loop — the common shape behind LangChain and most other agent frameworks, shown as background, not as this repository's own stack._
+
+Frameworks bring a large integration catalog, a shared vocabulary and fast prototyping, at the cost of a fast-moving dependency, an abstraction between you and the provider's actual request, and no opinion about durability, tenancy or credentials. This project takes the other side of that trade: a small execution core purpose-built around the durability, tenancy and tool-validation guarantees above, with MCP as the integration catalog. The patterns it implements map onto the canvas like this:
+
+```mermaid
+flowchart TD
+  subgraph "Single agent patterns - per agent setting"
+    A1["ReAct: reason, call tools, observe, answer"]
+    A2["Plan and execute: plan, run each step with tools, synthesize"]
+    A3["Reflection: draft, critique, revise"]
+    A4["Autonomous loop: iterate until the done marker"]
+  end
+  subgraph "Sequential pipeline - next edges"
+    S1[agent] --> S2[agent] --> S3[agent]
+  end
+  subgraph "Parallel multi-agent - parallel node"
+    P0[agent] --> P1{{parallel node}}
+    P1 --> P2[agent A]
+    P1 --> P3[agent B]
+  end
+  subgraph "Routing - condition after a triage agent"
+    R0[triage agent] --> R1{condition}
+    R1 -->|SUPPORT| R2[support agent]
+    R1 -->|SALES| R3[sales agent]
+  end
+```
+
+## Configuration
+
+`start.sh` writes `.env` with unique credentials. Every variable below is read by the API and the runner; recreate them after changes with `docker compose up -d api runner`.
+
+| Variable                                                                           | Default                       | Purpose                                                                                                                                                                                                                  |
+| ---------------------------------------------------------------------------------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `PUBLIC_URL`                                                                       | `http://localhost:8088`       | The URL users open; used for OAuth callbacks, webhook URLs and embed links.                                                                                                                                              |
+| `STUDIO_PORT`, `STUDIO_BIND`                                                       | `8088`, `127.0.0.1`           | Published port and bind address of the studio.                                                                                                                                                                           |
+| `ENCRYPTION_KEY`                                                                   | generated                     | 32 random bytes (hex) that protect stored credentials. Back it up with the volumes.                                                                                                                                      |
+| `SETUP_TOKEN`                                                                      | generated                     | Required once to create the first administrator.                                                                                                                                                                         |
+| `ALLOWED_PRIVATE_HOSTS`                                                            | `host.docker.internal,ollama` | Hostnames on private networks that model, MCP and SMTP endpoints may use.                                                                                                                                                |
+| `ALLOW_PRIVATE_URLS`                                                               | `false`                       | Allow any private address (development only).                                                                                                                                                                            |
+| `WORKER_CONCURRENCY`                                                               | `2`                           | Jobs a runner replica executes at once.                                                                                                                                                                                  |
+| `MAX_ACTIVE_RUNS`                                                                  | `20`                          | Queued plus running runs allowed per workspace; `0` means no limit.                                                                                                                                                      |
+| `RUN_TIMEOUT_SECONDS`                                                              | `0`                           | Installation-wide wall-clock cap on one run; `0` means none, so runs are bounded only by their agents' time limits (which may also be 0).                                                                                |
+| `MODEL_REQUEST_TIMEOUT_SECONDS`                                                    | `600`                         | How long one model request, including a streamed reply, may take before it is retried.                                                                                                                                   |
+| `MAX_RESUMES`                                                                      | `3`                           | Automatic resumes of a run whose runner died before it is marked interrupted.                                                                                                                                            |
+| `MAX_UPLOAD_MB`                                                                    | `20`                          | Knowledge document upload limit.                                                                                                                                                                                         |
+| `TRUST_PROXY`                                                                      | `0`                           | Set to `1` only behind exactly one trusted reverse proxy.                                                                                                                                                                |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM` | unset                         | Installation-wide email defaults (for example Amazon SES); workspace settings override them.                                                                                                                             |
+| `VECTOR_STORE`                                                                     | `weaviate`                    | Vector store for new knowledge bases: `weaviate`, `qdrant`, `opensearch`, `elasticsearch` or `openai`. Existing bases keep theirs.                                                                                       |
+| `QDRANT_URL`, `OPENSEARCH_URL`, `ELASTICSEARCH_URL`, `OPENAI_VECTOR_STORES_URL`    | unset                         | Enable the other stores, with their credentials (`QDRANT_API_KEY`, `OPENSEARCH_USERNAME`/`OPENSEARCH_PASSWORD`, `ELASTICSEARCH_API_KEY`, `OPENAI_VECTOR_STORES_API_KEY`). See [docs/vector-stores.md](vector-stores.md). |
+
+MongoDB, RabbitMQ, Weaviate and Qdrant credentials are generated into `.env` and consumed by Compose. Knowledge vectors live in a pluggable vector store. Each knowledge base records its store when it is created, and a base with documents cannot move to another store. See [docs/vector-stores.md](vector-stores.md). The `files` volume is mounted at `/data` in the API and runner; use [compose.shared-fs.yaml](../compose.shared-fs.yaml) for a mounted shared filesystem. Scale runners with `docker compose up -d --scale runner=2`, keeping the same database, broker, Weaviate instance, credentials and filesystem for every replica.
+
+## Operations and limits
+
+- Keep `.env` backed up with the volumes. Encrypted credentials cannot be recovered without `ENCRYPTION_KEY`.
+- The default HTTP listener binds to loopback. For a server, put a TLS reverse proxy in front and set `PUBLIC_URL` to the HTTPS URL.
+- A Mongo run record is the durable outbox. Queue deliveries are at least once; atomic claims prevent two workers from executing the same active run.
+- A run whose runner dies resumes from its checkpoint when the in-flight step had no external side effects (`resumePolicy: safe`, the default). A run interrupted during external work is marked **interrupted**, not replayed. Review its trace before starting a new run. This is not an exactly-once guarantee for external side effects.
+- Agent tool errors, including arguments that fail the tool's schema, return to the model for correction. An explicit harness tool error fails that run. No potentially mutating MCP tool is retried automatically.
+- Harnesses have one Start and at least one Finish, every step needs a path to Finish, and cycles are bounded by the step budget (default 100, maximum 500). Agent turns and timeouts are bounded separately. Templates are not code: only `input`, `last`, `steps.<id>` and `payload.<field>` are evaluated.
+- Parallel steps wait for all agents; a failed sibling aborts the others' in-flight requests but cannot undo completed external actions.
+- Schedules dispatch while the API is running; after downtime an overdue slot fires once. Daily and weekly schedules wait for their first wall-clock time instead of firing on save.
+- Conversations longer than a provider's context window are compacted before each model call (older tool results first, then completed turns). A provider limit error is parsed, the learned window is stored on the provider, and the call is retried up to twice.
+- Knowledge indexing is retriable and replaces partial vectors. A provider's embedding configuration cannot change while a knowledge base uses it. Scanned PDFs need OCR before upload; extraction stops at 2 million characters or 4,000 chunks per document.
+- Run history and documents persist until you remove them or their volumes. Backups and retention are the operator's responsibility.
+
+See [operations](operations.md) for backup and recovery and [design notes](design.md) for execution guarantees.
+
+## Upgrade
+
+Back up your configuration and volumes, then run `git pull --ff-only` and `./start.sh` from your clone. Existing private accounts keep separate workspaces and their data. See [upgrade details](operations.md#upgrading-to-02).
+
+## Development and verification
+
+Node.js 22 or later is required outside Docker.
+
+```sh
+npm ci
+npm run typecheck
+npm test
+npm run build
+```
+
+Run the complete isolated-stack suite (creates and removes **test-only** Compose volumes):
+
+```sh
+./scripts/test-stack.sh
+```
+
+Include browser tests (Chromium, plus WebKit for the editor drag and drop) with `BROWSER_TESTS=1 ./scripts/test-stack.sh` after `npx playwright install --with-deps chromium webkit`, or `BROWSER_TESTS=container ./scripts/test-stack.sh` on Linux to use the matching Playwright container.
+
+For UI development against the running local Compose API, use `npm run dev` and open `http://localhost:5173`; set `DEV_API_URL` and `DEV_API_ORIGIN` for a non-default API. The fixtures provide deterministic model, MCP, OAuth and (JSON-transport) email endpoints; MongoDB, RabbitMQ, Weaviate, the API and the runner are real containers. Tests cover protocol plumbing, streaming, agentic patterns, queue recovery and resume, email, and access isolation; hosted models and your particular MCP services should also be checked with their real credentials before release.
+
+The GitHub Actions harness builds and tests every push and pull request. Installation credentials are generated locally; `.env`, data, dependency folders and test artifacts are excluded from version control.
+
+## License
+
+Apache License 2.0. See [LICENSE](../LICENSE) and [NOTICE](../NOTICE). Third-party packages and container images retain their respective licenses.

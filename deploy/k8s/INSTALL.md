@@ -448,7 +448,7 @@ The application now runs, but it has no inference model configured:
 1. Open Settings and add your model provider's endpoint and credentials. Select **LLM**, **Vision** or
    **Embedding** as its type, and enter one model ID per entry. Use the
    connection test before saving it as the workspace default. See the
-   [model-provider guide](../../README.md#1-connect-a-model-provider).
+   [model-provider guide](../../docs/platform.md#1-connect-a-model-provider).
 2. Open Harnesses, create a simple harness with an agent using that provider, and run a prompt
    in Playground. Check the execution trace and saved output.
 3. To give agents external tools, add an MCP server through **MCP connections**, discover its
@@ -468,7 +468,7 @@ conversation uses the primary model. The connection test for Vision sends a smal
 
 The upgrade automatically splits old combined chat/embedding definitions and preserves notebook
 references. Reclassify your image-capable entries as Vision after upgrading. See the
-[model-provider guide](../../README.md#1-connect-a-model-provider) for migration and storage details.
+[model-provider guide](../../docs/platform.md#1-connect-a-model-provider) for migration and storage details.
 Images use the existing file volume and MongoDB backup procedure; removed draft uploads currently
 remain stored, subject to a 1 GB soft quota per workspace.
 
