@@ -2767,3 +2767,97 @@ textarea::placeholder {
   color: var(--muted);
   font-size: 11px;
 }
+
+/* Health (#86) */
+.health-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  margin-bottom: 12px;
+  border: 1px solid var(--border-soft);
+}
+.health-banner .button {
+  margin-left: auto;
+}
+.level-green {
+  background: #e6f4ec;
+  color: #1e6b45;
+}
+.level-amber {
+  background: #fdf3e1;
+  color: #8a5a00;
+}
+.level-red {
+  background: #fbe9e7;
+  color: #a3291c;
+}
+.gap-strip {
+  display: inline-flex;
+  gap: 1px;
+  align-items: center;
+  flex-wrap: nowrap;
+}
+.gap-strip i {
+  width: 4px;
+  height: 14px;
+  border-radius: 1px;
+}
+.gap-strip i.has {
+  background: #2e8b57;
+}
+.gap-strip i.gap {
+  background: transparent;
+  border: 1px solid #c0392b;
+  box-sizing: border-box;
+}
+.health-issues {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+}
+.health-failures ul,
+.health-pipelines ul {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.health-failures li,
+.health-pipelines li {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-size: 13px;
+}
+.health h3 {
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  margin: 10px 0 6px;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.data-freshness {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  margin-right: 10px;
+}
+.data-freshness i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+}

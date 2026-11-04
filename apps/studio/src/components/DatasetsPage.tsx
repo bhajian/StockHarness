@@ -49,6 +49,7 @@ import { Tabs } from './kit';
 import { TransformsTab } from './TransformsTab';
 import { PipelinesTab } from './PipelinesTab';
 import { CatalogTab } from './CatalogTab';
+import { HealthTab } from './HealthTab';
 import {
   DATASET_TABS,
   datasetsPath,
@@ -127,11 +128,7 @@ export function DatasetsPage(props: Props) {
       ) : route.tab === 'catalog' ? (
         <CatalogTab item={route.item} go={go} isAdmin={props.isAdmin} data={props.data} />
       ) : (
-        <Empty
-          icon={<Activity size={28} />}
-          title="Health"
-          text="Freshness and failures across syncs and transforms."
-        />
+        <HealthTab go={go} />
       )}
     </>
   );

@@ -595,3 +595,45 @@ export async function exportCatalogMarkdown(collections: string[]) {
   if (!r.ok) throw new Error(`Export failed (${r.status})`);
   return r.text();
 }
+
+// Data health (#86).
+export type HealthRow = {
+  collection: string;
+  layer: 1 | 2 | null;
+  freshness: 'fresh' | 'stale' | 'failed' | 'unknown';
+  lagSessions?: number;
+  lastUpdated?: string;
+  dateMax?: string;
+  rows: number;
+  coveragePct?: number;
+  dq: { error: number; warn: number };
+  caveats: { blocking: number; warn: number };
+  producer?: { type: string; name: string };
+  error?: string;
+  gaps: { date: string; rows: number | null }[] | null;
+};
+export type DataHealth = {
+  kpis: { fresh: number; stale: number; failed: number; drift: number };
+  indicator: { level: 'green' | 'amber' | 'red'; text: string };
+  expected: string[];
+  collections: HealthRow[];
+  syncs: { total: number; late: string[]; failed: { name: string; error?: string }[] };
+  transforms: { name: string; status: string; error?: string; finishedAt?: string }[];
+  pipelines: {
+    name: string;
+    runId: string;
+    period: string;
+    status: string;
+    blockedAt?: string;
+    blockedStatus?: string;
+  }[];
+};
+export const fetchDataHealth = (days = 60) => api<DataHealth>(`/datasets/health?days=${days}`);
+export async function fetchGaps(collection: string, days = 60) {
+  const r = await fetch(`/api/datasets/health/${encodeURIComponent(collection)}/gaps?days=${days}`, {
+    credentials: 'same-origin',
+  });
+  if (r.status === 202) return null;
+  if (!r.ok) throw new Error(`Gaps failed (${r.status})`);
+  return (await r.json()) as { collection: string; cells: { date: string; rows: number | null }[] };
+}
