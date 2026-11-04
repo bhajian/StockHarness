@@ -73,6 +73,22 @@ test('Datasets tabs and a Flatten transform created in the UI', async ({ page })
   ]);
   expect(saved.code).toContain('oh.output("company_listing")');
 
+  // Preview (#95): runs in the executor on a sample, checks every output, writes nothing.
+  await page.getByRole('button', { name: 'Preview' }).click();
+  const bar = page.locator('.validation-bar');
+  await expect(bar).toContainText('Key is unique', { timeout: 120000 });
+  await expect(bar).toContainText('company_listing');
+  const panel = page.locator('.preview-panel');
+  await expect(panel).toContainText('nothing written');
+  await expect(panel.locator('td', { hasText: 'Triple A' })).toBeVisible();
+  await panel.getByLabel('Preview output').selectOption('company_classification');
+  await expect(panel.locator('td', { hasText: 'Tech' })).toBeVisible();
+  await panel.getByRole('tab', { name: 'Schema' }).click();
+  await expect(panel).toContainText('sector');
+  const collections = await api(`/mongodb/${mongo.id}/collections`);
+  expect(JSON.stringify(collections)).toContain('company_profiles');
+  expect(JSON.stringify(collections)).not.toContain('company_identity');
+
   // Back to the list: the transform, its inputs and outputs; browser back returns to the editor.
   await page.locator('.transform-editor-head').getByRole('button', { name: 'Transforms' }).click();
   const row = page.locator('.transforms-table tr', { hasText: 'profiles_flat' });

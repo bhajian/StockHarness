@@ -25,8 +25,10 @@ const report = z.object({
   truncated: z.boolean().optional(),
   result: z.unknown().optional(),
   durationMs: z.number().int().min(0).optional(),
-  /** SDK stats and oh.describe() docs (#90). */
-  meta: z.object({ stats: z.unknown().optional(), describe: z.unknown().optional() }).optional(),
+  /** SDK stats and oh.describe() docs (#90); preview captures (#95). */
+  meta: z
+    .object({ stats: z.unknown().optional(), describe: z.unknown().optional(), preview: z.unknown().optional() })
+    .optional(),
 });
 function token(header: string | undefined) {
   const match = /^Bearer\s+(\S+)$/.exec(header ?? '');

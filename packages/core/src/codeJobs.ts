@@ -35,7 +35,9 @@ export type CodeJobSpec = {
    * Transform context (#90): OH_WINDOW, OH_OUTPUTS, OH_DQ_COLLECTION for the `oh` SDK. Only these names are
    * accepted by the executor, which never lets job env set other OH_* variables.
    */
-  context?: Partial<Record<'OH_WINDOW' | 'OH_OUTPUTS' | 'OH_DQ_COLLECTION', string>>;
+  context?: Partial<
+    Record<'OH_WINDOW' | 'OH_OUTPUTS' | 'OH_DQ_COLLECTION' | 'OH_PREVIEW' | 'OH_SAMPLE_SYMBOLS', string>
+  >;
 };
 export type CodeJobOutcome = {
   id: string;
@@ -48,7 +50,7 @@ export type CodeJobOutcome = {
   result?: unknown;
   durationMs?: number;
   /** What the SDK reported (#90): per-collection read/write/dq stats and oh.describe() docs. */
-  meta?: { stats?: unknown; describe?: unknown };
+  meta?: { stats?: unknown; describe?: unknown; preview?: unknown };
 };
 export type CodeJobRecord = CodeJobSpec &
   Omit<CodeJobOutcome, 'status' | 'id'> & {

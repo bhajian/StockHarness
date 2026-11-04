@@ -51,6 +51,14 @@ _client = None
 # other collection are refused, so a transform can only write what it declares.
 _OUTPUTS: dict[str, dict] = {o["collection"]: o for o in json.loads(os.environ.get("OH_OUTPUTS") or "[]")}
 _DQ_COLLECTION = os.environ.get("OH_DQ_COLLECTION") or (next(iter(_OUTPUTS)) if _OUTPUTS else "")
+# Preview runs (#95): writes are captured (first rows + checks per output) instead of written, dq issues are
+# counted but not stored, and reads of symbol-keyed collections are narrowed to a sample of symbols.
+_PREVIEW = os.environ.get("OH_PREVIEW") == "1"
+_PREVIEW_PATH = os.environ.get("OH_PREVIEW_PATH", "")
+_SAMPLE: list[str] = json.loads(os.environ.get("OH_SAMPLE_SYMBOLS") or "[]")
+_PREVIEW_ROWS = 100
+_preview: dict[str, dict] = {}
+_has_symbol: dict[str, bool] = {}
 
 
 def _db():
@@ -77,13 +85,91 @@ def _guard(collection: str) -> None:
         )
 
 
+def _sampled(collection: str, filter: dict | None) -> dict:
+    """In a preview, narrow reads of collections that have a symbol field to the sample symbols."""
+    filter = filter or {}
+    if not (_PREVIEW and _SAMPLE) or "symbol" in filter:
+        return filter
+    if collection not in _has_symbol:
+        _has_symbol[collection] = _db()[collection].find_one({"symbol": {"$exists": True}}, {"_id": 1}) is not None
+    if not _has_symbol[collection]:
+        return filter
+    narrowed = {"symbol": {"$in": _SAMPLE}}
+    return {"$and": [filter, narrowed]} if filter else narrowed
+
+
+def _capture(collection: str, rows: list[dict], key: list[str] | None, known_at_field: str | None) -> dict:
+    """Preview: record rows and checks for an output instead of writing (#95)."""
+    p = _preview.setdefault(collection, {"count": 0, "rows": [], "dup_keys": 0, "missing_key": 0,
+                                         "missing_known_at": 0, "fields": {}, "_seen": set()})
+    for r in rows:
+        r = {k: v for k, v in r.items() if k not in ("_id", "_hash")}
+        p["count"] += 1
+        if key:
+            ident = tuple(r.get(k) for k in key)
+            if any(v is None for v in ident):
+                p["missing_key"] += 1
+            elif ident in p["_seen"]:
+                p["dup_keys"] += 1
+            else:
+                p["_seen"].add(ident)
+        if known_at_field and r.get(known_at_field) in (None, ""):
+            p["missing_known_at"] += 1
+        for k, v in r.items():
+            f = p["fields"].setdefault(k, {"nonnull": 0, "type": None})
+            if v is not None:
+                f["nonnull"] += 1
+                f["type"] = f["type"] or type(v).__name__
+        if len(p["rows"]) < _PREVIEW_ROWS:
+            p["rows"].append({k: (v if not isinstance(v, str) or len(v) <= 300 else v[:300] + "…") for k, v in r.items()})
+    _count(collection, "previewed", len(rows))
+    return {"written": 0, "unchanged": 0, "previewed": len(rows)}
+
+
+def _finite(v):
+    """JSON has no NaN/Infinity (e.g. pct_change after a zero close): show them as strings in the preview."""
+    import math
+
+    if isinstance(v, float) and not math.isfinite(v):
+        return str(v)
+    if isinstance(v, dict):
+        return {k: _finite(x) for k, x in v.items()}
+    if isinstance(v, (list, tuple)):
+        return [_finite(x) for x in v]
+    return v
+
+
+def _write_preview() -> None:
+    if not (_PREVIEW and _PREVIEW_PATH):
+        return
+    out = {}
+    for c, p in _preview.items():
+        out[c] = {k: v for k, v in p.items() if k != "_seen"}
+        # A field missing from a row counts as null for that row.
+        out[c]["fields"] = {
+            k: {"type": f["type"], "null_pct": round(100 * (1 - f["nonnull"] / p["count"]), 1) if p["count"] else 0}
+            for k, f in p["fields"].items()
+        }
+    out = _finite(out)
+    body = json.dumps(out, default=str, allow_nan=False)
+    for keep in (20, 5, 0):  # keep the job report (stdout + result + meta) well under the API's 1 MB body limit
+        if len(body) <= 400_000:
+            break
+        for p in out.values():
+            p["rows"] = p["rows"][:keep]
+            p["truncated"] = True
+        body = json.dumps(out, default=str, allow_nan=False)
+    with open(_PREVIEW_PATH, "w", encoding="utf-8") as handle:
+        handle.write(body)
+
+
 def read(collection: str, filter: dict | None = None, *, limit: int | None = None, sort: list | None = None,
          projection: dict | None = None, columns: list[str] | None = None) -> list[dict]:
     """Documents of a collection as plain dicts (``_id`` is kept as a string). ``columns`` limits the fields."""
     if columns and projection is None:
         projection = {c: 1 for c in columns}
         projection.setdefault("_id", 0)
-    cursor = _db()[collection].find(filter or {}, projection)
+    cursor = _db()[collection].find(_sampled(collection, filter), projection)
     if sort:
         cursor = cursor.sort(sort)
     if limit:
@@ -116,7 +202,7 @@ def _read_chunks(collection, filter, chunksize, *, columns=None, sort=None, proj
     if columns and projection is None:
         projection = {c: 1 for c in columns}
         projection.setdefault("_id", 0)
-    cursor = _db()[collection].find(filter or {}, projection, batch_size=min(chunksize, 10000))
+    cursor = _db()[collection].find(_sampled(collection, filter), projection, batch_size=min(chunksize, 10000))
     if sort:
         cursor = cursor.sort(sort)
     if limit:
@@ -145,6 +231,10 @@ def write(collection: str, records: Iterable[dict], *, mode: str = "append") -> 
         record = dict(record)
         record.pop("_id", None)
         docs.append(record)
+    if _PREVIEW:
+        cfg = _OUTPUTS.get(collection, {})
+        known = None if cfg.get("static") else cfg.get("known_at_field")
+        return _capture(collection, docs, cfg.get("key"), known)["previewed"]
     target = _db()[collection]
     if mode == "replace":
         target.delete_many({})
@@ -234,6 +324,8 @@ def upsert(collection: str, records: Iterable[dict], *, key: list[str], known_at
     _guard(collection)
     if not key:
         raise ValueError("upsert needs a key, e.g. key=['security_id', 'date']")
+    if _PREVIEW:
+        return _capture(collection, [dict(r) for r in records], key, known_at_field)
     rows = []
     for record in records:
         record = dict(record)
@@ -285,7 +377,7 @@ class _Output:
         if mode == "upsert":
             return upsert(self.collection, records, key=self.cfg["key"], known_at_field=self._known)
         rows = list(records)
-        if self._known:
+        if self._known and not _PREVIEW:
             for r in rows:
                 if r.get(self._known) in (None, ""):
                     raise ValueError(f"{self.collection}: row without {self._known}: {str(r)[:200]}")
@@ -337,6 +429,15 @@ def _flush_dq() -> None:
     now = datetime.now(timezone.utc)
     for d in _dq_buffer:
         _count(d["collection"], "dq", 1)
+    if _PREVIEW:  # counted, with the first issues kept for the preview; nothing is stored
+        for d in _dq_buffer:
+            issues = _preview.setdefault(d["collection"], {"count": 0, "rows": [], "dup_keys": 0, "missing_key": 0,
+                                                           "missing_known_at": 0, "fields": {}, "_seen": set()})
+            issues.setdefault("dq", [])
+            if len(issues["dq"]) < 50:
+                issues["dq"].append({k: d[k] for k in ("issue_type", "severity", "security_id", "date")})
+        _dq_buffer.clear()
+        return
     ops = [
         UpdateOne(
             {k: d[k] for k in ("collection", "issue_type", "security_id", "date")},
@@ -457,5 +558,6 @@ def _write_stats() -> None:
 
 
 # At exit: buffered data-quality issues are written (also every 1,000 issues), then the stats file.
+_atexit.register(_write_preview)
 _atexit.register(_write_stats)
 _atexit.register(lambda: _dq_buffer and _flush_dq())

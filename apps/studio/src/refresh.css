@@ -2056,3 +2056,33 @@ textarea::placeholder {
   font-size: 12px;
   white-space: pre-wrap;
 }
+
+/* Transform preview (#95) */
+.validation-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  align-items: center;
+  padding: 8px 10px;
+  margin-bottom: 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--surface);
+}
+.validation-bar.muted {
+  color: var(--faint);
+  font-size: 13px;
+}
+.validation-output {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+}
+.validation-output code {
+  font-size: 12px;
+  margin-right: 2px;
+}
+.preview-panel select {
+  margin-left: auto;
+}
