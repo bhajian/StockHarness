@@ -17,6 +17,12 @@ import {
 } from '../../../packages/core/src/datasetSync.js';
 import { z } from 'zod';
 import {
+  backfills,
+  backfillAction,
+  backfillProgress,
+  createBackfill,
+} from '../../../packages/core/src/datasetBackfill.js';
+import {
   exportDatasetSyncConfig,
   planDatasetSyncImport,
   applyDatasetSyncImport,
@@ -45,6 +51,14 @@ async function listSyncs(ownerId: string) {
     .project<{ syncId: string }>({ syncId: 1 })
     .toArray();
   const busy = new Set(running.map((r) => r.syncId));
+  const latest = await backfills()
+    .aggregate<{ _id: string; b: any }>([
+      { $match: { ownerId } },
+      { $sort: { createdAt: -1 } },
+      { $group: { _id: '$syncId', b: { $first: '$$ROOT' } } },
+    ])
+    .toArray();
+  const bfBySync = new Map(latest.map((x) => [x._id, { status: x.b.status, ...backfillProgress(x.b) }]));
   const q = syncQueue.status();
   const queued = new Set(q.queued.map((j) => j.id));
   return items.map((s) => ({
@@ -52,6 +66,7 @@ async function listSyncs(ownerId: string) {
     running: busy.has(s._id) || q.running.some((j) => j.id === s._id),
     queued: queued.has(s._id),
     effectivePriority: effectivePriority(s),
+    backfill: bfBySync.get(s._id),
   }));
 }
 // The studio auto-loads `/datasetSyncs` (collections key); `/dataset-syncs` is the REST alias.
@@ -158,6 +173,44 @@ datasetSyncRouter.post('/dataset-syncs/probe-depth', async (req, res) => {
     );
   res.json(result);
 });
+
+// Backfill (#80): history in resumable batches at the lowest FMP priority; never touches the cursor.
+const backfillInput = z.object({
+  from: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional(),
+  to: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional(),
+  batchSize: z.number().int().min(1).max(500).optional(),
+});
+datasetSyncRouter.post('/dataset-syncs/:id/backfill', async (req, res) => {
+  assertAdmin(req.principal!.user.role);
+  const b = await createBackfill(req.principal!.tenantId, String(req.params.id), {
+    ...backfillInput.parse(req.body ?? {}),
+    requestedBy: req.principal!.user._id,
+  });
+  res.status(202).json(publicBackfill(b));
+});
+datasetSyncRouter.get('/dataset-syncs/:id/backfill', async (req, res) => {
+  const b = await backfills()
+    .find({ ownerId: req.principal!.tenantId, syncId: String(req.params.id) })
+    .sort({ createdAt: -1 })
+    .limit(1)
+    .next();
+  res.json(b ? publicBackfill(b) : null);
+});
+datasetSyncRouter.post('/dataset-syncs/:id/backfill/:action', async (req, res) => {
+  assertAdmin(req.principal!.user.role);
+  const action = z.enum(['pause', 'resume', 'cancel', 'retry']).parse(req.params.action);
+  res.json(publicBackfill((await backfillAction(req.principal!.tenantId, String(req.params.id), action))!));
+});
+function publicBackfill(b: any) {
+  const { _id, symbols, ...rest } = b;
+  return { id: _id, ...rest, symbolCount: symbols?.length, progress: backfillProgress(b) };
+}
 
 // Apply one action to many syncs at once (Datasets toolbar). `run` returns immediately; the selected
 // syncs then run one after another in the background.

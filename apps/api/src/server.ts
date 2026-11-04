@@ -14,6 +14,7 @@ import {
   dispatchDatasetSyncs,
   recoverInterruptedDatasetSyncRuns,
 } from '../../../packages/core/src/datasetSync.js';
+import { dispatchBackfills, recoverBackfills } from '../../../packages/core/src/datasetBackfill.js';
 import { safeError } from '../../../packages/core/src/security.js';
 import { dispatchConfigBackup } from './configBackup.js';
 import { refreshAllCatalogs } from './catalog.js';
@@ -21,6 +22,9 @@ import { refreshAllCatalogs } from './catalog.js';
 await connectDatabase();
 const interrupted = await recoverInterruptedDatasetSyncRuns();
 if (interrupted) console.warn(`Marked ${interrupted} interrupted dataset sync run(s) as failed`);
+// Backfills are persisted: ones that were running resume from their last finished symbol (#80).
+const resumed = await recoverBackfills();
+if (resumed) console.warn(`Resuming ${resumed} dataset backfill(s)`);
 await provisionMongoMcp(
   async () =>
     (await collection('connections').distinct('ownerId', { kind: 'mongodb', builtIn: true })) as string[],
@@ -39,6 +43,7 @@ async function tick() {
     await dispatchPending();
     await dispatchSchedules();
     await dispatchDatasetSyncs();
+    await dispatchBackfills();
     await deliverWebhooks();
     await dispatchReflections();
     await dispatchGuardrailEvaluations();

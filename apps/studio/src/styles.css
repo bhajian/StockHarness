@@ -7531,3 +7531,11 @@ details.advanced summary {
 .priority-pill small { font-weight: 400; opacity: 0.7; }
 .depth-fields { display: flex; flex-direction: column; gap: 8px; }
 .depth-probe { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.backfill-panel { display: flex; flex-direction: column; gap: 8px; padding: 12px; border: 1px solid var(--border, #e5e7eb); border-radius: 10px; }
+.backfill-start { display: flex; align-items: flex-end; gap: 10px; flex-wrap: wrap; }
+.backfill-bar { height: 8px; border-radius: 999px; background: var(--surface-2, #f3f4f6); overflow: hidden; }
+.backfill-bar span { display: block; height: 100%; background: var(--blue, #3b82f6); transition: width 0.4s; }
+.backfill-actions { display: flex; gap: 8px; }
+.backfill-badge { margin-left: 6px; font-size: 11px; padding: 1px 6px; border-radius: 999px; background: #e8f0fe; color: #1d4ed8; }
+.backfill-badge.paused { background: #f3f4f6; color: #6b7280; }
+.backfill-badge.failed { background: #fff1eb; color: #bb785c; }
