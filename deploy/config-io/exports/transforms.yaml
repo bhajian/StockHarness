@@ -52,6 +52,84 @@ spec:
 apiVersion: stockharness/v1
 kind: Transform
 metadata:
+  name: fundamentals_pit
+  version: "1"
+spec:
+  description: "Quarterly income statement, balance sheet and cash flow merged into point-in-time versions per security: a restatement adds a version (is_latest marks the newest), known_at is the SEC acceptance time, as_of_date the first session after it, and TTM figures are as known then."
+  code: |
+    import oh
+    from pipeline.layer2.fundamentals_pit import compute
+
+    out = oh.output("fundamentals_pit")
+    read = lambda c, f=None, cols=None, sort=None: oh.read(c, f, columns=cols, sort=sort)
+    for rows, issues in compute(read):
+        out.upsert(rows)
+        for i in issues:
+            oh.dq(i["issue_type"], i["severity"], security_id=i["security_id"], date=i["date"])
+  inputs:
+    - securities
+    - trading_calendar
+    - income_statement
+    - balance_sheet
+    - cash_flow
+  outputs:
+    - collection: fundamentals_pit
+      key:
+        - security_id
+        - period_end
+        - version
+      write_mode: upsert
+      known_at_field: known_at
+      as_of_field: as_of_date
+      static: false
+      description: "One row per security, fiscal quarter and version. Filter as_of_date <= D and take the highest version per period for what was known on D. Values are in the reported currency: is_usd is false for the ~9% non-USD filers (no FX conversion yet)."
+      grain: security × fiscal quarter × version
+      fields:
+        period_end:
+          description: Fiscal quarter end date
+        version:
+          description: 1 = first filing; each later acceptance (restatement) adds one
+        is_latest:
+          description: The newest version of this period
+        known_at:
+          description: SEC acceptance time (UTC); date-only acceptances mean the end of that day
+        currency:
+          description: Reported currency
+        is_usd:
+          description: Reported in USD (non-USD values are not converted)
+        revenue:
+          description: Revenue for the quarter
+          unit: reported currency
+        net_income:
+          description: Net income for the quarter
+          unit: reported currency
+        eps_diluted:
+          description: Diluted EPS for the quarter
+          unit: reported currency per share
+        free_cash_flow:
+          description: Operating cash flow minus capex for the quarter
+          unit: reported currency
+        ttm_revenue:
+          description: Sum of the last four consecutive quarters as known at known_at
+          unit: reported currency
+        ttm_net_income:
+          description: Trailing-twelve-month net income as known at known_at
+          unit: reported currency
+  trigger:
+    after:
+      - dataset:income_statement
+      - dataset:balance_sheet
+      - dataset:cash_flow
+  incremental:
+    mode: full
+    lookback_days: 0
+  params: {}
+  secrets: []
+  enabled: true
+---
+apiVersion: stockharness/v1
+kind: Transform
+metadata:
   name: macro_daily
   version: "1"
 spec:

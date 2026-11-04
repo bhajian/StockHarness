@@ -86,6 +86,9 @@ before(async () => {
   // Disabled syncs, so the transforms' dataset triggers validate (each names the collection a sync writes).
   for (const dataset of [
     'company_profiles',
+    'income_statement',
+    'balance_sheet',
+    'cash_flow',
     'dividends_calendar',
     'splits_calendar',
     'eod_prices',
@@ -143,6 +146,59 @@ before(async () => {
     { symbol: '^GSPC', date: '2016-01-05', close: 2020 },
     { symbol: '^VIX', date: '2016-01-04', close: 20 },
   ]);
+  // AAA quarterly statements 2015-Q1..Q4 (filed after each quarter); Q4 restated later; one unbalanced balance sheet.
+  const q = [
+    ['2015-03-31', 'Q1', '2015-04-28 16:30:00'],
+    ['2015-06-30', 'Q2', '2015-07-28 16:30:00'],
+    ['2015-09-30', 'Q3', '2015-10-27 16:30:00'],
+    ['2015-12-31', 'Q4', '2016-01-26 16:30:00'],
+  ];
+  await insert('income_statement', [
+    ...q.map(([date, period, acceptedDate], i) => ({
+      symbol: 'AAA',
+      date,
+      period,
+      acceptedDate,
+      fiscalYear: '2015',
+      reportedCurrency: 'USD',
+      revenue: 100 + i,
+      netIncome: 10,
+    })),
+    {
+      symbol: 'AAA',
+      date: '2015-12-31',
+      period: 'Q4',
+      acceptedDate: '2016-03-01 08:00:00',
+      fiscalYear: '2015',
+      reportedCurrency: 'USD',
+      revenue: 90,
+      netIncome: 9,
+    },
+  ]);
+  await insert(
+    'balance_sheet',
+    q.map(([date, period, acceptedDate], i) => ({
+      symbol: 'AAA',
+      date,
+      period,
+      acceptedDate,
+      totalAssets: 1000,
+      totalLiabilities: 600,
+      totalEquity: i === 2 ? 100 : 400,
+    })),
+  );
+  await insert(
+    'cash_flow',
+    q.map(([date, period, acceptedDate]) => ({
+      symbol: 'AAA',
+      date,
+      period,
+      acceptedDate,
+      operatingCashFlow: 20,
+      capitalExpenditure: -5,
+      freeCashFlow: 15,
+    })),
+  );
   await insert('sector_performance', [{ date: '2016-01-04', sector: 'Technology', averageChange: 0.5 }]);
   await insert('eod_prices', [
     // AAA has one zero close (a DQ error) on 2016-01-07.
@@ -274,4 +330,34 @@ test('corporate_actions, prices_daily (H1, H2, H3) and macro_daily', async () =>
   assert.ok(Math.abs(m[1].spx_ret_1d - 0.01) < 1e-9);
   for (const c of ['corporate_actions', 'prices_daily', 'macro_daily'])
     assert.equal((await ok(`/catalog/${c}`)).producedBy[0].name, c);
+});
+
+test('fundamentals_pit (#100): restatement versions, known_at / as_of, TTM as known, balance check', async () => {
+  const run = await runAndWait('fundamentals_pit');
+  assert.equal(run.status, 'succeeded', run.stderr);
+  const rows = (await docs('fundamentals_pit', `&sort=${encodeURIComponent('{"period_end":1,"version":1}')}`))
+    .documents;
+  assert.deepEqual(
+    rows.map((r: any) => `${r.period_end}#${r.version}${r.is_latest ? '*' : ''}`),
+    ['2015-03-31#1*', '2015-06-30#1*', '2015-09-30#1*', '2015-12-31#1', '2015-12-31#2*'],
+  );
+  const [q4v1, q4v2] = rows.slice(3);
+  assert.equal(q4v1.known_at, '2016-01-26T21:30:00+00:00', 'Eastern acceptance -> UTC');
+  assert.equal(q4v1.as_of_date, '2016-01-27', 'usable from the next session (the calendar)');
+  assert.deepEqual(
+    [q4v1.ttm_revenue, q4v2.ttm_revenue],
+    [406, 393],
+    'TTM with Q4 as originally filed, then restated',
+  );
+  assert.equal(q4v2.as_of_date, '2016-03-01', 'accepted before the open: usable that day');
+  assert.equal(q4v1.free_cash_flow, 15);
+  const dq = await docs(
+    'dq_issues',
+    `&filter=${encodeURIComponent('{"collection":"fundamentals_pit","issue_type":"balance_sheet_identity"}')}`,
+  );
+  assert.equal(dq.total, 1, 'the unbalanced Q3 balance sheet');
+  const again = await runAndWait('fundamentals_pit');
+  assert.equal(again.outputs.fundamentals_pit.written, 0, 'idempotent');
+  const cat = await ok('/catalog/fundamentals_pit');
+  assert.deepEqual([cat.layer, cat.timeSemantics.status], [2, 'pit']);
 });
