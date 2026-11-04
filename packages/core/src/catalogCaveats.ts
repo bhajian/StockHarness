@@ -12,7 +12,7 @@ export type Caveat = {
   /** Issue that lifts it, when known. */
   fix?: string;
 };
-type Ctx = { collection: string; dateMin?: string; dateField?: string };
+type Ctx = { collection: string; dateMin?: string; dateField?: string; firstSnapshot?: string };
 type Builtin = {
   id: string;
   severity: CaveatSeverity;
@@ -63,7 +63,7 @@ export const BUILTIN_CAVEATS: Builtin[] = [
     fix: '#113 (forward_only)',
     applies: (c) => snapshots.has(c.collection),
     text: (c) =>
-      `No history before the first weekly snapshot${c.dateField === 'snapshot_date' && c.dateMin ? ` (${c.dateMin})` : ''}: FMP keeps no estimate/consensus history. Backtests must not use this data before that date; strategies built on it are forward-only.`,
+      `No history before the first weekly snapshot${c.firstSnapshot ? ` (${c.firstSnapshot})` : ''}: FMP keeps no estimate/consensus history. Backtests must not use this data before that date; strategies built on it are forward-only.`,
   },
   {
     id: 'feed-history',
