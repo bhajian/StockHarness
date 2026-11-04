@@ -63,6 +63,7 @@ import { datasetSyncRouter } from './datasetSyncs.js';
 import { objectsRouter } from './objects.js';
 import { configBackupRouter } from './configBackup.js';
 import { catalogRouter } from './catalog.js';
+import { transformsRouter } from './transformsApi.js';
 import { openshell } from './openshell.js';
 import { tenantView, type Tenant } from './tenant.js';
 import { openHarnessApi, openHarnessErrors } from './openharness/index.js';
@@ -681,6 +682,7 @@ app.use('/api', requireSession, datasetSyncRouter);
 app.use('/api', requireSession, objectsRouter);
 app.use('/api', requireSession, configBackupRouter);
 app.use('/api', requireSession, catalogRouter);
+app.use('/api', requireSession, transformsRouter);
 app.use('/api', requireSession, resources);
 app.use('/api', (_req, _res, next) => next(new HttpError(404, 'API endpoint not found')));
 

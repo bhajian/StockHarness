@@ -34,6 +34,7 @@ FILES = [
     ("Agent", "agents.yaml", []),
     ("Harness", "harnesses.yaml", ["workflows.yaml"]),
     ("DatasetSync", "dataset-syncs.yaml", ["dataset-syncs.json"]),
+    ("Transform", "transforms.yaml", []),
     ("CatalogEntry", "catalog.yaml", []),
 ]
 BASE = os.environ.get("OH_BASE", "https://openharness.faberiq.ai").rstrip("/")
