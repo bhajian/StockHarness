@@ -1,0 +1,86 @@
+// #73 / #94: Datasets tabs route by URL; a transform is created from the Flatten template, saved and listed,
+// entirely in the UI; the editor shows Monaco, the inputs pane and the outputs panel.
+import { readFileSync } from 'node:fs';
+import { test, expect, type Page } from '@playwright/test';
+
+const base = process.env.TEST_BASE_URL ?? 'http://localhost:8088';
+const password = 'Integration-test-password-42';
+function setupToken() {
+  if (process.env.SETUP_TOKEN) return process.env.SETUP_TOKEN;
+  const line = readFileSync('.env', 'utf8')
+    .split('\n')
+    .find((l) => l.startsWith('SETUP_TOKEN='));
+  return line?.slice('SETUP_TOKEN='.length).trim() ?? '';
+}
+async function workspace(page: Page) {
+  const api = async (path: string, data?: unknown) => {
+    const r = await page.request.fetch('/api' + path, {
+      method: data === undefined ? 'GET' : 'POST',
+      headers: { Origin: base },
+      data,
+    });
+    expect(r.ok(), `${path}: ${await r.text()}`).toBeTruthy();
+    const text = await r.text();
+    return text ? JSON.parse(text) : undefined;
+  };
+  const admin = { email: 'admin@openharness.test', password };
+  if ((await api('/auth/status')).needsSetup)
+    await api('/auth/setup', { ...admin, name: 'Test administrator', setupToken: setupToken() });
+  else await api('/auth/login', admin);
+  const credentials = { email: `transforms-browser-${Date.now()}@openharness.test`, password };
+  await api('/users', { ...credentials, name: 'Browser Transforms', workspace: 'new' });
+  await api('/auth/login', credentials);
+  return api;
+}
+
+test('Datasets tabs and a Flatten transform created in the UI', async ({ page }) => {
+  const api = await workspace(page);
+  const errors: string[] = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  page.on('dialog', (dialog) => void dialog.accept());
+  // The Flatten template reads company_profiles; inputs must exist.
+  const mongo = await api('/connections', { name: 'MongoDB', kind: 'mongodb', builtIn: true, url: '' });
+  await api(`/mongodb/${mongo.id}/collections`, { name: 'company_profiles' });
+  await api(`/mongodb/${mongo.id}/collections/company_profiles/documents`, {
+    documents: [{ symbol: 'AAA', companyName: 'Triple A', sector: 'Tech', exchange: 'NASDAQ' }],
+  });
+
+  await page.goto('/datasets');
+  await expect(page).toHaveURL(/\/datasets\/syncs$/);
+  await expect(page.getByRole('tab', { name: 'Syncs' })).toHaveAttribute('aria-selected', 'true');
+  await page.getByRole('tab', { name: 'Transforms' }).click();
+  await expect(page).toHaveURL(/\/datasets\/transforms$/);
+  await expect(page.getByText('No transforms yet')).toBeVisible();
+
+  await page.getByRole('button', { name: 'New transform' }).first().click();
+  await page.getByRole('button', { name: /Flatten/ }).click();
+  await expect(page).toHaveURL(/\/datasets\/transforms\/new$/);
+  await expect(page.locator('.monaco-editor')).toBeVisible({ timeout: 30000 });
+  await expect(page.getByLabel('Output collection')).toHaveCount(3);
+  // A non-static output without known_at blocks saving.
+  await page.getByLabel('known_at field').first().fill('');
+  await expect(page.getByRole('button', { name: 'Create' })).toBeDisabled();
+  await page.getByLabel('known_at field').first().fill('known_at');
+  await page.getByRole('button', { name: 'Create' }).click();
+  await expect(page).toHaveURL(/\/datasets\/transforms\/profiles_flat$/);
+  await expect(page.getByText('Created profiles_flat v1')).toBeVisible();
+
+  const [saved] = await api('/transforms');
+  expect(saved.outputs.map((o: any) => o.collection)).toEqual([
+    'company_identity',
+    'company_classification',
+    'company_listing',
+  ]);
+  expect(saved.code).toContain('oh.output("company_listing")');
+
+  // Back to the list: the transform, its inputs and outputs; browser back returns to the editor.
+  await page.locator('.transform-editor-head').getByRole('button', { name: 'Transforms' }).click();
+  const row = page.locator('.transforms-table tr', { hasText: 'profiles_flat' });
+  await expect(row).toContainText('company_profiles');
+  await expect(row).toContainText('company_listing');
+  await page.goBack();
+  await expect(page).toHaveURL(/\/datasets\/transforms\/profiles_flat$/);
+  await page.getByRole('tab', { name: 'Syncs' }).click();
+  await expect(page).toHaveURL(/\/datasets\/syncs$/);
+  expect(errors).toEqual([]);
+});

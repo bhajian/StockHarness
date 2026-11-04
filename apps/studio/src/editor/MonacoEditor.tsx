@@ -2,6 +2,27 @@
 // Python and YAML only; editing, read-only and side-by-side diff modes; markers from tracebacks.
 import React, { useEffect, useRef } from 'react';
 import * as monaco from 'monaco-editor/editor/editor.api';
+// Only the editing features we use (the full set more than doubles the chunk); codicon brings the icon font.
+import 'monaco-editor/features/codicon/register';
+import 'monaco-editor/features/bracketMatching/register';
+import 'monaco-editor/features/clipboard/register';
+import 'monaco-editor/features/comment/register';
+import 'monaco-editor/features/contextmenu/register';
+import 'monaco-editor/features/cursorUndo/register';
+import 'monaco-editor/features/diffEditor/register';
+import 'monaco-editor/features/find/register';
+import 'monaco-editor/features/folding/register';
+import 'monaco-editor/features/gotoError/register';
+import 'monaco-editor/features/gotoLine/register';
+import 'monaco-editor/features/hover/register';
+import 'monaco-editor/features/indentation/register';
+import 'monaco-editor/features/linesOperations/register';
+import 'monaco-editor/features/multicursor/register';
+import 'monaco-editor/features/suggest/register';
+import 'monaco-editor/features/wordHighlighter/register';
+import 'monaco-editor/features/wordOperations/register';
+import 'monaco-editor/features/readOnlyMessage/register';
+import 'monaco-editor/features/quickCommand/register';
 import 'monaco-editor/languages/definitions/python/register';
 import 'monaco-editor/languages/definitions/yaml/register';
 import EditorWorker from 'monaco-editor/editor/editor.worker?worker';

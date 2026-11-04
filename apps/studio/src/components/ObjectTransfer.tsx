@@ -8,6 +8,8 @@ const KIND_LABEL: Record<ObjectKind, string> = {
   Agent: 'agents',
   Harness: 'harnesses',
   DatasetSync: 'dataset syncs',
+  Transform: 'transforms',
+  CatalogEntry: 'catalog docs',
 };
 
 /**
@@ -16,10 +18,13 @@ const KIND_LABEL: Record<ObjectKind, string> = {
  */
 export function ObjectTransfer({
   kinds = [],
+  names = [],
   onImported,
   compact = false,
 }: {
   kinds?: ObjectKind[];
+  /** Export only these objects (by name); import is unaffected. */
+  names?: string[];
   onImported?: () => Promise<void> | void;
   compact?: boolean;
 }) {
@@ -29,11 +34,11 @@ export function ObjectTransfer({
   async function download() {
     setError('');
     try {
-      const text = await exportObjectsYaml(kinds);
+      const text = await exportObjectsYaml(kinds, names);
       const url = URL.createObjectURL(new Blob([text], { type: 'application/yaml' }));
       const a = document.createElement('a');
       a.href = url;
-      a.download = `stockharness-${kinds.length ? kinds.join('-').toLowerCase() : 'all'}-${new Date().toISOString().slice(0, 10)}.yaml`;
+      a.download = `stockharness-${names.length === 1 ? names[0] : kinds.length ? kinds.join('-').toLowerCase() : 'all'}-${new Date().toISOString().slice(0, 10)}.yaml`;
       a.click();
       URL.revokeObjectURL(url);
     } catch (e) {
