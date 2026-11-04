@@ -22,6 +22,7 @@ import {
   type DatasetSync,
 } from './datasetSync.js';
 import { refreshCatalogEntry } from './schemaCatalog.js';
+import { emitHarnessEvent } from './harnessEvents.js';
 
 export type BackfillStatus = 'queued' | 'running' | 'paused' | 'completed' | 'failed' | 'cancelled';
 export type BackfillBatch = {
@@ -384,6 +385,19 @@ export async function runBackfill(job: Backfill) {
       },
     },
   );
+  const done = (await backfills().findOne({ _id: job._id }))!;
+  await emitHarnessEvent(job.ownerId, anyFailed ? 'dataset.backfill.failed' : 'dataset.backfill.completed', {
+    sync_id: job.syncId,
+    sync_name: job.syncName,
+    dataset: job.dataset,
+    collection: sync.targetCollection || def.defaultCollection,
+    backfill_id: job._id,
+    date_from: job.from,
+    date_to: job.to,
+    rows: done.rows,
+    calls: done.calls,
+    failed_batches: done.batches.filter((x) => x.status === 'failed').length,
+  });
   void refreshCatalogEntry(job.ownerId, sync.targetCollection || def.defaultCollection).catch(
     () => undefined,
   );
