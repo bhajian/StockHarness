@@ -203,11 +203,26 @@ export async function dataHealth(ownerId: string, opts: { days?: number } = {}) 
   });
   const blocked = pipelines.filter((p) => p.blockedAt) as { name: string; blockedAt: string }[];
   const failedTransforms = transforms.filter((t) => t.status === 'failed');
+  const drift = await collection<{
+    _id: string;
+    collection: string;
+    kind: string;
+    field: string;
+    detail: string;
+    breaking: boolean;
+    count: number;
+    lastSeenAt: Date;
+    syncName?: string;
+  }>('schema_drift')
+    .find({ ownerId, resolved: false })
+    .sort({ lastSeenAt: -1 })
+    .limit(100)
+    .toArray();
   const kpis = {
     fresh: rows.filter((r) => r.freshness === 'fresh').length,
     stale: rows.filter((r) => r.freshness === 'stale').length,
     failed: rows.filter((r) => r.freshness === 'failed').length + failedTransforms.length,
-    drift: 0, // schema drift detection: #83
+    drift: drift.length,
   };
   const eod =
     rows.find((r) => r.collection === 'prices_daily' && r.dateMax) ??
@@ -235,6 +250,7 @@ export async function dataHealth(ownerId: string, opts: { days?: number } = {}) 
     kpis,
     indicator,
     expected,
+    drift: drift.map(({ _id, ...d }) => ({ id: _id, ...d })),
     collections: rows,
     syncs: {
       total: syncs.length,

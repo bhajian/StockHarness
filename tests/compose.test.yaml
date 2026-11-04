@@ -26,6 +26,8 @@ services:
       TRANSFORM_TRIGGER_DEBOUNCE_SECONDS: 2
       # Layer 3 research and Layer 5 live nodes do not exist yet; the pipeline tests use stub executors (#156).
       PIPELINE_STUB_EXECUTORS: '1'
+      # Dataset syncs call the fixture FMP (#83).
+      FMP_BASE_URL: http://fixtures:9090/fmp/stable
     depends_on: &test-store-services
       qdrant: { condition: service_healthy }
       opensearch: { condition: service_healthy }

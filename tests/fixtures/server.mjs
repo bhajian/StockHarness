@@ -147,6 +147,32 @@ app.post('/human-tool-schema', (req, res) => {
   humanToolChanged = req.body.changed === true;
   res.json({ ok: true });
 });
+// A tiny FMP for dataset syncs (#83). eod: GOOD returns normal bars; DRIFTS sends close as a string
+// (non-breaking type change); BREAK drops the date field (breaking); ERR returns an FMP error body.
+app.get('/fmp/stable/*endpoint', (req, res) => {
+  const symbol = String(req.query.symbol ?? '');
+  if (symbol === 'ERR')
+    return res.json({ 'Error Message': 'Invalid API KEY. Please retry or visit our documentation.' });
+  const days = ['2026-10-26', '2026-10-27', '2026-10-28'];
+  const bar = (date, i) => ({
+    symbol,
+    date,
+    open: 10 + i,
+    high: 11 + i,
+    low: 9 + i,
+    close: 10.5 + i,
+    volume: 1000 + i,
+  });
+  if (symbol === 'DRIFTS') return res.json(days.map((d, i) => ({ ...bar(d, i), close: String(10.5 + i) })));
+  if (symbol === 'BREAK')
+    return res.json(
+      days.map((d, i) => {
+        const { date, ...rest } = bar(d, i);
+        return rest;
+      }),
+    );
+  return res.json(days.map(bar));
+});
 app.get('/health', (_req, res) => res.json({ ok: true }));
 app.get('/stats', (_req, res) => res.json(stats));
 const sessions = new Map();

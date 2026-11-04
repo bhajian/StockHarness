@@ -120,7 +120,8 @@ test('build, run, inspect, re-run and round-trip a pipeline in the UI', async ({
 
   // Lineage (#97): Catalog > Graph shows input -> transform -> output; open the output's catalog page.
   await page.goto('/datasets/catalog/_graph');
-  await expect(page.locator('.lnode-transform', { hasText: 'pb_daily' })).toBeVisible();
+  // The lineage loads after navigation; allow for a busy stack (a transient 5 s timeout was seen once).
+  await expect(page.locator('.lnode-transform', { hasText: 'pb_daily' })).toBeVisible({ timeout: 20000 });
   await expect(page.locator('.lnode-transform', { hasText: 'pb_daily' })).toHaveClass(/fresh-fresh/);
   await page.locator('.lnode-collection', { hasText: 'pb_daily_out' }).click();
   await page.getByRole('button', { name: 'Open collection' }).click();

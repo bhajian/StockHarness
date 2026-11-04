@@ -128,7 +128,7 @@ export function DatasetsPage(props: Props) {
       ) : route.tab === 'catalog' ? (
         <CatalogTab item={route.item} go={go} isAdmin={props.isAdmin} data={props.data} />
       ) : (
-        <HealthTab go={go} />
+        <HealthTab go={go} isAdmin={props.isAdmin} />
       )}
     </>
   );

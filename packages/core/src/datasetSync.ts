@@ -10,7 +10,8 @@ import { nextScheduledAt } from './schedule.js';
 import { HttpError, safeError } from './security.js';
 import { scheduleSchema, type Stored } from './schema.js';
 import { catalogById, UNIVERSE_DATASET_ID, presetById, type DatasetDef } from './datasetCatalog.js';
-import { refreshCatalogEntry } from './schemaCatalog.js';
+import { catalogEntries, refreshCatalogEntry } from './schemaCatalog.js';
+import { ingestChecker, recordDrift } from './ingestValidation.js';
 import { emitHarnessEvent } from './harnessEvents.js';
 import {
   PriorityRateLimiter,
@@ -21,7 +22,8 @@ import {
   type SyncPriority,
 } from './syncScheduler.js';
 
-const FMP_BASE = 'https://financialmodelingprep.com/stable';
+// The test stack points this at its FMP fixture (#83); production uses FMP.
+const FMP_BASE = process.env.FMP_BASE_URL || 'https://financialmodelingprep.com/stable';
 const MAX_RPM = Number(process.env.DATASET_SYNC_RPM) || 250;
 /** One FMP rate limit for every sync in the process; the highest-priority waiter gets the next slot (#78). */
 export const fmpLimiter = new PriorityRateLimiter(MAX_RPM);
@@ -311,8 +313,35 @@ async function pull(
   stats: PullStats = {},
 ): Promise<number> {
   const wsDb = mongo.db(workspaceDatabase(sync.ownerId));
-  const coll = wsDb.collection(sync.targetCollection || def.defaultCollection);
+  const collName = sync.targetCollection || def.defaultCollection;
+  const coll = wsDb.collection(collName);
   await coll.createIndex(Object.fromEntries(def.keyFields.map((k) => [k, 1]))).catch(() => undefined);
+  // #83: responses are validated against the schema the catalog knew when this pull started.
+  const known = await catalogEntries()
+    .findOne({ ownerId: sync.ownerId, collection: collName }, { projection: { fields: 1 } })
+    .catch(() => null);
+  const checker = ingestChecker(known?.fields ?? [], {
+    collection: collName,
+    keyFields: def.keyFields,
+    dateField: def.dateField,
+  });
+  try {
+    return await pullChecked(sync, def, apikey, stats, coll, wsDb, checker);
+  } finally {
+    const drift = checker.drift();
+    if (drift.length) await recordDrift(sync.ownerId, collName, drift, sync).catch(() => undefined);
+  }
+}
+
+async function pullChecked(
+  sync: DatasetSync,
+  def: DatasetDef,
+  apikey: string,
+  stats: PullStats,
+  coll: ReturnType<ReturnType<typeof mongo.db>['collection']>,
+  wsDb: ReturnType<typeof mongo.db>,
+  checker: ReturnType<typeof ingestChecker>,
+): Promise<number> {
   const now = today();
   const defaultFrom = sync.from || addDays(now, -365);
   let rows = 0;
@@ -327,8 +356,7 @@ async function pull(
       // One symbol's transient throttle (402/429) must never fail the whole dataset.
       try {
         const params = perSymbolParams(def, sync, symbol, now);
-        const data = await fmpGet(def.endpoint, params, apikey);
-        const list = Array.isArray(data) ? data : data ? [data] : [];
+        const list = checker.check(await fmpGet(def.endpoint, params, apikey));
         for (const r of list)
           if (r && typeof r === 'object') {
             (r as Record<string, unknown>).symbol = symbol;
@@ -356,12 +384,9 @@ async function pull(
   } else if (def.fixedSymbols) {
     for (const symbol of def.fixedSymbols) {
       try {
-        const data = await fmpGet(
-          def.endpoint,
-          { symbol, from: sync.cursor || defaultFrom, to: now },
-          apikey,
+        const list = checker.check(
+          await fmpGet(def.endpoint, { symbol, from: sync.cursor || defaultFrom, to: now }, apikey),
         );
-        const list = Array.isArray(data) ? data : [];
         for (const r of list) if (r && typeof r === 'object') (r as Record<string, unknown>).symbol = symbol;
         rows += await upsertRows(coll, list, def.keyFields);
       } catch (error) {
@@ -432,8 +457,7 @@ async function pull(
   } else if (def.scope === 'feed') {
     const maxPages = Number((sync.params as Record<string, unknown> | undefined)?.pages ?? 5);
     for (let page = 0; page < maxPages; page++) {
-      const data = await fmpGet(def.endpoint, { page, limit: 100 }, apikey);
-      const list = Array.isArray(data) ? data : [];
+      const list = checker.check(await fmpGet(def.endpoint, { page, limit: 100 }, apikey));
       if (!list.length) break;
       rows += await upsertRows(coll, list, def.keyFields);
     }
@@ -441,8 +465,11 @@ async function pull(
     const from = sync.from || addDays(now, -7);
     const to = sync.to || addDays(now, 14);
     for (const [a, b] of chunkRanges(from, to, 60)) {
-      const data = await fmpGet(def.endpoint, { from: a, to: b }, apikey);
-      rows += await upsertRows(coll, Array.isArray(data) ? data : [], def.keyFields);
+      rows += await upsertRows(
+        coll,
+        checker.check(await fmpGet(def.endpoint, { from: a, to: b }, apikey)),
+        def.keyFields,
+      );
     }
   } else {
     const params: Record<string, string | number> = { ...(def.params ?? {}) };
@@ -451,8 +478,7 @@ async function pull(
       params.from = sync.from || addDays(now, -365 * 5);
       params.to = sync.to || now;
     }
-    const data = await fmpGet(def.endpoint, params, apikey);
-    rows += await upsertRows(coll, Array.isArray(data) ? data : [], def.keyFields);
+    rows += await upsertRows(coll, checker.check(await fmpGet(def.endpoint, params, apikey)), def.keyFields);
   }
 
   if (sync.retentionDays && def.dateField) {

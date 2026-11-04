@@ -2,7 +2,7 @@
 // cells are missing days), DQ issues and caveats, failed syncs and transforms, pipelines' latest runs.
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, CheckCircle2, GitBranch, Layers, RefreshCw, XCircle } from 'lucide-react';
-import { type DataHealth, type HealthRow, fetchDataHealth, fetchGaps, timestamp } from '../api';
+import { type DataHealth, type HealthRow, fetchDataHealth, fetchGaps, resolveDrift, timestamp } from '../api';
 import type { DatasetsRoute } from '../datasetsRoute';
 import { Button } from './ui';
 import { KpiCard, Skeleton, StatusPill } from './kit';
@@ -60,7 +60,7 @@ function GapCell({ row }: { row: HealthRow }) {
   );
 }
 
-export function HealthTab({ go }: { go: Go }) {
+export function HealthTab({ go, isAdmin = false }: { go: Go; isAdmin?: boolean }) {
   const [h, setH] = useState<DataHealth | null>(null);
   const [error, setError] = useState('');
   const [filter, setFilter] = useState<'all' | 'issues'>('issues');
@@ -135,9 +135,63 @@ export function HealthTab({ go }: { go: Go }) {
           icon={<Layers size={18} />}
           label="Drift alerts"
           value={h.kpis.drift}
-          footnote="schema drift: #83"
+          footnote="schema changes in synced data"
         />
       </div>
+      {(h.drift ?? []).length > 0 && (
+        <section className="health-drift">
+          <h3>
+            <Layers size={14} /> Drift alerts
+          </h3>
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Collection</th>
+                  <th>Field</th>
+                  <th>Change</th>
+                  <th>Seen</th>
+                  <th />
+                </tr>
+              </thead>
+              <tbody>
+                {(h.drift ?? []).map((d) => (
+                  <tr key={d.id}>
+                    <td>
+                      <button
+                        className="link-button"
+                        onClick={() => go({ tab: 'catalog', item: d.collection })}
+                        title="Open the collection (Sample shows the rows)"
+                      >
+                        <code>{d.collection}</code>
+                      </button>
+                      {d.syncName && <div className="muted-line">{d.syncName}</div>}
+                    </td>
+                    <td>
+                      <code>{d.field}</code>
+                    </td>
+                    <td>
+                      <StatusPill status={d.breaking ? 'blocked' : 'warn'} label={d.kind.replace('_', ' ')} />{' '}
+                      <span className="muted-line">{d.detail}</span>
+                      {d.breaking && <div className="muted-line">Breaking: those items were not written</div>}
+                    </td>
+                    <td>
+                      {d.count}× · {timestamp(d.lastSeenAt)}
+                    </td>
+                    <td>
+                      {isAdmin && (
+                        <Button variant="ghost" onClick={() => void resolveDrift(d.id).then(load)}>
+                          Resolve
+                        </Button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
       {(h.syncs.failed.length > 0 || h.transforms.some((t) => t.status === 'failed')) && (
         <section className="health-failures">
           <h3>Failing</h3>
