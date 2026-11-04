@@ -3,6 +3,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { collectionCoverage } from '../../../packages/core/src/catalogCoverage.js';
 import { lineage } from '../../../packages/core/src/lineage.js';
+import { dataHealth } from '../../../packages/core/src/dataHealth.js';
 import { collection } from '../../../packages/core/src/db.js';
 import { HttpError, safeError } from '../../../packages/core/src/security.js';
 import {
@@ -41,6 +42,22 @@ catalogRouter.post('/catalog/export', async (req, res) => {
     (e) => !names || names.includes(e.collection),
   );
   res.type('text/markdown').send(catalogMarkdown(entries));
+});
+// Data health (#86): freshness, coverage, DQ, gaps, failed syncs/transforms, pipelines, top-bar indicator.
+catalogRouter.get('/datasets/health', async (req, res) => {
+  const days = Math.min(250, Math.max(10, Number(req.query.days) || 60));
+  res.json(await dataHealth(req.principal!.tenantId, { days }));
+});
+// One collection's gap strip over the last N expected sessions; computes coverage if needed (202 meanwhile).
+catalogRouter.get('/datasets/health/:collection/gaps', async (req, res) => {
+  const name = String(req.params.collection);
+  await entryOr404(req.principal!.tenantId, name);
+  const { coverage } = await collectionCoverage(req.principal!.tenantId, name);
+  if (!coverage) return void res.status(202).json({ computing: true });
+  const days = Math.min(250, Math.max(10, Number(req.query.days) || 90));
+  const { expected } = await dataHealth(req.principal!.tenantId, { days });
+  const byDate = new Map(coverage.daily.dates.map((d, i) => [d, coverage.daily.series.rows?.[i] ?? null]));
+  res.json({ collection: name, cells: expected.map((d) => ({ date: d, rows: byDate.get(d) ?? 0 })) });
 });
 // Lineage (#97): syncs -> collections -> transforms -> collections, with freshness per node.
 catalogRouter.get('/catalog/lineage', async (req, res) => {

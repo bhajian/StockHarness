@@ -34,6 +34,7 @@ import { KnowledgePage } from './components/KnowledgePage';
 import { MongoCollections } from './components/MongoCollections';
 import { SkillsPage } from './components/SkillsPage';
 import { DatasetsPage } from './components/DatasetsPage';
+import { DataFreshness } from './components/HealthTab';
 import { EmbedChat, Playground, playgroundTargets } from './components/Playground';
 import { IntegrationsPage, SettingsPage } from './components/Settings';
 import './styles.css';
@@ -501,6 +502,13 @@ function App() {
                 <span>New knowledge base</span>
               </Button>
             )}
+            <DataFreshness
+              onOpen={() => {
+                navigate('datasets');
+                history.replaceState({}, '', '/datasets/health');
+                dispatchEvent(new PopStateEvent('popstate'));
+              }}
+            />
             <span className={`system-status ${healthy ? '' : 'unhealthy'}`}>
               <i />
               {healthy ? 'Online' : 'Connecting…'}
