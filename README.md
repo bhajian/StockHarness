@@ -172,21 +172,22 @@ The research layers are planned in [ROADMAP.md](ROADMAP.md):
 
 ## Repository layout
 
-| Path                      | Purpose                                                                                             |
-| ------------------------- | --------------------------------------------------------------------------------------------------- |
-| `apps/api`                | Express API: auth, resources, dataset syncs, scheduler, queue dispatcher, SSE, static UI            |
-| `apps/runner`             | RabbitMQ consumer: run execution, checkpoints, agent patterns, document ingestion                   |
-| `apps/studio`             | React studio: Datasets, harness canvas, playground, knowledge, connections, settings                |
-| `packages/core`           | Shared runtime: schemas, agent runtime, LLM adapters, MCP, dataset catalog and sync engine, storage |
-| `pipeline/`               | Python Layer 2 library: PIT helpers, securities, prices, corporate actions, macro, tests            |
-| `python-executor/`        | Executor image and the `oh` SDK (`oh.py`)                                                           |
-| `mongodb-mcp/`            | MongoDB MCP server giving agents per-workspace database access                                      |
-| `deploy/k8s`              | Kustomize base and overlays (`aws`, `nebius`, `generic`) and scripts                                |
-| `deploy/config-io`        | Config export/import CLI and the committed exports                                                  |
-| `deploy/pipeline-harness` | Builder for the current Layer 2 harness (to be replaced by Transforms)                              |
-| `gateway`, `connector-*`  | Device gateway and connectors (inherited from OpenHarness; not used in the StockHarness UI)         |
-| `tests/`                  | Unit, real-stack integration, fault-injection and browser tests                                     |
-| `docs/`                   | Platform documentation ([platform reference](docs/platform.md))                                     |
+| Path                      | Purpose                                                                                                                                              |
+| ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `apps/api`                | Express API: auth, resources, dataset syncs, scheduler, queue dispatcher, SSE, static UI                                                             |
+| `apps/runner`             | RabbitMQ consumer: run execution, checkpoints, agent patterns, document ingestion                                                                    |
+| `apps/studio`             | React studio: Datasets, harness canvas, playground, knowledge, connections, settings                                                                 |
+| `packages/core`           | Shared runtime: schemas, agent runtime, LLM adapters, MCP, dataset catalog and sync engine, storage                                                  |
+| `pipeline/`               | Python Layer 2 library: PIT helpers, securities, prices, corporate actions, macro, tests                                                             |
+| `python-executor/`        | Executor image and the `oh` SDK (`oh.py`)                                                                                                            |
+| `mongodb-mcp/`            | MongoDB MCP server giving agents per-workspace database access                                                                                       |
+| `skills/`                 | Agent skills kept in the repo, e.g. [`strategy-library.md`](skills/strategy-library.md), the 42 strategy cards (also in the config-io skills export) |
+| `deploy/k8s`              | Kustomize base and overlays (`aws`, `nebius`, `generic`) and scripts                                                                                 |
+| `deploy/config-io`        | Config export/import CLI and the committed exports                                                                                                   |
+| `deploy/pipeline-harness` | Builder for the current Layer 2 harness (to be replaced by Transforms)                                                                               |
+| `gateway`, `connector-*`  | Device gateway and connectors (inherited from OpenHarness; not used in the StockHarness UI)                                                          |
+| `tests/`                  | Unit, real-stack integration, fault-injection and browser tests                                                                                      |
+| `docs/`                   | Platform documentation ([platform reference](docs/platform.md))                                                                                      |
 
 ## Deployment
 
