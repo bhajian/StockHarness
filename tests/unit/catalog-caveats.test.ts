@@ -22,8 +22,9 @@ test('plan limits attach to the right collections', () => {
 test('history caveats are blocking and cite the live start date', () => {
   const est = caveatsFor({
     collection: 'analyst_estimates',
-    dateField: 'snapshot_date',
-    dateMin: '2026-10-23',
+    dateField: 'date',
+    dateMin: '2019-12-31',
+    firstSnapshot: '2026-10-23',
   });
   const snap = est.find((c) => c.id === 'snapshot-history')!;
   assert.equal(snap.severity, 'blocking');

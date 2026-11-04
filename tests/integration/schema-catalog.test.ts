@@ -166,10 +166,22 @@ test(
   async () => {
     const { agentView } = await import('../../packages/core/src/schemaCatalog.js');
     await ws(A)
+      .collection('analyst_estimates')
+      .insertMany([
+        { symbol: 'AAPL', date: '2027-09-30', snapshot_date: '2026-10-31', epsAvg: 9.1 },
+        { symbol: 'AAPL', date: '2027-09-30', snapshot_date: '2026-10-23', epsAvg: 9.0 },
+      ]);
+    await ws(A)
       .collection('insider_trades')
       .insertOne({ symbol: 'UXIN', filingDate: '2026-10-22', transactionType: 'P-Purchase' });
     await refreshCatalog(A);
     const ins = (await catalogEntries().findOne({ ownerId: A, collection: 'insider_trades' }))!;
+    const est = (await catalogEntries().findOne({ ownerId: A, collection: 'analyst_estimates' }))!;
+    assert.match(
+      est.caveats.find((c) => c.id === 'snapshot-history')!.text,
+      /\(2026-10-23\)/,
+      'first snapshot date, not the fiscal date',
+    );
     assert.deepEqual(
       ins.caveats.map((c) => c.id),
       ['feed-history'],

@@ -277,6 +277,20 @@ export async function refreshCatalogEntry(ownerId: string, name: string, syncs?:
       });
   }
 
+  // Weekly snapshot datasets: when the first snapshot was taken (history starts there).
+  const firstSnapshot =
+    rows && names.has('snapshot_date')
+      ? ((
+          await timed(
+            coll
+              .find({ snapshot_date: { $nin: [null, ''] } }, { projection: { snapshot_date: 1 } })
+              .sort({ snapshot_date: 1 })
+              .limit(1)
+              .toArray(),
+            [] as Record<string, unknown>[],
+          )
+        )[0]?.snapshot_date as string | undefined)
+      : undefined;
   const lastRun = producers.reduce<DatasetSync | undefined>(
     (best, s) => (s.lastRunAt && (!best?.lastRunAt || s.lastRunAt > best.lastRunAt) ? s : best),
     undefined,
@@ -337,7 +351,7 @@ export async function refreshCatalogEntry(ownerId: string, name: string, syncs?:
     },
     joins,
     caveats: caveatsFor(
-      { collection: name, dateMin: coverage.dateMin, dateField: coverage.dateField },
+      { collection: name, dateMin: coverage.dateMin, dateField: coverage.dateField, firstSnapshot },
       curated,
     ),
     ...(curated ? { curated } : {}),
