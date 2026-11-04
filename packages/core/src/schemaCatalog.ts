@@ -39,7 +39,7 @@ export type CatalogEntry = {
   ownerId: string;
   collection: string;
   layer: 1 | 2 | null;
-  producedBy: { type: 'sync' | 'pipeline'; name: string; id?: string; dataset?: string }[];
+  producedBy: { type: 'sync' | 'pipeline' | 'transform'; name: string; id?: string; dataset?: string }[];
   description: string;
   grain: string;
   primaryKey: string[];
@@ -212,7 +212,36 @@ export async function refreshCatalogEntry(ownerId: string, name: string, syncs?:
   const def: DatasetDef | undefined =
     (name !== 'delisted_companies' && producers[0] && catalogById.get(producers[0].dataset)) ||
     DATASET_CATALOG.find((d) => d.defaultCollection === name);
-  const l2 = LAYER2[name];
+  // Transform outputs are Layer 2 (#90): described by the transform's output declaration.
+  const tr = await collection<{
+    _id: string;
+    name: string;
+    version: number;
+    outputs: {
+      collection: string;
+      key: string[];
+      known_at_field?: string;
+      as_of_field?: string;
+      static?: boolean;
+      description?: string;
+      grain?: string;
+    }[];
+  }>('transforms').findOne(
+    { ownerId, 'outputs.collection': name },
+    { projection: { name: 1, version: 1, outputs: 1 } },
+  );
+  const tOut = tr?.outputs.find((o) => o.collection === name);
+  const l2 = tOut
+    ? {
+        name: `${tr!.name} v${tr!.version}`,
+        description: tOut.description ?? `Output of the transform ${tr!.name}.`,
+        grain: tOut.grain ?? grainOf(tOut.key),
+        key: tOut.key,
+        static: tOut.static,
+        dateField: tOut.as_of_field ?? tOut.known_at_field ?? 'date',
+        transform: true,
+      }
+    : LAYER2[name];
   let refreshError: string | undefined;
   const timed = async <T>(p: Promise<T>, fallback: T): Promise<T> => {
     try {
@@ -325,7 +354,12 @@ export async function refreshCatalogEntry(ownerId: string, name: string, syncs?:
     collection: name,
     layer: l2 ? 2 : def || SIDE_OUTPUTS[name] ? 1 : null,
     producedBy: l2
-      ? [{ type: 'pipeline', name: l2.name }]
+      ? [
+          {
+            type: (l2 as { transform?: boolean }).transform ? ('transform' as const) : ('pipeline' as const),
+            name: l2.name,
+          },
+        ]
       : producers.map((s) => ({ type: 'sync' as const, name: s.name, id: s._id, dataset: s.dataset })),
     description:
       curated?.description ?? l2?.description ?? SIDE_OUTPUTS[name]?.description ?? def?.description ?? '',

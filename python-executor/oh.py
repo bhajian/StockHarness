@@ -37,6 +37,15 @@ __all__ = [
 params: dict[str, Any] = json.loads(os.environ.get("OH_PARAMS") or "{}")
 _RESULT_PATH = os.environ.get("OH_RESULT_PATH", "/work/.oh-result.json")
 _DESCRIBE_PATH = os.environ.get("OH_DESCRIBE_PATH", "/work/.oh-describe.json")
+_STATS_PATH = os.environ.get("OH_STATS_PATH", "")
+# Per-collection counters reported to the runner (#90): rows read, written, unchanged, dq issues.
+_stats: dict[str, dict[str, int]] = {}
+
+
+def _count(collection: str, key: str, n: int) -> None:
+    if n:
+        c = _stats.setdefault(collection, {})
+        c[key] = c.get(key, 0) + int(n)
 _client = None
 # Declared outputs of the running transform (set by the transform runner, #90). When present, writes to any
 # other collection are refused, so a transform can only write what it declares.
@@ -84,6 +93,7 @@ def read(collection: str, filter: dict | None = None, *, limit: int | None = Non
         if "_id" in doc:
             doc["_id"] = str(doc["_id"])
         rows.append(doc)
+    _count(collection, "read", len(rows))
     return rows
 
 
@@ -143,6 +153,7 @@ def write(collection: str, records: Iterable[dict], *, mode: str = "append") -> 
     inserted = 0
     for start in range(0, len(docs), 1000):
         inserted += len(target.insert_many(docs[start : start + 1000], ordered=True).inserted_ids)
+    _count(collection, "written", inserted)
     return inserted
 
 
@@ -251,6 +262,8 @@ def upsert(collection: str, records: Iterable[dict], *, key: list[str], known_at
         if ops:
             res = target.bulk_write(ops, ordered=False)
             written += (res.upserted_count or 0) + (res.modified_count or 0)
+    _count(collection, "written", written)
+    _count(collection, "unchanged", unchanged)
     return {"written": written, "unchanged": unchanged}
 
 
@@ -322,6 +335,8 @@ def _flush_dq() -> None:
     if not _dq_buffer:
         return
     now = datetime.now(timezone.utc)
+    for d in _dq_buffer:
+        _count(d["collection"], "dq", 1)
     ops = [
         UpdateOne(
             {k: d[k] for k in ("collection", "issue_type", "security_id", "date")},
@@ -435,5 +450,12 @@ pit = _Pit()
 
 import atexit as _atexit  # noqa: E402
 
-# Buffered data-quality issues are written when the job exits (and every 1,000 issues).
+def _write_stats() -> None:
+    if _STATS_PATH and _stats:
+        with open(_STATS_PATH, "w", encoding="utf-8") as handle:
+            json.dump(_stats, handle)
+
+
+# At exit: buffered data-quality issues are written (also every 1,000 issues), then the stats file.
+_atexit.register(_write_stats)
 _atexit.register(lambda: _dq_buffer and _flush_dq())

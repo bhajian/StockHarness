@@ -230,9 +230,14 @@ export async function updateTransform(
     createdAt: now,
     createdBy: userId,
   });
+  // A changed schedule re-seeds from now instead of firing missed slots.
+  const scheduleChanged = JSON.stringify(prev.trigger?.schedule) !== JSON.stringify(spec.trigger.schedule);
   const r = await transforms().updateOne(
     { _id: id, ownerId, version: prev.version },
-    { $set: { ...spec, version, updatedAt: now, updatedBy: userId } },
+    {
+      $set: { ...spec, version, updatedAt: now, updatedBy: userId },
+      ...(scheduleChanged ? { $unset: { nextRunAt: '' } as Record<string, ''> } : {}),
+    },
   );
   if (!r.matchedCount) {
     await transformVersions().deleteOne({ _id: `${id}:${version}` });

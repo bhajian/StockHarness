@@ -31,6 +31,11 @@ export type CodeJobSpec = {
   purpose?: string;
   /** Names of Python secrets the job receives as environment variables. */
   secrets?: string[];
+  /**
+   * Transform context (#90): OH_WINDOW, OH_OUTPUTS, OH_DQ_COLLECTION for the `oh` SDK. Only these names are
+   * accepted by the executor, which never lets job env set other OH_* variables.
+   */
+  context?: Partial<Record<'OH_WINDOW' | 'OH_OUTPUTS' | 'OH_DQ_COLLECTION', string>>;
 };
 export type CodeJobOutcome = {
   id: string;
@@ -42,6 +47,8 @@ export type CodeJobOutcome = {
   truncated?: boolean;
   result?: unknown;
   durationMs?: number;
+  /** What the SDK reported (#90): per-collection read/write/dq stats and oh.describe() docs. */
+  meta?: { stats?: unknown; describe?: unknown };
 };
 export type CodeJobRecord = CodeJobSpec &
   Omit<CodeJobOutcome, 'status' | 'id'> & {
@@ -117,6 +124,7 @@ export async function runCodeJob(ctx: CodeJobContext, spec: CodeJobSpec): Promis
       status: 'queued',
       code: spec.code,
       params: spec.params ?? {},
+      ...(spec.context ? { context: spec.context } : {}),
       purpose: spec.purpose,
       secrets: spec.secrets ?? [],
       timeoutSeconds: jobTimeoutSeconds(spec.timeoutSeconds),
@@ -333,6 +341,7 @@ export function outcomeOf(record: CodeJobRecord): CodeJobOutcome {
     truncated: record.truncated,
     result: record.result,
     durationMs: record.durationMs,
+    ...(record.meta ? { meta: record.meta } : {}),
   };
 }
 
@@ -348,6 +357,7 @@ export async function claimJob(id: string, token: string) {
     timeoutSeconds: record.timeoutSeconds,
     mongodbUri: await workspaceJobMongoUri(record.ownerId),
     env: await resolveSecrets(record.ownerId, record.secrets),
+    context: record.context ?? {},
   };
 }
 /** A status report from the container: `running` when it starts, then the outcome. */
@@ -377,6 +387,9 @@ export async function reportJob(id: string, token: string, report: Record<string
     truncated: Boolean(report.truncated),
     result: oversized ? undefined : report.result,
     durationMs: typeof report.durationMs === 'number' ? report.durationMs : undefined,
+    ...(report.meta && typeof report.meta === 'object' && JSON.stringify(report.meta).length <= RESULT_LIMIT
+      ? { meta: report.meta as CodeJobOutcome['meta'] }
+      : {}),
   });
   return true;
 }
