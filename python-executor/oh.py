@@ -8,6 +8,17 @@
     oh.result({"rows": len(rows)})                               # what the agent or workflow receives
     oh.params["window"]                                          # parameters the caller passed in
 
+Transforms (Layer 2, #91):
+
+    w = oh.window                                   # start, end, lookback_start (None outside a transform)
+    bars = oh.read_df("eod_prices", {"date": {"$gte": w.lookback_start}}, columns=["symbol", "date", "close"])
+    oh.output("prices_daily").upsert_df(rows)       # a declared output: its key and write mode apply
+    oh.upsert("my_table", records, key=["security_id", "date"])   # idempotent; unchanged rows are skipped
+    oh.dq("stale_price", "warn", security_id="SEC_1", date="2026-11-03")   # idempotent data-quality issue
+    oh.describe("prices_daily", fields={"adj_close": "Adjusted close, USD"}, grain="security × day")
+    oh.pit.eod_known_at("2026-11-03"); oh.pit.as_of(known_at)            # point-in-time helpers
+    con = oh.duckdb(bars=bars, actions=("corporate_actions", {}))        # SQL joins over frames/collections
+
 Collections are those of the calling workspace: the connection string the executor received only reaches
 that database. Writes go through the trusted runner; the code never needs credentials of its own.
 """
@@ -18,11 +29,19 @@ import json
 import os
 from typing import Any, Iterable
 
-__all__ = ["params", "read", "read_df", "write", "write_df", "result", "log", "collections"]
+__all__ = [
+    "params", "read", "read_df", "write", "write_df", "result", "log", "collections",
+    "window", "output", "upsert", "upsert_df", "dq", "describe", "pit", "duckdb",
+]
 
 params: dict[str, Any] = json.loads(os.environ.get("OH_PARAMS") or "{}")
 _RESULT_PATH = os.environ.get("OH_RESULT_PATH", "/work/.oh-result.json")
+_DESCRIBE_PATH = os.environ.get("OH_DESCRIBE_PATH", "/work/.oh-describe.json")
 _client = None
+# Declared outputs of the running transform (set by the transform runner, #90). When present, writes to any
+# other collection are refused, so a transform can only write what it declares.
+_OUTPUTS: dict[str, dict] = {o["collection"]: o for o in json.loads(os.environ.get("OH_OUTPUTS") or "[]")}
+_DQ_COLLECTION = os.environ.get("OH_DQ_COLLECTION") or (next(iter(_OUTPUTS)) if _OUTPUTS else "")
 
 
 def _db():
@@ -42,9 +61,19 @@ def collections() -> list[str]:
     return sorted(n for n in _db().list_collection_names() if not n.startswith("system."))
 
 
+def _guard(collection: str) -> None:
+    if _OUTPUTS and collection not in _OUTPUTS:
+        raise PermissionError(
+            f"{collection} is not a declared output of this transform (outputs: {', '.join(_OUTPUTS)})"
+        )
+
+
 def read(collection: str, filter: dict | None = None, *, limit: int | None = None, sort: list | None = None,
-         projection: dict | None = None) -> list[dict]:
-    """Documents of a collection as plain dicts (``_id`` is kept as a string)."""
+         projection: dict | None = None, columns: list[str] | None = None) -> list[dict]:
+    """Documents of a collection as plain dicts (``_id`` is kept as a string). ``columns`` limits the fields."""
+    if columns and projection is None:
+        projection = {c: 1 for c in columns}
+        projection.setdefault("_id", 0)
     cursor = _db()[collection].find(filter or {}, projection)
     if sort:
         cursor = cursor.sort(sort)
@@ -58,16 +87,45 @@ def read(collection: str, filter: dict | None = None, *, limit: int | None = Non
     return rows
 
 
-def read_df(collection: str, filter: dict | None = None, **kwargs):
-    """A collection (or a filtered part of it) as a pandas DataFrame."""
+def read_df(collection: str, filter: dict | None = None, *, chunksize: int | None = None, **kwargs):
+    """A collection (or a filtered part of it) as a pandas DataFrame.
+
+    ``columns=[...]`` loads only those fields. ``chunksize=N`` returns an iterator of DataFrames of N rows,
+    for collections too large to load at once.
+    """
     import pandas as pd
 
-    rows = read(collection, filter, **kwargs)
-    return pd.DataFrame(rows)
+    if not chunksize:
+        return pd.DataFrame(read(collection, filter, **kwargs))
+    return _read_chunks(collection, filter, int(chunksize), **kwargs)
+
+
+def _read_chunks(collection, filter, chunksize, *, columns=None, sort=None, projection=None, limit=None):
+    import pandas as pd
+
+    if columns and projection is None:
+        projection = {c: 1 for c in columns}
+        projection.setdefault("_id", 0)
+    cursor = _db()[collection].find(filter or {}, projection, batch_size=min(chunksize, 10000))
+    if sort:
+        cursor = cursor.sort(sort)
+    if limit:
+        cursor = cursor.limit(int(limit))
+    batch = []
+    for doc in cursor:
+        if "_id" in doc:
+            doc["_id"] = str(doc["_id"])
+        batch.append(doc)
+        if len(batch) >= chunksize:
+            yield pd.DataFrame(batch)
+            batch = []
+    if batch:
+        yield pd.DataFrame(batch)
 
 
 def write(collection: str, records: Iterable[dict], *, mode: str = "append") -> int:
     """Insert documents. ``mode="replace"`` empties the collection first. Returns the inserted count."""
+    _guard(collection)
     if mode not in ("append", "replace"):
         raise ValueError("mode must be 'append' or 'replace'")
     docs = []
@@ -92,11 +150,19 @@ def write_df(collection: str, frame, *, mode: str = "append") -> int:
     """Write a pandas DataFrame (one document per row). NaN becomes null."""
     import math
 
+    return write(collection, _frame_records(frame), mode=mode)
+
+
+def _frame_records(frame) -> list[dict]:
+    import math
+
     records = frame.to_dict(orient="records")
     for record in records:
         for key, value in list(record.items()):
             if isinstance(value, float) and math.isnan(value):
                 record[key] = None
+            elif value is None:
+                continue
             elif hasattr(value, "isoformat"):
                 record[key] = value.isoformat()
             elif hasattr(value, "item") and not isinstance(value, (str, bytes)):
@@ -104,7 +170,10 @@ def write_df(collection: str, frame, *, mode: str = "append") -> int:
                     record[key] = value.item()
                 except (ValueError, TypeError):
                     pass
-    return write(collection, records, mode=mode)
+            # pandas missing values (NaT, NA)
+            if record[key] is not None and str(record[key]) in ("NaT", "<NA>", "nan"):
+                record[key] = None
+    return records
 
 
 def result(value: Any) -> None:
@@ -116,3 +185,255 @@ def result(value: Any) -> None:
 def log(*parts: Any) -> None:
     """Print a line to the job's output (visible to the agent and in the trace)."""
     print(*parts, flush=True)
+
+
+# --- Transforms (#91) ------------------------------------------------------------------------------
+class _Window:
+    """The run's window: write rows in [start, end]; load from lookback_start (for returns, rolling stats)."""
+
+    def __init__(self, raw: dict):
+        self.start: str = raw["start"]
+        self.end: str = raw["end"]
+        self.lookback_start: str = raw.get("lookback_start") or raw["start"]
+
+    def __getitem__(self, k):
+        return getattr(self, k)
+
+    def __repr__(self):
+        return f"Window(start={self.start!r}, end={self.end!r}, lookback_start={self.lookback_start!r})"
+
+
+window: _Window | None = _Window(json.loads(os.environ["OH_WINDOW"])) if os.environ.get("OH_WINDOW") else None
+
+
+def _hash(record: dict) -> str:
+    import hashlib
+
+    body = {k: v for k, v in record.items() if k not in ("_id", "_hash", "_syncedAt", "processed_at")}
+    return hashlib.sha1(json.dumps(body, sort_keys=True, default=str).encode()).hexdigest()
+
+
+def upsert(collection: str, records: Iterable[dict], *, key: list[str], known_at_field: str | None = None) -> dict:
+    """Idempotent write on ``key``. Rows whose content did not change are skipped (content hash).
+
+    Returns ``{"written": n, "unchanged": m}``. ``known_at_field``, when given, must be set on every row.
+    """
+    from pymongo import UpdateOne
+
+    _guard(collection)
+    if not key:
+        raise ValueError("upsert needs a key, e.g. key=['security_id', 'date']")
+    rows = []
+    for record in records:
+        record = dict(record)
+        record.pop("_id", None)
+        missing = [k for k in key if record.get(k) is None]
+        if missing:
+            raise ValueError(f"{collection}: row without key field(s) {missing}: {str(record)[:200]}")
+        if known_at_field and record.get(known_at_field) in (None, ""):
+            raise ValueError(f"{collection}: row without {known_at_field} (point-in-time is required): {str(record)[:200]}")
+        record["_hash"] = _hash(record)
+        rows.append(record)
+    target = _db()[collection]
+    written = unchanged = 0
+    for start in range(0, len(rows), 1000):
+        chunk = rows[start : start + 1000]
+        existing = {
+            tuple(d.get(k) for k in key): d.get("_hash")
+            for d in target.find({"$or": [{k: r[k] for k in key} for r in chunk]}, {**{k: 1 for k in key}, "_hash": 1, "_id": 0})
+        }
+        ops = []
+        for r in chunk:
+            if existing.get(tuple(r[k] for k in key)) == r["_hash"]:
+                unchanged += 1
+                continue
+            ops.append(UpdateOne({k: r[k] for k in key}, {"$set": r}, upsert=True))
+        if ops:
+            res = target.bulk_write(ops, ordered=False)
+            written += (res.upserted_count or 0) + (res.modified_count or 0)
+    return {"written": written, "unchanged": unchanged}
+
+
+def upsert_df(collection: str, frame, *, key: list[str], known_at_field: str | None = None) -> dict:
+    """``upsert`` for a pandas DataFrame (NaN/NaT become null, numpy scalars plain Python)."""
+    return upsert(collection, _frame_records(frame), key=key, known_at_field=known_at_field)
+
+
+class _Output:
+    """A declared transform output: writes use its key and write mode, and enforce its known_at field."""
+
+    def __init__(self, cfg: dict):
+        self.cfg = cfg
+        self.collection = cfg["collection"]
+        self._known = None if cfg.get("static") else cfg.get("known_at_field")
+
+    def upsert(self, records: Iterable[dict]) -> dict:
+        mode = self.cfg.get("write_mode", "upsert")
+        if mode == "upsert":
+            return upsert(self.collection, records, key=self.cfg["key"], known_at_field=self._known)
+        rows = list(records)
+        if self._known:
+            for r in rows:
+                if r.get(self._known) in (None, ""):
+                    raise ValueError(f"{self.collection}: row without {self._known}: {str(r)[:200]}")
+        return {"written": write(self.collection, rows, mode="replace" if mode == "replace" else "append"), "unchanged": 0}
+
+    def upsert_df(self, frame) -> dict:
+        return self.upsert(_frame_records(frame))
+
+    write = upsert
+    write_df = upsert_df
+
+
+def output(name: str) -> _Output:
+    """A declared output of the running transform (see its Outputs panel)."""
+    if not _OUTPUTS:
+        raise RuntimeError("oh.output() is for transforms; this job declares no outputs")
+    if name not in _OUTPUTS:
+        raise KeyError(f"{name} is not a declared output (outputs: {', '.join(_OUTPUTS)})")
+    return _Output(_OUTPUTS[name])
+
+
+_dq_buffer: list[dict] = []
+
+
+def dq(issue_type: str, severity: str = "warn", *, security_id: str | None = None, date: str | None = None,
+       collection: str | None = None, **context: Any) -> None:
+    """Record a data-quality issue idempotently: one row per (collection, issue_type, security_id, date)."""
+    if severity not in ("info", "warn", "error"):
+        raise ValueError("severity must be info, warn or error")
+    _dq_buffer.append({
+        "collection": collection or _DQ_COLLECTION or "unknown",
+        "issue_type": issue_type,
+        "security_id": security_id,
+        "date": date,
+        "severity": severity,
+        "context": context or None,
+    })
+    if len(_dq_buffer) >= 1000:
+        _flush_dq()
+
+
+def _flush_dq() -> None:
+    from datetime import datetime, timezone
+
+    from pymongo import UpdateOne
+
+    if not _dq_buffer:
+        return
+    now = datetime.now(timezone.utc)
+    ops = [
+        UpdateOne(
+            {k: d[k] for k in ("collection", "issue_type", "security_id", "date")},
+            {"$set": {"severity": d["severity"], "context": d["context"], "last_seen_at": now},
+             "$setOnInsert": {"detected_at": now, "resolved": False}},
+            upsert=True,
+        )
+        for d in _dq_buffer
+    ]
+    _db()["dq_issues"].bulk_write(ops, ordered=False)
+    _dq_buffer.clear()
+
+
+_described: dict[str, dict] = {}
+
+
+def describe(collection: str, *, description: str | None = None, grain: str | None = None,
+             fields: dict[str, str | dict] | None = None, caveats: list[dict] | None = None) -> None:
+    """Curated catalog docs for an output. The runner applies them to the Schema Catalog after the run."""
+    entry = _described.setdefault(collection, {"collection": collection})
+    if description is not None:
+        entry["description"] = description
+    if grain is not None:
+        entry["grain"] = grain
+    if fields:
+        entry.setdefault("fields", {}).update(
+            {k: (v if isinstance(v, dict) else {"description": v}) for k, v in fields.items()}
+        )
+    if caveats:
+        entry["caveats"] = caveats
+    with open(_DESCRIBE_PATH, "w", encoding="utf-8") as handle:
+        json.dump(list(_described.values()), handle, default=str)
+
+
+def duckdb(**tables):
+    """A DuckDB connection with each keyword registered as a table: a DataFrame, or (collection, filter)."""
+    import duckdb as _duckdb
+
+    con = _duckdb.connect()
+    for name, value in tables.items():
+        if isinstance(value, tuple):
+            value = read_df(value[0], value[1] if len(value) > 1 else None)
+        con.register(name, value)
+    return con
+
+
+class _Pit:
+    """Point-in-time helpers (pipeline.core.pit): when information became known and when it is usable."""
+
+    def eod_known_at(self, d):
+        from pipeline.core.pit import eod_known_at
+
+        return eod_known_at(_as_date(d))
+
+    def earnings_known_at(self, d, timing: str = "unknown"):
+        from pipeline.core.pit import earnings_known_at
+
+        return earnings_known_at(_as_date(d), timing)
+
+    def as_of(self, known_at, *, same_day: bool = False):
+        """First trading date to act on ``known_at`` (uses the workspace trading_calendar when present)."""
+        from datetime import datetime, timezone
+
+        from pipeline.core.pit import as_of_from_known_at
+
+        if isinstance(known_at, str):
+            known_at = datetime.fromisoformat(known_at.replace("Z", "+00:00"))
+        if known_at.tzinfo is None:
+            known_at = known_at.replace(tzinfo=timezone.utc)
+        return as_of_from_known_at(known_at, self._sessions(), same_day=same_day)
+
+    _cache = None
+
+    def _sessions(self):
+        from datetime import datetime, timedelta, timezone
+
+        if self._cache is None:
+            rows = read("trading_calendar", {"is_trading_day": True}, sort=[("date", 1)],
+                        projection={"date": 1, "open_utc": 1, "_id": 0})
+            if rows:
+                self._cache = [(_as_date(r["date"]), _as_dt(r["open_utc"])) for r in rows]
+            else:  # no calendar yet: weekdays with a 09:30 ET (14:30 UTC) open
+                start = datetime(2000, 1, 3, 14, 30, tzinfo=timezone.utc)
+                days = (datetime.now(timezone.utc) - start).days + 400
+                self._cache = [
+                    ((start + timedelta(days=i)).date(), start + timedelta(days=i))
+                    for i in range(days) if (start + timedelta(days=i)).weekday() < 5
+                ]
+        return self._cache
+
+
+def _as_date(v):
+    from datetime import date, datetime
+
+    if isinstance(v, datetime):
+        return v.date()
+    if isinstance(v, date):
+        return v
+    return date.fromisoformat(str(v)[:10])
+
+
+def _as_dt(v):
+    from datetime import datetime, timezone
+
+    if isinstance(v, datetime):
+        return v if v.tzinfo else v.replace(tzinfo=timezone.utc)
+    return datetime.fromisoformat(str(v).replace("Z", "+00:00"))
+
+
+pit = _Pit()
+
+import atexit as _atexit  # noqa: E402
+
+# Buffered data-quality issues are written when the job exits (and every 1,000 issues).
+_atexit.register(lambda: _dq_buffer and _flush_dq())
