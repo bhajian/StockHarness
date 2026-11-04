@@ -14,8 +14,9 @@ def _sessions(start: date, end: date):
     try:
         import exchange_calendars as xcals
 
-        cal = xcals.get_calendar("XNYS")
-        idx = cal.sessions_in_range(str(start), str(end))
+        # Explicit bounds: the default calendar only reaches about a year ahead (M2, #31).
+        cal = xcals.get_calendar("XNYS", start=str(start), end=str(end))
+        idx = cal.sessions  # the calendar is already bounded to [start, end]
         out = []
         for s in idx:
             out.append((s.date(), cal.session_open(s).to_pydatetime(), cal.session_close(s).to_pydatetime()))
@@ -30,17 +31,22 @@ def _sessions(start: date, end: date):
         ]
 
 
+def compute(start=None, end=None):
+    """NYSE sessions from 1990 (or `start`) through the end of next year (M2: re-run monthly so the calendar
+    always reaches at least 11 months ahead)."""
+    start = start or date(1990, 1, 1)
+    end = end or date(date.today().year + 1, 12, 31)
+    return shape_calendar(_sessions(start, end))
+
+
 @transform("build_trading_calendar")
 def build(ctx):
     from pymongo import ReplaceOne
 
     from ..core.db import coll
 
-    start = ctx.start or date(1990, 1, 1)
-    end = ctx.end or date(date.today().year + 1, 12, 31)
-    sessions = _sessions(start, end)
-    ctx.rows_read = len(sessions)
-    rows = shape_calendar(sessions)
+    rows = compute(ctx.start, ctx.end)
+    ctx.rows_read = len(rows)
     c = coll("trading_calendar")
     c.create_index("date", unique=True)
     if rows:

@@ -57,3 +57,58 @@ class TestIntervals(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestBuildSecurities(unittest.TestCase):
+    """#98: H4 ISO bounds, H5 sector_is_backfilled, H6 ticker valid_from = first observed date."""
+
+    def build(self, existing=(), today="2026-11-04", profiles=None):
+        profiles = profiles or [
+            {"symbol": "AAA", "companyName": "Alpha Inc", "cik": "1", "sector": "Tech", "industry": "Software",
+             "exchange": "NASDAQ", "ipoDate": "1999-01-04", "isActivelyTrading": True},
+        ]
+        return s.build_securities_docs(profiles, [], [], list(existing), {"AAA": "2016-01-04"}, today)
+
+    def test_new_security(self):
+        [doc] = self.build()
+        ticker = next(i for i in doc["identifiers"] if i["type"] == "ticker")
+        self.assertEqual(ticker["valid_from"], "2016-01-04", "H6: first observed, not the IPO date")
+        self.assertEqual(doc["sector_history"], [{"value": "Tech", "valid_from": "2016-01-04", "valid_to": None, "backfilled": True}])
+        self.assertTrue(doc["sector_is_backfilled"])
+        self.assertEqual(doc["sector_observed_from"], "2026-11-04")
+        for f in ("sector_history", "industry_history", "exchange_history", "identifiers"):
+            for iv in doc[f]:
+                self.assertIsInstance(iv["valid_from"], str, f"H4: {f}")
+                self.assertEqual(len(iv["valid_from"]), 10)
+
+    def test_rerun_is_stable_and_a_change_is_dated_today(self):
+        [first] = self.build()
+        [same] = self.build([first], today="2026-11-05")
+        self.assertEqual(same, first, "a re-run is identical (identifier order included)")
+        moved = [{**self.build()[0], "security_id": first["security_id"]}]
+        [changed] = s.build_securities_docs(
+            [{"symbol": "AAA", "companyName": "Alpha Inc", "cik": "1", "sector": "Energy", "exchange": "NASDAQ"}],
+            [], [], moved, {"AAA": "2016-01-04"}, "2026-12-01",
+        )
+        self.assertEqual([i["value"] for i in changed["sector_history"]], ["Tech", "Energy"])
+        self.assertEqual(changed["sector_history"][0]["valid_to"], "2026-12-01")
+        self.assertEqual(changed["sector_history"][1]["valid_from"], "2026-12-01")
+        self.assertTrue(changed["sector_is_backfilled"], "the earliest interval stays flagged")
+
+    def test_old_docs_are_repaired(self):
+        from datetime import datetime, timezone
+
+        old = {
+            "security_id": "SEC_000007", "name": "Alpha Inc",
+            "identifiers": [
+                {"type": "cik", "value": "1", "valid_from": "1999-01-04", "valid_to": None},
+                {"type": "ticker", "value": "AAA", "valid_from": "1999-01-04", "valid_to": None},
+            ],
+            "sector_history": [{"value": "Tech", "valid_from": datetime(2026, 10, 23, 20, 35, tzinfo=timezone.utc), "valid_to": None}],
+        }
+        [doc] = self.build([old])
+        self.assertEqual(doc["security_id"], "SEC_000007", "matched by CIK, id kept")
+        self.assertEqual(next(i for i in doc["identifiers"] if i["type"] == "ticker")["valid_from"], "2016-01-04")
+        self.assertEqual(doc["sector_history"][0]["valid_from"], "2016-01-04")
+        self.assertTrue(doc["sector_is_backfilled"])
+        self.assertEqual(doc["sector_observed_from"], "2026-10-23", "H4: the old datetime became a date")
