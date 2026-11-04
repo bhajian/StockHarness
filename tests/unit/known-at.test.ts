@@ -10,7 +10,12 @@ const { DATASET_CATALOG } = await import('../../packages/core/src/datasetCatalog
 test('every catalog dataset declares a known-at rule', () => {
   const missing = DATASET_CATALOG.map((d) => d.id).filter((id) => !KNOWN_AT[id]);
   assert.deepEqual(missing, []);
-  assert.equal(Object.keys(KNOWN_AT).length, DATASET_CATALOG.length, 'no rules for unknown datasets');
+  const ids = new Set(DATASET_CATALOG.map((d) => d.id));
+  assert.deepEqual(
+    Object.keys(KNOWN_AT).filter((k) => !ids.has(k)),
+    ['delisted_companies'],
+    'only known side outputs have rules without a dataset',
+  );
   for (const r of Object.values(KNOWN_AT)) assert.ok(describeKnownAt(r).length > 10);
 });
 

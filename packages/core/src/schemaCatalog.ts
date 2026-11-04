@@ -119,6 +119,14 @@ const LAYER2: Record<
   },
 };
 
+/** Layer 1 collections written as a side output of another dataset's sync. */
+const SIDE_OUTPUTS: Record<string, { description: string; key: string[] }> = {
+  delisted_companies: {
+    description:
+      'Delisted companies merged into the universe by the universe sync (about 100 names on the current plan).',
+    key: ['symbol', 'delistedDate'],
+  },
+};
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const DATETIME_RE = /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}/;
 function typeOf(v: unknown): FieldType {
@@ -188,6 +196,8 @@ export function inferFields(docs: Record<string, unknown>[], curated?: CatalogCu
 const grainOf = (key: string[]) => `one row per ${key.join(' × ')}`;
 /** Defs whose rows land in `name` (a sync's targetCollection override wins). */
 function producersOf(name: string, syncs: DatasetSync[]) {
+  // The universe sync also writes the delisted-companies list it merges in.
+  if (name === 'delisted_companies') return syncs.filter((s) => s.dataset === 'universe');
   return syncs.filter((s) => (s.targetCollection || catalogById.get(s.dataset)?.defaultCollection) === name);
 }
 
@@ -200,7 +210,7 @@ export async function refreshCatalogEntry(ownerId: string, name: string, syncs?:
   const coll = db.collection(name);
   const producers = producersOf(name, allSyncs);
   const def: DatasetDef | undefined =
-    (producers[0] && catalogById.get(producers[0].dataset)) ||
+    (name !== 'delisted_companies' && producers[0] && catalogById.get(producers[0].dataset)) ||
     DATASET_CATALOG.find((d) => d.defaultCollection === name);
   const l2 = LAYER2[name];
   let refreshError: string | undefined;
@@ -222,7 +232,8 @@ export async function refreshCatalogEntry(ownerId: string, name: string, syncs?:
   const fields = inferFields(sample, curated);
   const names = new Set(fields.map((f) => f.name));
   const symbolField = names.has('security_id') ? 'security_id' : names.has('symbol') ? 'symbol' : undefined;
-  const rule: KnownAtRule | undefined = def ? KNOWN_AT[def.id] : undefined;
+  const rule: KnownAtRule | undefined =
+    name === 'delisted_companies' ? KNOWN_AT.delisted_companies : def ? KNOWN_AT[def.id] : undefined;
   const dateField =
     l2?.dateField ??
     def?.dateField ??
@@ -298,13 +309,22 @@ export async function refreshCatalogEntry(ownerId: string, name: string, syncs?:
   const entry: Omit<CatalogEntry, '_id'> = {
     ownerId,
     collection: name,
-    layer: l2 ? 2 : def ? 1 : null,
+    layer: l2 ? 2 : def || SIDE_OUTPUTS[name] ? 1 : null,
     producedBy: l2
       ? [{ type: 'pipeline', name: l2.name }]
       : producers.map((s) => ({ type: 'sync' as const, name: s.name, id: s._id, dataset: s.dataset })),
-    description: curated?.description ?? l2?.description ?? def?.description ?? '',
-    grain: curated?.grain ?? (l2 ? l2.grain : def ? grainOf(def.keyFields) : ''),
-    primaryKey: l2?.key ?? def?.keyFields ?? [],
+    description:
+      curated?.description ?? l2?.description ?? SIDE_OUTPUTS[name]?.description ?? def?.description ?? '',
+    grain:
+      curated?.grain ??
+      (l2
+        ? l2.grain
+        : SIDE_OUTPUTS[name]
+          ? grainOf(SIDE_OUTPUTS[name].key)
+          : def
+            ? grainOf(def.keyFields)
+            : ''),
+    primaryKey: l2?.key ?? SIDE_OUTPUTS[name]?.key ?? def?.keyFields ?? [],
     timeSemantics,
     fields,
     coverage,
