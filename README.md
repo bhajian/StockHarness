@@ -1,6 +1,13 @@
 # StockHarness
 
-StockHarness is a self-hosted research system for finding and proving stock-trading strategies. It works in layers:
+**StockHarness** is a self-hosted research system for finding, proving and running stock-trading strategies.
+
+- It keeps a clean, point-in-time copy of 5–10 years of market data.
+- A team of AI research agents proposes trading theories and tests each one on a trusted backtest engine.
+- You review the evidence, approve the ideas that hold up, and simulate them over history.
+- Approved strategies then run live, producing daily signals against a paper (dry-run) portfolio.
+
+It works in five layers:
 
 1. It syncs historical and scheduled market data from Financial Modeling Prep (FMP) into MongoDB.
 2. It prepares that data into clean, point-in-time collections.
@@ -8,11 +15,16 @@ StockHarness is a self-hosted research system for finding and proving stock-trad
 4. People review the results, approve ideas and simulate them over history.
 5. Approved strategies produce live signals and run in a paper (dry-run) portfolio.
 
-It is built on a fork of [OpenHarness](https://github.com/deepfinery/OpenHarness), a durable, MCP-native agent platform. Agents, harnesses, the runner, the Python executor and the API come from OpenHarness. StockHarness adds the market-data and research layers on top.
+StockHarness's agents, harnesses, durable runner, Python executor and API are its own platform. They were forked from the open-source [OpenHarness](https://github.com/deepfinery/OpenHarness) project, which StockHarness extends with the market-data, research, simulation and live layers.
 
+- **Product guide:** [PRODUCT.md](PRODUCT.md) explains the finished product:
+  - every one of the 42 datasets, with its fields and real example rows,
+  - the clean Layer 2 collections,
+  - the research agents, their skills and about 40 strategy ideas, with a worked end-to-end example,
+  - what each layer does in the app.
 - **Roadmap:** [ROADMAP.md](ROADMAP.md) describes the 5-layer architecture, the gaps and the ordered plan. The ordered checklist is pinned as [#139](https://github.com/bhajian/StockHarness/issues/139).
-- **Platform reference:** [docs/platform.md](docs/platform.md) covers agents, harnesses, runs, resilience, configuration and the API.
-- **Live instance:** https://openharness.faberiq.ai (AWS EKS).
+- **Platform reference:** [docs/platform.md](docs/platform.md) covers StockHarness's agents, harnesses, runs, resilience, configuration and the API.
+- **Live instance:** https://openharness.faberiq.ai (AWS EKS; the host name predates the rename).
 
 ## Contents
 
@@ -52,9 +64,9 @@ Three rules hold the system together:
 
 | Area                                                                              | Status                                                                                                                                                                                                                           |
 | --------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Layer 1: dataset syncs**                                                        | ✅ 41 FMP datasets with schedules, a survivorship-aware sync universe, append-only snapshots and statements, bulk actions, and YAML config export/import. See [Datasets](#datasets-layer-1).                                     |
+| **Layer 1: dataset syncs**                                                        | ✅ 42 FMP datasets with schedules, a survivorship-aware sync universe, append-only snapshots and statements, bulk actions, and YAML config export/import. See [Datasets](#datasets-layer-1).                                     |
 | **Layer 2: pipeline modules**                                                     | 🟡 `trading_calendar`, `securities`, `corporate_actions`, `prices_daily` and `macro_daily` exist in [`pipeline/`](pipeline/README.md) and run from a harness. Moving them into a first-class **Transforms** tab is milestone M2. |
-| **Agent platform**                                                                | ✅ Agents, harnesses, schedules, the Python executor (`run_python` and code steps), MongoDB over MCP, knowledge, skills and the API, all inherited from OpenHarness. See [docs/platform.md](docs/platform.md).                   |
+| **Agent platform**                                                                | ✅ Agents, harnesses, schedules, the Python executor (`run_python` and code steps), MongoDB over MCP, knowledge, skills and the API. See [docs/platform.md](docs/platform.md).                                                   |
 | **Schema Catalog, trusted evaluator, research loop, Ideas, Simulations, Signals** | ⏳ Planned in milestones M1–M7. See [ROADMAP.md](ROADMAP.md).                                                                                                                                                                    |
 
 Known data limits on the current FMP plan:
@@ -87,14 +99,14 @@ Later starts reuse `.env` and the volumes. Run `docker compose up --build -d --w
 
 The **Dataset** tab syncs raw FMP data into your workspace's MongoDB, one collection per dataset. The sync runs in the backend; it doesn't use a harness or an agent.
 
-- **Catalog:** 41 datasets in 7 categories:
+- **Catalog:** 42 datasets in 7 categories (each is described with its fields and a real example in [PRODUCT.md §4](PRODUCT.md#4-layer-1-data-sync)):
   - Prices: EOD stocks and indexes.
   - Market: treasury rates, sector performance, gainers and most active, news, GDP, CPI.
   - Calendars: earnings, dividends, splits, and full dividend and split history.
   - Fundamentals: statements, metrics, ratios, scores, growth, segments, owner earnings.
   - Estimates: analyst estimates, price targets, grades.
   - Ownership: insider and congress trades.
-  - Reference: profiles, float, market cap, peers, executives, employees.
+  - Reference: the sync universe, profiles, float, market cap, peers, executives, employees.
 
   They're defined in [`packages/core/src/datasetCatalog.ts`](packages/core/src/datasetCatalog.ts).
 
@@ -140,7 +152,7 @@ Today the chain runs from the "Pipeline Layer 2" harness ([`deploy/pipeline-harn
 
 ## Agents and research
 
-The platform from OpenHarness provides:
+The StockHarness platform provides:
 
 - agents with four patterns (ReAct, plan-and-execute, reflection, autonomous loop),
 - unlimited budgets when configured, and a model role per agent,
@@ -148,6 +160,8 @@ The platform from OpenHarness provides:
 - schedules, skills, knowledge bases, and MCP tools.
 
 Agents can run Python they write themselves (`run_python`, with up to 1,000 parallel parameter sets) in an isolated executor. The executor includes pandas, polars, duckdb, scipy, statsmodels, scikit-learn, LightGBM, TA-Lib and empyrical. See [docs/python-executor.md](docs/python-executor.md) and [docs/platform.md](docs/platform.md).
+
+[PRODUCT.md §7](PRODUCT.md#7-layer-3-research-agents) describes the planned agents (Theorist, Judge, Coder), the skills they load, the strategy ideas they explore, and a full theory → code → evaluation → verdict example.
 
 The research layers are planned in [ROADMAP.md](ROADMAP.md):
 
@@ -186,7 +200,7 @@ Use Docker Compose via `./start.sh` (see [Quick start](#quick-start)).
 
 |                     |                                                                                                                               |
 | ------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| Cluster / namespace | `deepfinery-training-eks` / `openharness` (us-east-1)                                                                         |
+| Cluster / namespace | `deepfinery-training-eks` / `openharness`, a legacy name (us-east-1)                                                          |
 | Public URL          | https://openharness.faberiq.ai (an ALB terminates TLS)                                                                        |
 | Images              | ECR `491085405405.dkr.ecr.us-east-1.amazonaws.com/openharness/{app,gateway,mongodb-mcp,python-executor}`                      |
 | Manifests           | [`deploy/k8s/overlays/aws`](deploy/k8s/overlays/aws/kustomization.yaml): gp3 EBS storage, HTTP proxy, no Caddy, NeMo or Garak |
