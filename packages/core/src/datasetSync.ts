@@ -1,6 +1,7 @@
 // Config-driven FMP -> workspace-MongoDB sync. Runs entirely in the backend (no harness,
 // no Python). dispatchDatasetSyncs() fires due syncs from the shared server tick loop.
 import { randomUUID } from 'node:crypto';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { z } from 'zod';
 import { mongo, collection } from './db.js';
 import { workspaceDatabase } from './mongoMcp.js';
@@ -9,11 +10,22 @@ import { nextScheduledAt } from './schedule.js';
 import { HttpError, safeError } from './security.js';
 import { scheduleSchema, type Stored } from './schema.js';
 import { catalogById, UNIVERSE_DATASET_ID, presetById, type DatasetDef } from './datasetCatalog.js';
+import {
+  PriorityRateLimiter,
+  SyncWorkQueue,
+  SYNC_PRIORITIES,
+  defaultPriority,
+  type SyncPriority,
+} from './syncScheduler.js';
 
 const FMP_BASE = 'https://financialmodelingprep.com/stable';
 const MAX_RPM = Number(process.env.DATASET_SYNC_RPM) || 250;
-const MIN_INTERVAL = 60000 / Math.max(1, MAX_RPM);
-let lastCall = 0;
+/** One FMP rate limit for every sync in the process; the highest-priority waiter gets the next slot (#78). */
+export const fmpLimiter = new PriorityRateLimiter(MAX_RPM);
+/** Background sync runs: priority first, never twice at once, never blocking the dispatcher tick. */
+export const syncQueue = new SyncWorkQueue(Math.max(1, Number(process.env.DATASET_SYNC_CONCURRENCY) || 3));
+/** The priority of the sync whose code is running, so every FMP call it makes is scheduled at that priority. */
+const syncContext = new AsyncLocalStorage<{ priority: SyncPriority }>();
 
 export const datasetSyncInput = z.object({
   name: z.string().min(1).max(200),
@@ -37,6 +49,8 @@ export const datasetSyncInput = z.object({
     .optional(),
   retentionDays: z.number().int().min(1).max(36500).optional(),
   params: z.record(z.unknown()).optional(),
+  /** P0 prices / corporate actions / calendars, P1 fundamentals / estimates, P2 news / segments / peers. */
+  priority: z.enum(SYNC_PRIORITIES).optional(),
   schedule: scheduleSchema,
 });
 export type DatasetSyncInput = z.infer<typeof datasetSyncInput>;
@@ -65,6 +79,10 @@ export type DatasetSyncRun = {
   startedAt: Date;
   finishedAt?: Date;
 };
+
+/** The sync's explicit priority, else its dataset's default. */
+export const effectivePriority = (s: Pick<DatasetSync, 'dataset' | 'priority'>): SyncPriority =>
+  s.priority ?? defaultPriority(s.dataset);
 
 export const datasetSyncs = () => collection<DatasetSync>('dataset_syncs');
 export const datasetSyncRuns = () => collection<DatasetSyncRun>('dataset_sync_runs');
@@ -104,10 +122,9 @@ async function fmpGet(
   const query = new URLSearchParams({ ...objToStr(params), apikey });
   const url = `${FMP_BASE}/${endpoint}?${query.toString()}`;
   let lastErr: unknown;
+  const priority = syncContext.getStore()?.priority ?? 'P1';
   for (let attempt = 0; attempt < 8; attempt++) {
-    const wait = MIN_INTERVAL - (Date.now() - lastCall);
-    if (wait > 0) await sleep(wait);
-    lastCall = Date.now();
+    await fmpLimiter.acquire(priority);
     try {
       const res = await fetch(url, {
         headers: { 'user-agent': 'stockharness-dataset-sync' },
@@ -118,7 +135,10 @@ async function fmpGet(
       if ([402, 429, 500, 502, 503, 504].includes(res.status)) {
         if (res.status === 402 && attempt >= 5)
           throw new HttpError(402, `FMP endpoint ${endpoint} is not in the current plan`);
-        await sleep(Math.min(60000, 2 ** attempt * 1000) + Math.random() * 1000);
+        const backoff = Math.min(60000, 2 ** attempt * 1000) + Math.random() * 1000;
+        // A throttle means FMP wants *everyone* to slow down: pause all syncs, not just this request.
+        if (res.status === 429 || res.status === 402) fmpLimiter.cooldown(backoff);
+        else await sleep(backoff);
         lastErr = new Error(`FMP ${res.status}`);
         continue;
       }
@@ -357,7 +377,7 @@ export async function runDatasetSync(
   await datasetSyncRuns().insertOne(run);
   try {
     const apikey = await fmpApiKey(sync.ownerId, sync.connectionId);
-    const rows = await pull(sync, def, apikey);
+    const rows = await syncContext.run({ priority: effectivePriority(sync) }, () => pull(sync, def, apikey));
     await datasetSyncRuns().updateOne(
       { _id: run._id },
       { $set: { status: 'succeeded', rows, finishedAt: new Date() } },
@@ -440,16 +460,31 @@ export async function dispatchDatasetSyncs() {
       $set: { nextRunAt: nextScheduledAt(schedule) },
     });
     if (!claimed.matchedCount) continue;
-    try {
-      await runDatasetSync(sync, { trigger: 'schedule', scheduleKey: `${sync._id}:${dueAt.toISOString()}` });
-    } catch (error) {
-      // One failing sync must not starve the others; back off a minute.
-      await datasetSyncs().updateOne(
-        { _id: sync._id },
-        { $set: { nextRunAt: new Date(Date.now() + 60000), lastError: safeError(error) } },
-      );
-    }
+    // Enqueue, never await: a multi-hour universe sync must not stall the server's dispatcher tick (#78).
+    syncQueue.enqueue(sync._id, effectivePriority(sync), async () => {
+      try {
+        await runDatasetSync(sync, {
+          trigger: 'schedule',
+          scheduleKey: `${sync._id}:${dueAt.toISOString()}`,
+        });
+      } catch (error) {
+        // One failing sync must not starve the others; back off a minute.
+        await datasetSyncs().updateOne(
+          { _id: sync._id },
+          { $set: { nextRunAt: new Date(Date.now() + 60000), lastError: safeError(error) } },
+        );
+      }
+    });
   }
+}
+
+/** Queue a manual run (Run now, bulk Run). Returns false when the sync is already queued or running. */
+export function enqueueManualRun(sync: DatasetSync) {
+  return syncQueue.enqueue(sync._id, effectivePriority(sync), async () => {
+    const fresh = await datasetSyncs().findOne({ _id: sync._id });
+    if (!fresh) return; // deleted while queued
+    await runDatasetSync(fresh, { trigger: 'manual' }).catch(() => undefined);
+  });
 }
 
 export type { Stored };
@@ -496,15 +531,6 @@ export function collectionsToDrop(
 
 // A run row stuck in `running` longer than this (e.g. the pod restarted mid-sync) no longer blocks.
 const STALE_RUN_MS = 12 * 3600 * 1000;
-
-/** Run syncs one after another so a "run all" does not stampede the shared FMP rate limiter. */
-async function runSequentially(syncs: DatasetSync[]) {
-  for (const sync of syncs) {
-    const fresh = await datasetSyncs().findOne({ _id: sync._id });
-    if (!fresh) continue; // deleted while queued
-    await runDatasetSync(fresh, { trigger: 'manual' }).catch(() => undefined);
-  }
-}
 
 export async function applyDatasetSyncBulk(
   ownerId: string,
@@ -578,14 +604,16 @@ export async function applyDatasetSyncBulk(
         })
         .project<{ syncId: string }>({ syncId: 1 })
         .toArray();
-      const busy = new Set(running.map((r) => r.syncId));
-      // Keep the table order (newest first), matching what the user sees.
-      const queue = selected
+      const busy = new Set([
+        ...running.map((r) => r.syncId),
+        ...selected.filter((s) => syncQueue.has(s._id)).map((s) => s._id),
+      ]);
+      // Keep the table order (newest first); the queue then orders by priority and shares the FMP limit.
+      const toRun = selected
         .filter((s) => !busy.has(s._id))
         .sort((a, b) => ids.indexOf(a._id) - ids.indexOf(b._id));
-      result.queued = queue.map((s) => s._id);
+      result.queued = toRun.filter((s) => enqueueManualRun(s)).map((s) => s._id);
       result.alreadyRunning = [...busy];
-      void runSequentially(queue);
       break;
     }
   }
