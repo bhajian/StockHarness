@@ -7529,3 +7529,5 @@ details.advanced summary {
 .priority-pill.p1 { background: #f7f4e5; color: #8a6d1d; }
 .priority-pill.p2 { background: #eceef1; color: #6b7280; }
 .priority-pill small { font-weight: 400; opacity: 0.7; }
+.depth-fields { display: flex; flex-direction: column; gap: 8px; }
+.depth-probe { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }

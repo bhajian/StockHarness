@@ -22,6 +22,8 @@ import {
   deleteDatasetSync,
   runDatasetSyncNow,
   bulkDatasetSyncs,
+  probeDatasetDepth,
+  type DepthProbe,
   exportDatasetSyncsYaml,
   importDatasetSyncsYaml,
   type DatasetImportPlan,
@@ -54,6 +56,8 @@ type SyncForm = {
   targetCollection: string;
   retentionDays: string;
   priority: '' | 'P0' | 'P1' | 'P2';
+  historyPeriods: string;
+  statementPeriod: '' | 'quarter' | 'annual';
   enabled: boolean;
   schedule: Schedule;
 };
@@ -187,6 +191,8 @@ export function DatasetsPage({ data, refresh, act, isAdmin }: Props) {
     targetCollection: '',
     retentionDays: '',
     priority: '',
+    historyPeriods: '',
+    statementPeriod: '',
     enabled: true,
     schedule: {
       enabled: true,
@@ -209,6 +215,8 @@ export function DatasetsPage({ data, refresh, act, isAdmin }: Props) {
     targetCollection: s.targetCollection ?? '',
     retentionDays: s.retentionDays ? String(s.retentionDays) : '',
     priority: s.priority ?? '',
+    historyPeriods: s.historyPeriods ? String(s.historyPeriods) : '',
+    statementPeriod: s.statementPeriod ?? '',
     enabled: s.enabled ?? true,
     schedule: s.schedule ?? blankForm().schedule,
   });
@@ -239,6 +247,9 @@ export function DatasetsPage({ data, refresh, act, isAdmin }: Props) {
     if (editing.targetCollection.trim()) body.targetCollection = editing.targetCollection.trim();
     if (editing.retentionDays) body.retentionDays = Number(editing.retentionDays);
     if (editing.priority) body.priority = editing.priority;
+    if (item?.defaultHistoryPeriods && editing.historyPeriods)
+      body.historyPeriods = Number(editing.historyPeriods);
+    if (item?.periodParam && editing.statementPeriod) body.statementPeriod = editing.statementPeriod;
     await saveDatasetSync(body, editing.id);
     await refresh();
     setEditing(null);
@@ -769,6 +780,13 @@ export function DatasetsPage({ data, refresh, act, isAdmin }: Props) {
               </div>
             )}
 
+            {selectedItem?.perSymbol &&
+              (selectedItem.defaultHistoryPeriods ||
+                selectedItem.periodParam ||
+                selectedItem.supportsDateRange) && (
+                <DepthFields editing={editing} setEditing={setEditing} item={selectedItem} />
+              )}
+
             <div className="two-columns">
               <Field label="Collection" hint={`Default: ${selectedItem?.defaultCollection ?? '—'}`}>
                 <input
@@ -862,6 +880,95 @@ function ImportPlanView({ plan }: { plan: DatasetImportPlan }) {
         <div className="dataset-plan-section muted">Unchanged: {plan.unchanged.length}</div>
       )}
       {nothing && <div className="dataset-plan-section muted">Nothing to change.</div>}
+    </div>
+  );
+}
+
+/** History depth (#77): rows per symbol / statement period, plus a probe of what the FMP plan returns. */
+function DepthFields({
+  editing,
+  setEditing,
+  item,
+}: {
+  editing: SyncForm;
+  setEditing: (f: SyncForm) => void;
+  item: DatasetCatalogItem;
+}) {
+  const [probe, setProbe] = useState<DepthProbe | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const unit =
+    item.periodParam === 'quarter' && editing.statementPeriod !== 'annual' ? 'quarters' : 'periods';
+  return (
+    <div className="depth-fields">
+      <div className="two-columns">
+        {item.defaultHistoryPeriods ? (
+          <Field
+            label={`History depth (${unit} per symbol)`}
+            hint={`Default ${item.defaultHistoryPeriods}. Target for statements: 40 quarters.`}
+          >
+            <input
+              type="number"
+              min={1}
+              max={200}
+              value={editing.historyPeriods}
+              onChange={(e) => setEditing({ ...editing, historyPeriods: e.target.value })}
+              placeholder={String(item.defaultHistoryPeriods)}
+            />
+          </Field>
+        ) : (
+          <div />
+        )}
+        {item.periodParam ? (
+          <Field label="Statement period">
+            <select
+              value={editing.statementPeriod}
+              onChange={(e) =>
+                setEditing({ ...editing, statementPeriod: e.target.value as SyncForm['statementPeriod'] })
+              }
+            >
+              <option value="">Default ({item.periodParam})</option>
+              <option value="quarter">Quarterly</option>
+              <option value="annual">Annual</option>
+            </select>
+          </Field>
+        ) : (
+          <div />
+        )}
+      </div>
+      <div className="depth-probe">
+        <Button
+          type="button"
+          variant="secondary"
+          disabled={busy || !editing.connectionId}
+          onClick={async () => {
+            setBusy(true);
+            setError('');
+            try {
+              setProbe(
+                await probeDatasetDepth({
+                  dataset: editing.dataset,
+                  connectionId: editing.connectionId,
+                  statementPeriod: editing.statementPeriod || undefined,
+                  syncId: editing.id,
+                }),
+              );
+            } catch (e) {
+              setError(e instanceof Error ? e.message : String(e));
+            } finally {
+              setBusy(false);
+            }
+          }}
+        >
+          Test depth
+        </Button>
+        <span className="field-help">
+          {probe
+            ? `FMP returned ${probe.rows} rows for ${probe.symbol}: ${probe.earliest ?? '—'} → ${probe.latest ?? '—'} (${probe.years} years).`
+            : error ||
+              'Asks FMP for as much history as possible for one symbol (AAPL), to check what the plan allows.'}
+        </span>
+      </div>
     </div>
   );
 }

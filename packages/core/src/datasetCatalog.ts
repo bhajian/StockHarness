@@ -392,7 +392,7 @@ export const DATASET_CATALOG: DatasetDef[] = [
     endpoint: 'income-statement',
     scope: 'per-symbol',
     incremental: 'snapshot',
-    keyFields: ['symbol', 'date', 'acceptedDate'],
+    keyFields: ['symbol', 'date', 'period', 'acceptedDate'],
     dateField: 'date',
     supportsDateRange: false,
     perSymbol: true,
@@ -408,7 +408,7 @@ export const DATASET_CATALOG: DatasetDef[] = [
     endpoint: 'balance-sheet-statement',
     scope: 'per-symbol',
     incremental: 'snapshot',
-    keyFields: ['symbol', 'date', 'acceptedDate'],
+    keyFields: ['symbol', 'date', 'period', 'acceptedDate'],
     dateField: 'date',
     supportsDateRange: false,
     perSymbol: true,
@@ -424,7 +424,7 @@ export const DATASET_CATALOG: DatasetDef[] = [
     endpoint: 'cash-flow-statement',
     scope: 'per-symbol',
     incremental: 'snapshot',
-    keyFields: ['symbol', 'date', 'acceptedDate'],
+    keyFields: ['symbol', 'date', 'period', 'acceptedDate'],
     dateField: 'date',
     supportsDateRange: false,
     perSymbol: true,
@@ -697,14 +697,16 @@ export const TICKER_PRESETS: TickerPreset[] = [
   {
     id: 'sp500_like',
     label: 'Top 500 US (S&P 500-like)',
-    description: 'Largest 500 US stocks by market cap (proxy; exact S&P 500 membership needs a plan upgrade).',
+    description:
+      'Largest 500 US stocks by market cap (proxy; exact S&P 500 membership needs a plan upgrade).',
     screener: { exchange: 'NASDAQ,NYSE,AMEX', marketCapMoreThan: 1_000_000_000 },
     take: 500,
   },
   {
     id: 'nasdaq100_like',
     label: 'Top 100 Nasdaq (Nasdaq-100-like)',
-    description: 'Largest 100 Nasdaq stocks by market cap (proxy; exact Nasdaq-100 membership needs a plan upgrade).',
+    description:
+      'Largest 100 Nasdaq stocks by market cap (proxy; exact Nasdaq-100 membership needs a plan upgrade).',
     screener: { exchange: 'NASDAQ', marketCapMoreThan: 1_000_000_000 },
     take: 100,
   },
@@ -737,5 +739,9 @@ export function catalogView() {
     supportsDateRange: d.supportsDateRange,
     recommendedEveryMinutes: d.recommendedEveryMinutes,
     defaultCollection: d.defaultCollection,
+    // History depth (#77): limit-based datasets take a per-sync row count; statement-style ones a period.
+    defaultHistoryPeriods: typeof d.params?.limit === 'number' ? d.params.limit : undefined,
+    periodParam: typeof d.params?.period === 'string' ? d.params.period : undefined,
+    incremental: d.incremental,
   }));
 }
