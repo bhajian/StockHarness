@@ -31,6 +31,37 @@ oh.result({"ticker": oh.params["ticker"], "rows": len(prices)})
 
 Nothing persists between jobs except what the code writes to collections. `MONGODB_URI` in the job points at the workspace database with a user that has `readWrite` on that database only; the job cannot see other workspaces, the application database or the broker. The last 200 KB of stdout and stderr come back; the full outcome is on the run's jobs (`GET /api/runs/<id>/jobs`).
 
+### Transform helpers (Layer 2, #91)
+
+Code that runs as a **transform** gets its run window and its declared outputs from the runner. These
+helpers keep transforms idempotent and point-in-time-correct:
+
+```python
+import oh
+
+w = oh.window                                     # start, end, lookback_start
+bars = oh.read_df("eod_prices", {"date": {"$gte": w.lookback_start, "$lte": w.end}}, columns=["symbol", "date", "close"])
+rows = compute(bars)
+oh.output("prices_daily").upsert_df(rows[rows.date >= w.start])   # write only the window
+oh.dq("stale_price", "warn", security_id="SEC_000008", date="2026-11-03")
+oh.describe("prices_daily", fields={"adj_close": "Close adjusted for splits and dividends, USD"})
+```
+
+| Helper                                                                                                    | Purpose                                                                                                                                                                                             |
+| --------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `oh.window`                                                                                               | `start`, `end`, `lookback_start` of the run (`None` outside a transform). Load from `lookback_start`, write only `[start, end]`.                                                                    |
+| `oh.output(name)`                                                                                         | A declared output. `.upsert(records)` / `.upsert_df(frame)` use its key and write mode (`upsert`, `append` or `replace`), and refuse rows without its `known_at` field unless the output is static. |
+| `oh.upsert(name, records, *, key, known_at_field=None)` / `oh.upsert_df(...)`                             | Idempotent write on `key`. Rows whose content didn't change are skipped (content hash), and the call returns `{"written", "unchanged"}`.                                                            |
+| `oh.read(..., columns=[...])`, `oh.read_df(..., columns=[...], chunksize=N)`                              | Load only some fields; `chunksize` yields DataFrames of N rows for large collections.                                                                                                               |
+| `oh.duckdb(**tables)`                                                                                     | A DuckDB connection with each keyword registered as a table: a DataFrame, or `(collection, filter)`.                                                                                                |
+| `oh.dq(issue_type, severity="warn", *, security_id=None, date=None, **context)`                           | A data-quality issue, written **idempotently**: one row per (collection, issue_type, security_id, date) in `dq_issues`. Issues are buffered and written at exit.                                    |
+| `oh.describe(collection, *, description, grain, fields, caveats)`                                         | Curated Schema Catalog docs for an output; the runner applies them after the run.                                                                                                                   |
+| `oh.pit.eod_known_at(d)`, `oh.pit.earnings_known_at(d, timing)`, `oh.pit.as_of(known_at, same_day=False)` | Point-in-time helpers from `pipeline.core.pit`. `as_of` uses the workspace `trading_calendar` when present, otherwise weekday sessions.                                                             |
+
+When a job declares outputs (every transform does), **writing to any other collection raises
+`PermissionError`**, so a transform writes exactly what it declares. The SDK tests run inside the real
+executor image against a throwaway MongoDB: `./scripts/test-oh-sdk.sh`.
+
 ## Secrets
 
 API keys and passwords the code needs live under **Settings → Python secrets** (`PUT /api/executor/secrets/<NAME>` with `{"value": ...}`, or `{"connectionId": ..., "queryParam": "apikey"}` to copy the key an MCP connection already holds, server-side). Values are stored encrypted and never returned. A Python step lists the secrets it uses (`secrets: ["FMP_API_KEY"]`), and so does an agent (`codeExecution.secrets`); the job gets exactly those as environment variables (`os.environ["FMP_API_KEY"]`). A listed secret that does not exist fails the job before it starts. Code can print what it is given, so give an agent only the secrets its task needs.
