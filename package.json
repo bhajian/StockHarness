@@ -44,6 +44,7 @@
     "jszip": "^3.10.2",
     "lucide-react": "^0.468.0",
     "mammoth": "^1.11.0",
+    "monaco-editor": "^0.57.0",
     "mongodb": "^6.20.0",
     "multer": "^2.0.2",
     "nodemailer": "^6.10.1",
