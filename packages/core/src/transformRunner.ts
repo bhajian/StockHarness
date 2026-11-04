@@ -149,7 +149,7 @@ export async function executeTransformRun(
     outcome = await execute(
       {
         ownerId: run.ownerId,
-        runId: `transform:${run._id}`,
+        runId: `transform-${run._id}`,
         key: '1',
         signal: AbortSignal.timeout((TRANSFORM_TIMEOUT_SECONDS + 600) * 1000),
       },

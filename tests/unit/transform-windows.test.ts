@@ -29,3 +29,14 @@ test('full-mode transforms get no window (they process everything)', () => {
     undefined,
   ]);
 });
+
+test('the code-job run id is a valid Kubernetes label value', async () => {
+  const src = await (
+    await import('node:fs/promises')
+  ).readFile('packages/core/src/transformRunner.ts', 'utf8');
+  const m = src.match(/runId: `([^`]+)`/);
+  assert.ok(m, 'runId template found');
+  const sample = m![1].replace('${run._id}', '65f85192-387c-4b42-8430-4f09197e3074');
+  assert.match(sample, /^(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])?$/);
+  assert.ok(sample.length <= 63);
+});
