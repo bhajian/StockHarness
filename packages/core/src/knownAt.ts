@@ -41,6 +41,8 @@ const STATEMENT: KnownAtRule = { type: 'statement', field: 'acceptedDate', perio
 /** One rule per catalog dataset id (a unit test enforces completeness). */
 export const KNOWN_AT: Record<string, KnownAtRule> = {
   universe: CURRENT,
+  /** Side output of the universe sync (not a dataset of its own): the delisting date is when it became known. */
+  delisted_companies: ts('delistedDate'),
   eod_prices: eod(),
   eod_index: eod(),
   treasury_rates: eod(),

@@ -79,6 +79,9 @@ before(async () => {
   ]);
   await db.collection('company_profiles').insertOne({ symbol: 'AAPL', sector: 'Technology', beta: 1.1 });
   await db.collection('fin_income').insertOne({ symbol: 'ZZZ', date: '2025-05-31', netIncome: 1 });
+  await db
+    .collection('delisted_companies')
+    .insertOne({ symbol: 'AEAE', delistedDate: '2026-10-14', companyName: 'AltEnergy' });
   await db.collection('prices_daily').insertOne({
     security_id: 'SEC_000008',
     date: '2026-10-23',
@@ -121,6 +124,14 @@ test(
     assert.equal(by.fin_income.layer, null, 'leftover collection: no producer');
     assert.equal(by.fin_income.timeSemantics.status, 'unknown');
     assert.equal(by.prices_daily.layer, 2);
+    assert.deepEqual(
+      [
+        by.delisted_companies.layer,
+        by.delisted_companies.timeSemantics.status,
+        by.delisted_companies.primaryKey,
+      ],
+      [1, 'pit', ['symbol', 'delistedDate']],
+    );
     assert.equal(by.prices_daily.producedBy[0].type, 'pipeline');
   },
 );
