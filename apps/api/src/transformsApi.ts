@@ -10,6 +10,8 @@ import {
   updateTransform,
 } from '../../../packages/core/src/transforms.js';
 import { z } from 'zod';
+import { mongo } from '../../../packages/core/src/db.js';
+import { workspaceDatabase } from '../../../packages/core/src/mongoMcp.js';
 import { requestTransformRun, transformRuns } from '../../../packages/core/src/transformRunner.js';
 import { startPreview, transformPreviews } from '../../../packages/core/src/transformPreview.js';
 import { transformSpec } from '../../../packages/core/src/transforms.js';
@@ -173,16 +175,14 @@ transformsRouter.post('/transforms/:id/preview', async (req, res) => {
   const t = await transforms().findOne({ _id: String(req.params.id), ownerId: req.principal!.tenantId });
   if (!t) throw new HttpError(404, 'Transform not found');
   const { transform, ...opts } = previewInput.parse(req.body ?? {});
-  res
-    .status(202)
-    .json(
-      pub(
-        await startPreview(req.principal!.tenantId, transform ?? transformSpec(t), {
-          ...opts,
-          transformId: t._id,
-        }),
-      ),
-    );
+  res.status(202).json(
+    pub(
+      await startPreview(req.principal!.tenantId, transform ?? transformSpec(t), {
+        ...opts,
+        transformId: t._id,
+      }),
+    ),
+  );
 });
 transformsRouter.get('/transform-previews/:id', async (req, res) => {
   const p = await transformPreviews().findOne({
@@ -191,4 +191,28 @@ transformsRouter.get('/transform-previews/:id', async (req, res) => {
   });
   if (!p) throw new HttpError(404, 'Preview not found (previews expire after a day)');
   res.json(pub(p));
+});
+
+// The DQ issues a run recorded or re-saw (#96): dq_issues rows for the transform's outputs seen during the run.
+transformsRouter.get('/transform-runs/:runId/dq', async (req, res) => {
+  const ownerId = req.principal!.tenantId;
+  const r = await transformRuns().findOne({ _id: String(req.params.runId), ownerId });
+  if (!r) throw new HttpError(404, 'Run not found');
+  if (!r.startedAt) return void res.json([]);
+  const t = await transforms().findOne({ _id: r.transformId, ownerId }, { projection: { outputs: 1 } });
+  const outputs = [
+    ...new Set([...(t?.outputs.map((o) => o.collection) ?? []), ...Object.keys(r.outputs ?? {})]),
+  ];
+  const until = new Date((r.finishedAt ?? new Date()).getTime() + 60_000);
+  const issues = await mongo
+    .db(workspaceDatabase(ownerId))
+    .collection('dq_issues')
+    .find(
+      { collection: { $in: outputs }, last_seen_at: { $gte: r.startedAt, $lte: until } },
+      { projection: { _id: 0 } },
+    )
+    .sort({ severity: 1, collection: 1, issue_type: 1 })
+    .limit(500)
+    .toArray();
+  res.json(issues);
 });

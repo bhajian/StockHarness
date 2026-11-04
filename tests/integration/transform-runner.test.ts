@@ -133,6 +133,12 @@ test('a two-output transform runs in the executor: lookback, window, guard, dq, 
     'the first window day has a return thanks to the lookback',
   );
   assert.equal((await docs('dq_issues', { issue_type: 'zero_close' })).total, 1);
+  // The run drawer's DQ list (#96): issues on the transform's outputs seen during the run.
+  const runDq = await ok(`/transform-runs/${run.id}/dq`);
+  assert.deepEqual(
+    runDq.map((d: any) => [d.collection, d.issue_type, d.security_id]),
+    [['tr_returns', 'zero_close', 'AAA']],
+  );
   const cat = await ok('/catalog/tr_returns');
   assert.equal(cat.layer, 2);
   assert.equal(cat.producedBy[0].type, 'transform');

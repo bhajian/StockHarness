@@ -89,6 +89,38 @@ test('Datasets tabs and a Flatten transform created in the UI', async ({ page })
   expect(JSON.stringify(collections)).toContain('company_profiles');
   expect(JSON.stringify(collections)).not.toContain('company_identity');
 
+  // Versions (#96): save v2, diff v1 with v2, restore v1 as v3.
+  await page.getByLabel('Description').first().fill('Second version');
+  await page.getByRole('button', { name: 'Save version' }).click();
+  await expect(page.getByText('Saved v2')).toBeVisible();
+  await page.getByRole('tab', { name: /Versions/ }).click();
+  await expect(page.locator('.versions-list')).toContainText('v2');
+  await page.locator('.versions-diff').getByRole('tab', { name: 'Settings' }).click();
+  await expect(page.locator('.versions-diff .monaco-diff-editor')).toBeVisible({ timeout: 30000 });
+  await expect(page.locator('.versions-diff')).toContainText('Second version');
+  await page.locator('.versions-list tr', { hasText: 'v1' }).getByRole('button', { name: 'Restore' }).click();
+  await expect(page.getByText('Restored v1 as v3')).toBeVisible();
+  await expect(page.getByRole('tab', { name: 'Versions (3)' })).toBeVisible();
+  const versions = await api(`/transforms/${saved.id}/versions`);
+  expect(versions.map((v: any) => [v.version, v.note ?? ''])).toEqual([
+    [3, 'Restored from v1'],
+    [2, ''],
+    [1, ''],
+  ]);
+
+  // Run history (#96): run the saved version, then open the run in the drawer.
+  await page.getByRole('button', { name: 'Run now' }).click();
+  await page.getByRole('button', { name: 'Queue run' }).click();
+  await page.getByRole('tab', { name: /Run history/ }).click();
+  const runRow = page.locator('.run-history tbody tr').first();
+  await expect(runRow).toContainText('succeeded', { timeout: 120000 });
+  await runRow.click();
+  const drawer = page.locator('.drawer');
+  await expect(drawer).toContainText('company_identity');
+  await expect(drawer).toContainText('stdout');
+  await page.keyboard.press('Escape');
+  await expect(drawer).toHaveCount(0);
+
   // Back to the list: the transform, its inputs and outputs; browser back returns to the editor.
   await page.locator('.transform-editor-head').getByRole('button', { name: 'Transforms' }).click();
   const row = page.locator('.transforms-table tr', { hasText: 'profiles_flat' });

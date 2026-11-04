@@ -61,10 +61,11 @@ def login():
     _req("POST", "/auth/login", {"email": os.environ["OH_EMAIL"], "password": os.environ["OH_PASSWORD"]})
 
 
-def cmd_export(out_dir: Path):
+def cmd_export(out_dir: Path, with_history: bool = False):
     out_dir.mkdir(parents=True, exist_ok=True)
     for kind, fname, legacy in FILES:
-        text = _req("GET", "/objects/export?" + urllib.parse.urlencode({"kinds": kind}), raw=True)
+        query = {"kinds": kind, **({"history": "1"} if with_history else {})}
+        text = _req("GET", "/objects/export?" + urllib.parse.urlencode(query), raw=True)
         (out_dir / fname).write_text(text)
         count = text.count("\nkind: ") + (1 if text.startswith("kind: ") else 0)
         print(f"exported {count:>3} {kind:<12} -> {out_dir / fname}")
@@ -120,10 +121,12 @@ def main():
     ap.add_argument("--dir", default=str(Path(__file__).parent / "exports"))
     ap.add_argument("--dry-run", action="store_true", help="preview only")
     ap.add_argument("--replace", action="store_true", help="also remove objects of each kind not in its file")
+    ap.add_argument("--with-history", action="store_true",
+                    help="export: include every transform version (an import into an empty workspace restores them)")
     args = ap.parse_args()
     login()
     if args.command == "export":
-        cmd_export(Path(args.dir))
+        cmd_export(Path(args.dir), args.with_history)
     else:
         cmd_apply(Path(args.dir), args.dry_run, args.replace)
 

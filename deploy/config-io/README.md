@@ -26,6 +26,8 @@ the Export/Import buttons on the Harnesses, Skills and Datasets pages, and this 
 ```bash
 export OH_BASE=https://openharness.faberiq.ai OH_EMAIL=you@example.com OH_PASSWORD=...
 python3 config_io.py export                # write exports/ (one file per kind)
+python3 config_io.py export --with-history # also every earlier transform version (restored by an import
+                                           # that creates the transform, so diff and restore keep working)
 python3 config_io.py apply --dry-run       # preview every file; nothing is written
 python3 config_io.py apply                 # merge: create or update by kind + name
 python3 config_io.py apply --replace       # also remove objects of each kind that are not in its file

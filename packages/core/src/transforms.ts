@@ -274,3 +274,94 @@ export async function deleteTransform(ownerId: string, id: string) {
 }
 
 export const transformSpec = specOf;
+
+export type TransformHistoryEntry = { version: number; note?: string; spec?: Omit<TransformInput, 'name'> };
+/**
+ * Earlier versions (oldest first) for an export with history (#96). The current version's spec is the
+ * object's own spec; when it has a note (e.g. "Restored from v2") a last entry carries just that note.
+ */
+export async function transformHistory(ownerId: string, t: Transform): Promise<TransformHistoryEntry[]> {
+  const rows = await transformVersions()
+    .find({ ownerId, transformId: t._id, version: { $lte: t.version } })
+    .sort({ version: 1 })
+    .toArray();
+  const out: TransformHistoryEntry[] = [];
+  for (const v of rows) {
+    if (v.version === t.version) {
+      if (v.note && rows.length > 1) out.push({ version: v.version, note: v.note });
+      continue;
+    }
+    const { name: _n, ...spec } = specOf({ ...(v.spec as Transform) });
+    out.push({ version: v.version, ...(v.note ? { note: v.note } : {}), spec });
+  }
+  return out;
+}
+/**
+ * After an import created a transform (at v1 = the current spec), recreate its earlier versions so diff and
+ * restore keep working: history rows become v1..vN-1 and the current spec vN, as in the source workspace.
+ */
+export async function restoreTransformHistory(
+  ownerId: string,
+  id: string,
+  history: TransformHistoryEntry[],
+  userId?: string,
+) {
+  const earlier = history.filter((h) => h.spec);
+  if (!earlier.length) return;
+  const t = await transforms().findOne({ _id: id, ownerId });
+  if (!t) throw new HttpError(404, 'Transform not found');
+  const versions = earlier.map((h) => transformInputSchema.parse({ ...h.spec, name: t.name }));
+  const current = earlier.length + 1;
+  const currentNote = history.find((h) => !h.spec)?.note;
+  const now = new Date();
+  await transformVersions().deleteMany({ ownerId, transformId: id });
+  await transformVersions().insertMany([
+    ...versions.map((spec, i) => ({
+      _id: `${id}:${i + 1}`,
+      ownerId,
+      transformId: id,
+      version: i + 1,
+      spec,
+      ...(earlier[i].note ? { note: earlier[i].note } : {}),
+      createdAt: new Date(now.getTime() - (current - i)),
+      createdBy: userId,
+    })),
+    {
+      _id: `${id}:${current}`,
+      ownerId,
+      transformId: id,
+      version: current,
+      spec: specOf(t),
+      ...(currentNote ? { note: currentNote } : {}),
+      createdAt: now,
+      createdBy: userId,
+    },
+  ]);
+  await transforms().updateOne({ _id: id, ownerId }, { $set: { version: current } });
+}
+/** History entries in an imported spec: versions 1, 2, … in order; only the last may omit its spec (a note). */
+export const transformHistorySchema = z
+  .array(
+    z.object({
+      version: z.number().int().min(1),
+      note: z.string().max(500).optional(),
+      spec: z.record(z.unknown()).optional(),
+    }),
+  )
+  .max(500)
+  .superRefine((h, ctx) => {
+    h.forEach((e, i) => {
+      if (e.version !== i + 1)
+        ctx.addIssue({
+          code: 'custom',
+          path: [i, 'version'],
+          message: 'History must list versions 1, 2, … in order',
+        });
+      if (!e.spec && i !== h.length - 1)
+        ctx.addIssue({
+          code: 'custom',
+          path: [i, 'spec'],
+          message: 'Only the last (current) entry may omit its spec',
+        });
+    });
+  });
