@@ -10,6 +10,7 @@ import { nextScheduledAt } from './schedule.js';
 import { HttpError, safeError } from './security.js';
 import { scheduleSchema, type Stored } from './schema.js';
 import { catalogById, UNIVERSE_DATASET_ID, presetById, type DatasetDef } from './datasetCatalog.js';
+import { refreshCatalogEntry } from './schemaCatalog.js';
 import {
   PriorityRateLimiter,
   SyncWorkQueue,
@@ -392,6 +393,10 @@ export async function runDatasetSync(
         },
         $unset: { lastError: '' },
       },
+    );
+    // Keep the Schema Catalog current (#84); never let a stats query fail the sync.
+    void refreshCatalogEntry(sync.ownerId, sync.targetCollection || def.defaultCollection).catch(
+      () => undefined,
     );
     return { ...run, status: 'succeeded' as const, rows };
   } catch (error) {

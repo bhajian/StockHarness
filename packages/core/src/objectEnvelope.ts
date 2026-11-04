@@ -5,7 +5,7 @@ import { HttpError } from './security.js';
 
 export const API_VERSION = 'stockharness/v1';
 /** Object kinds in import (dependency) order: earlier kinds can be referenced by later ones. */
-export const OBJECT_KINDS = ['Skill', 'Agent', 'Harness', 'DatasetSync'] as const;
+export const OBJECT_KINDS = ['Skill', 'Agent', 'Harness', 'DatasetSync', 'CatalogEntry'] as const;
 export type ObjectKind = (typeof OBJECT_KINDS)[number];
 /**
  * Reference type names used in `{ $ref: { type, name } }`. Kept identical to the deploy/config-io CLI so its
@@ -16,6 +16,7 @@ export const REF_TYPE_BY_KIND: Record<ObjectKind, string> = {
   Agent: 'agents',
   Harness: 'workflows',
   DatasetSync: 'datasetSyncs',
+  CatalogEntry: 'catalog',
 };
 /** Referenceable types that are never exported (they hold secrets); they must already exist on the target. */
 export const EXTERNAL_REF_TYPES = ['connections', 'providers', 'knowledge', 'guardrails'] as const;

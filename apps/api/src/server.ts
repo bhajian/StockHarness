@@ -16,6 +16,7 @@ import {
 } from '../../../packages/core/src/datasetSync.js';
 import { safeError } from '../../../packages/core/src/security.js';
 import { dispatchConfigBackup } from './configBackup.js';
+import { refreshAllCatalogs } from './catalog.js';
 
 await connectDatabase();
 const interrupted = await recoverInterruptedDatasetSyncRuns();
@@ -63,6 +64,9 @@ const notifications = setInterval(async () => {
 const timer = setInterval(() => void tick(), 3000);
 // Config backup to git (#149): first check a minute after start, then every CONFIG_BACKUP_INTERVAL_MINUTES.
 const backupStart = setTimeout(() => void dispatchConfigBackup(), 60_000);
+// Schema Catalog (#84): full refresh two minutes after start, then daily (each sync also refreshes its entry).
+const catalogStart = setTimeout(() => void refreshAllCatalogs(), 120_000);
+const catalogTimer = setInterval(() => void refreshAllCatalogs(), 24 * 3600_000);
 const backupTimer = setInterval(
   () => void dispatchConfigBackup(),
   config.CONFIG_BACKUP_INTERVAL_MINUTES * 60_000,
@@ -72,6 +76,8 @@ async function shutdown() {
   clearInterval(timer);
   clearTimeout(backupStart);
   clearInterval(backupTimer);
+  clearTimeout(catalogStart);
+  clearInterval(catalogTimer);
   clearInterval(notifications);
   server.close();
   await closeQueue();

@@ -28,6 +28,27 @@ import {
   type ObjectKind,
 } from '../../../packages/core/src/objectEnvelope.js';
 import { saveResource, deleteResource, type ResourceKind, type ResourcePrincipal } from './resources.js';
+import {
+  catalogEntries,
+  patchCatalogEntry,
+  type CatalogCurated,
+} from '../../../packages/core/src/schemaCatalog.js';
+
+/** Kinds stored through the generic resource routes (the others have dedicated importers). */
+const isResourceKind = (k: ObjectKind): k is 'Skill' | 'Agent' | 'Harness' => k in RESOURCE_KIND;
+/** CatalogEntry spec: only the curated docs; generated stats are recomputed after import. */
+const catalogSpec = (c: CatalogCurated | undefined) => {
+  const spec: Record<string, unknown> = {};
+  if (c?.description) spec.description = c.description;
+  if (c?.grain) spec.grain = c.grain;
+  const fields = Object.fromEntries(
+    Object.entries(c?.fields ?? {})
+      .filter(([, v]) => v && (v.description || v.unit))
+      .sort(([a], [b]) => a.localeCompare(b)),
+  );
+  if (Object.keys(fields).length) spec.fields = fields;
+  return spec;
+};
 
 type Rec = { _id: string; ownerId: string; name: string; [key: string]: any };
 const COLLECTION_BY_REF_TYPE: Record<string, string> = {
@@ -74,7 +95,7 @@ async function referenceIndex(ownerId: string) {
 
 /** Canonical definition of a stored record, in reference (by-name) form. */
 function toSpec(
-  kind: Exclude<ObjectKind, 'DatasetSync'>,
+  kind: 'Skill' | 'Agent' | 'Harness',
   record: Rec,
   byId: Map<string, { type: string; name: string }>,
 ) {
@@ -115,6 +136,16 @@ export async function exportObjects(
         if (!wanted(s.name)) continue;
         const { name, ...spec } = toConfigEntry(s, connName.get(s.connectionId)) as Record<string, unknown>;
         docs.push({ apiVersion: API_VERSION, kind, metadata: { name: String(name) }, spec });
+      }
+      continue;
+    }
+    if (kind === 'CatalogEntry') {
+      for (const e of await catalogEntries()
+        .find({ ownerId, curated: { $exists: true } })
+        .toArray()) {
+        const spec = catalogSpec(e.curated);
+        if (!wanted(e.collection) || !Object.keys(spec).length) continue;
+        docs.push({ apiVersion: API_VERSION, kind, metadata: { name: e.collection }, spec });
       }
       continue;
     }
@@ -176,8 +207,30 @@ async function plan(
     for (const e of p.errors) result.errors.push({ kind: 'DatasetSync', name: e.name, message: e.message });
   }
 
+  // Catalog docs: curated descriptions only, matched by collection name (merge semantics in both modes).
+  for (const doc of docs.filter((d) => d.kind === 'CatalogEntry')) {
+    const name = doc.metadata.name;
+    const spec = doc.spec as CatalogCurated;
+    if (spec.fields && (typeof spec.fields !== 'object' || Array.isArray(spec.fields))) {
+      result.errors.push({
+        kind: 'CatalogEntry',
+        name,
+        message: 'spec.fields must map field names to { description, unit }',
+      });
+      continue;
+    }
+    const current = await catalogEntries().findOne({ ownerId, collection: name });
+    const action = !current?.curated
+      ? 'create'
+      : stableJson(catalogSpec(current.curated)) === stableJson(catalogSpec(spec))
+        ? 'unchanged'
+        : 'update';
+    prepared.push({ doc, action });
+    result.items.push({ kind: 'CatalogEntry', name, action });
+  }
+
   for (const doc of docs) {
-    if (doc.kind === 'DatasetSync') continue;
+    if (!isResourceKind(doc.kind)) continue;
     const kind = doc.kind;
     const rk = RESOURCE_KIND[kind]!;
     const type = REF_TYPE_BY_KIND[kind];
@@ -242,7 +295,7 @@ async function plan(
   // Replace: remove objects of each kind present in the file that the file no longer contains.
   if (mode === 'replace')
     for (const kind of OBJECT_KINDS) {
-      if (kind === 'DatasetSync' || !docs.some((d) => d.kind === kind)) continue;
+      if (!isResourceKind(kind) || !docs.some((d) => d.kind === kind)) continue;
       const keep = new Set(docs.filter((d) => d.kind === kind).map((d) => d.metadata.name));
       for (const r of await collection<Rec>(RESOURCE_KIND[kind]!)
         .find({ ownerId }, { projection: { name: 1 } })
@@ -281,7 +334,7 @@ export async function applyObjectImport(
   const done: ObjectPlanItem[] = [];
   try {
     for (const kind of OBJECT_KINDS) {
-      if (kind === 'DatasetSync') continue;
+      if (!isResourceKind(kind)) continue;
       // Re-resolve per kind so references to objects created earlier in this import find their new ids.
       const { byName } = await referenceIndex(ownerId);
       for (const p of prepared.filter(
@@ -301,9 +354,19 @@ export async function applyObjectImport(
       const r = await applyDatasetSyncImport(ownerId, syncYaml, mode, principal.user._id);
       if (!r.applied) throw new HttpError(400, r.plan.errors[0]?.message ?? 'Dataset sync import failed');
     }
+    // Catalog docs last: their collections may be targets of the syncs just imported.
+    for (const p of prepared.filter((x) => x.doc.kind === 'CatalogEntry' && x.action !== 'unchanged')) {
+      const spec = p.doc.spec as CatalogCurated;
+      await patchCatalogEntry(ownerId, p.doc.metadata.name, {
+        description: spec.description,
+        grain: spec.grain,
+        fields: spec.fields ?? {},
+      });
+      done.push({ kind: 'CatalogEntry', name: p.doc.metadata.name, action: p.action });
+    }
     // Removals last and in reverse dependency order, so harnesses go before the skills/agents they use.
     for (const kind of [...OBJECT_KINDS].reverse()) {
-      if (kind === 'DatasetSync') continue;
+      if (!isResourceKind(kind)) continue;
       for (const p of prepared.filter((x) => x.doc.kind === kind && x.action === 'remove')) {
         await deleteResource(RESOURCE_KIND[kind]!, principal, p.existingId!);
         done.push({ kind, name: p.doc.metadata.name, action: 'remove' });
