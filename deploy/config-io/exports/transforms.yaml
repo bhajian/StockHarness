@@ -30,20 +30,120 @@ spec:
       description: "One row per split or dividend: action_type (split, cash_dividend, special_dividend), ex_date, split_ratio or dividend_amount."
       grain: security × action × ex-date
       fields:
-        split_ratio:
-          description: New shares per old share (4-for-1 = 4.0; 1-for-10 reverse = 0.1)
-          unit: ratio
+        security_id:
+          description: StockHarness security id
+        action_type:
+          description: split, cash_dividend or special_dividend
+        ex_date:
+          description: Ex-date
+        record_date:
+          description: Record date
+        pay_date:
+          description: Payment date
+        declaration_date:
+          description: Declaration date
         dividend_amount:
           description: Cash dividend per share
           unit: USD
+        currency:
+          description: Dividend currency
+        split_ratio:
+          description: New shares per old share (4-for-1 = 4.0; 1-for-10 reverse = 0.1)
+          unit: ratio
+        split_type:
+          description: Split type as reported
         known_at:
           description: Declaration date, else the day before the ex-date
+        _lineage:
+          description: Source collection and row ids
   trigger:
     after:
       - dataset:dividends_calendar
       - dataset:splits_calendar
   incremental:
     mode: full
+    lookback_days: 0
+  params: {}
+  secrets: []
+  enabled: true
+---
+apiVersion: stockharness/v1
+kind: Transform
+metadata:
+  name: features_daily
+  version: "1"
+spec:
+  description: "Daily features per security from point-in-time inputs only: price (momentum, 12-1, volatility, 52-week high), valuation, quality and growth from the fundamentals version known that day priced at that day's market cap, and days since the latest filing. Every feature is in the registry (pipeline.layer2.features.REGISTRY) and documented in the catalog."
+  code: |
+    import oh
+    from pipeline.layer2.features import compute_daily, registry_docs
+
+    out = oh.output("features_daily")
+    read = lambda c, f=None, cols=None, sort=None: oh.read(c, f, columns=cols, sort=sort)
+    for rows in compute_daily(read, oh.window):
+        out.upsert(rows)
+    oh.describe("features_daily", fields=registry_docs())
+  inputs:
+    - securities
+    - prices_daily
+    - universe_daily
+    - fundamentals_pit
+  outputs:
+    - collection: features_daily
+      key:
+        - security_id
+        - date
+      write_mode: upsert
+      known_at_field: known_at
+      as_of_field: as_of_date
+      static: false
+      description: "One row per security and trading day: price, liquidity, valuation, quality, growth and event features (all as known that day)."
+      grain: security × trading day
+  trigger:
+    after:
+      - transform:universe_daily
+  incremental:
+    mode: date_range
+    lookback_days: 260
+  params: {}
+  secrets: []
+  enabled: true
+---
+apiVersion: stockharness/v1
+kind: Transform
+metadata:
+  name: features_ranked
+  version: "1"
+spec:
+  description: "Per date, over that date's universe members: cross-sectional z-scores (clipped at ±3) and percentiles of every feature, value / quality / momentum / growth / low-vol composite scores with sector percentiles, and a composite percentile that averages 0.5 per date."
+  code: |
+    import oh
+    from pipeline.layer2.features import compute_ranked, registry_docs
+
+    out = oh.output("features_ranked")
+    read = lambda c, f=None, cols=None, sort=None: oh.read(c, f, columns=cols, sort=sort)
+    for rows in compute_ranked(read, oh.window):
+        out.upsert(rows)
+    oh.describe("features_ranked", fields=registry_docs(ranked=True))
+  inputs:
+    - features_daily
+    - universe_counts
+  outputs:
+    - collection: features_ranked
+      key:
+        - security_id
+        - date
+      write_mode: upsert
+      known_at_field: known_at
+      as_of_field: as_of_date
+      static: false
+      description: "One row per universe member and trading day: <feature>_z, <feature>_pct, composite scores and percentiles."
+      grain: universe member × trading day
+  trigger:
+    after:
+      - transform:features_daily
+  incremental:
+    mode: date_range
     lookback_days: 0
   params: {}
   secrets: []
@@ -60,12 +160,15 @@ spec:
     import oh
     from pipeline.layer2.fundamentals_pit import compute
 
+    from pipeline.layer2.fundamentals_logic import field_docs
+
     out = oh.output("fundamentals_pit")
     read = lambda c, f=None, cols=None, sort=None: oh.read(c, f, columns=cols, sort=sort)
     for rows, issues in compute(read):
         out.upsert(rows)
         for i in issues:
             oh.dq(i["issue_type"], i["severity"], security_id=i["security_id"], date=i["date"])
+    oh.describe("fundamentals_pit", fields=field_docs())
   inputs:
     - securities
     - trading_calendar
@@ -154,14 +257,46 @@ spec:
       description: Market-wide daily context for features and regimes.
       grain: trading day
       fields:
+        date:
+          description: Trading day
+        ust_3m:
+          description: 3-month treasury yield
+          unit: "%"
+        ust_2y:
+          description: 2-year treasury yield
+          unit: "%"
+        ust_10y:
+          description: 10-year treasury yield
+          unit: "%"
+        ust_30y:
+          description: 30-year treasury yield
+          unit: "%"
         curve_10y_2y:
-          description: 10-year minus 2-year treasury yield
+          description: 10-year minus 2-year yield
+          unit: percentage points
+        curve_10y_3m:
+          description: 10-year minus 3-month yield
           unit: percentage points
         vix:
           description: CBOE VIX close
+        spx_close:
+          description: S&P 500 close
+        ndx_close:
+          description: Nasdaq Composite close
         spx_ret_1d:
           description: S&P 500 1-day return
           unit: ratio
+        sector_returns:
+          description: Sector average change that day, by sector
+          unit: "%"
+        known_at:
+          description: When the row became known (UTC)
+        as_of_date:
+          description: "First date it may be used: filter as_of_date <= D"
+        transform_name:
+          description: Producing transform
+        transform_version:
+          description: Logic version
   trigger:
     after:
       - dataset:treasury_rates
@@ -208,9 +343,45 @@ spec:
       description: "One row per security and trading day: OHLCV, adj_* on the current share basis, ret_1d, tr_1d, dollar_volume, dq_flags."
       grain: security × trading day
       fields:
+        security_id:
+          description: StockHarness security id
+        date:
+          description: Trading day
+        ticker:
+          description: Ticker that traded that day
+        open:
+          description: Open
+          unit: USD
+        high:
+          description: High
+          unit: USD
+        low:
+          description: Low
+          unit: USD
+        close:
+          description: Close (as traded)
+          unit: USD
+        volume:
+          description: Volume
+          unit: shares
+        vwap:
+          description: VWAP
+          unit: USD
         adj_factor:
           description: "Backward split factor: adj_close = close × adj_factor"
           unit: ratio
+        adj_open:
+          description: Split-adjusted open
+          unit: USD
+        adj_high:
+          description: Split-adjusted high
+          unit: USD
+        adj_low:
+          description: Split-adjusted low
+          unit: USD
+        adj_close:
+          description: Split-adjusted close (current share basis)
+          unit: USD
         ret_1d:
           description: Price return versus the previous bar, split-adjusted
           unit: ratio
@@ -222,6 +393,18 @@ spec:
           unit: USD
         dq_flags:
           description: zero_or_negative_price, high_lt_low, close_outside_range, zero_volume, jump_no_action, stale_price
+        known_at:
+          description: When the row became known (UTC)
+        as_of_date:
+          description: "First date it may be used: filter as_of_date <= D"
+        source_collection:
+          description: Layer 1 input
+        source_ids:
+          description: eod_prices row ids
+        transform_name:
+          description: Producing transform
+        transform_version:
+          description: Logic version
   trigger:
     after:
       - dataset:eod_prices
@@ -263,6 +446,20 @@ spec:
       fields:
         security_id:
           description: Immutable StockHarness id (SEC_000001); join key for every Layer 2 table
+        name:
+          description: Company name
+        security_type:
+          description: common or ADR
+        country:
+          description: Country of domicile
+        currency:
+          description: Trading currency
+        ipo_date:
+          description: IPO date (FMP)
+        is_active:
+          description: Still listed and actively trading
+        delisted_date:
+          description: Delisting date (delisted names only)
         identifiers:
           description: ticker / cik / cusip / isin with valid_from and valid_to (ISO dates); a ticker is valid from the first date it was observed
         sector_history:
@@ -271,6 +468,16 @@ spec:
           description: The earliest sector interval was backfilled from the current sector, not observed then
         sector_observed_from:
           description: When the sector was first actually observed
+        industry_history:
+          description: Industry intervals (same rules as sectors)
+        industry_is_backfilled:
+          description: The earliest industry interval was backfilled
+        industry_observed_from:
+          description: When the industry was first observed
+        exchange_history:
+          description: Exchange intervals
+        source_collections:
+          description: Layer 1 inputs
   trigger:
     after:
       - dataset:company_profiles
@@ -306,6 +513,8 @@ spec:
       fields:
         date:
           description: Session date (midnight UTC)
+        is_trading_day:
+          description: Always true (only sessions are stored)
         open_utc:
           description: Market open
           unit: UTC
@@ -314,6 +523,10 @@ spec:
           unit: UTC
         is_early_close:
           description: Half day (close at or before 18:30 UTC)
+        prev_trading_day:
+          description: Previous session
+        next_trading_day:
+          description: Next session
   trigger:
     schedule:
       enabled: true
@@ -361,10 +574,17 @@ spec:
       description: One row per security and priced date. Use in_universe = true on date D for the universe as of D (never filter by today's market cap).
       grain: security × trading day
       fields:
+        security_id:
+          description: StockHarness security id
+        date:
+          description: Trading day
         in_universe:
           description: Passed every filter on this date
         fails:
           description: "Filters that failed: price, liquidity, market_cap, exchange"
+        close:
+          description: Close that day
+          unit: USD
         adv_20d:
           description: Median dollar volume over the last 20 trading days
           unit: USD
@@ -372,9 +592,13 @@ spec:
           description: Market cap on this date
           unit: USD
         market_cap_source:
-          description: reported (historical_market_cap) or estimated (close x shares outstanding as known then)
+          description: reported (historical_market_cap) or estimated (close × shares outstanding as known then)
         exchange:
           description: Exchange as of this date (securities.exchange_history)
+        known_at:
+          description: When the row became known (UTC)
+        as_of_date:
+          description: "First date it may be used: filter as_of_date <= D"
     - collection: universe_counts
       key:
         - date
@@ -385,10 +609,16 @@ spec:
       description: "Universe size per date: members and priced securities."
       grain: trading day
       fields:
+        date:
+          description: Trading day
         members:
           description: Securities in the universe on this date
         priced:
           description: Securities with a price on this date
+        known_at:
+          description: When the row became known (UTC)
+        as_of_date:
+          description: "First date it may be used: filter as_of_date <= D"
   trigger:
     after:
       - transform:prices_daily

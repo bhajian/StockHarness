@@ -405,6 +405,9 @@ class _Output:
         self._known = None if cfg.get("static") else cfg.get("known_at_field")
 
     def upsert(self, records: Iterable[dict]) -> dict:
+        # Point-in-time readers filter on the as_of field: index it with the key (#102).
+        if self.cfg.get("as_of_field") and not _PREVIEW:
+            _ensure_key_index(self.collection, [self.cfg["as_of_field"]])
         mode = self.cfg.get("write_mode", "upsert")
         if mode == "upsert":
             return upsert(self.collection, records, key=self.cfg["key"], known_at_field=self._known)

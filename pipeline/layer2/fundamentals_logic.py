@@ -148,3 +148,53 @@ def balance_issue(v: dict, tolerance=0.01):
     if a is None or l is None or e is None or not a:
         return None
     return "balance_sheet_identity" if abs(a - (l + e)) / abs(a) > tolerance else None
+
+
+_LABELS = {
+    "revenue": "Revenue", "cost_of_revenue": "Cost of revenue", "gross_profit": "Gross profit", "rd_expense": "R&D expense",
+    "sga_expense": "SG&A expense", "operating_expenses": "Operating expenses", "operating_income": "Operating income",
+    "ebitda": "EBITDA", "ebit": "EBIT", "interest_expense": "Interest expense", "pretax_income": "Income before tax",
+    "income_tax": "Income tax expense", "net_income": "Net income", "eps": "Basic EPS", "eps_diluted": "Diluted EPS",
+    "d_and_a": "Depreciation and amortization", "shares_basic": "Weighted average basic shares",
+    "shares_diluted": "Weighted average diluted shares", "cash": "Cash and cash equivalents",
+    "cash_and_st_investments": "Cash and short-term investments", "receivables": "Net receivables", "inventory": "Inventory",
+    "current_assets": "Total current assets", "ppe_net": "Property, plant and equipment, net",
+    "goodwill_and_intangibles": "Goodwill and intangible assets", "total_assets": "Total assets", "payables": "Accounts payable",
+    "current_liabilities": "Total current liabilities", "short_term_debt": "Short-term debt", "long_term_debt": "Long-term debt",
+    "total_debt": "Total debt", "net_debt": "Net debt (total debt − cash)", "total_liabilities": "Total liabilities",
+    "retained_earnings": "Retained earnings", "stockholders_equity": "Total stockholders' equity",
+    "total_equity": "Total equity (incl. minority interest)", "operating_cash_flow": "Operating cash flow",
+    "capex": "Capital expenditure (negative = spent)", "free_cash_flow": "Free cash flow (OCF + capex)",
+    "dividends_paid": "Common dividends paid (negative = paid)", "buybacks": "Common stock repurchased (negative = bought back)",
+    "stock_based_comp": "Stock-based compensation", "acquisitions": "Acquisitions, net",
+}
+
+
+def field_docs():
+    """Catalog docs for every fundamentals_pit field (#102 M2 exit: complete catalog entries)."""
+    docs = {}
+    for out in {*INCOME.values(), *BALANCE.values(), *CASHFLOW.values()}:
+        kind = "" if out.startswith(("eps", "shares")) else (" for the quarter" if out in FLOW else " at the period end")
+        unit = "reported currency per share" if out.startswith("eps") else "shares" if out.startswith("shares") else "reported currency"
+        docs[out] = {"description": f"{_LABELS.get(out, out)}{kind}", "unit": unit}
+    for f in TTM_FIELDS:
+        docs[f"ttm_{f}"] = {"description": f"Trailing four quarters of {_LABELS.get(f, f).lower()}, as known at known_at", "unit": "reported currency"}
+    docs.update(
+        {
+            "security_id": {"description": "StockHarness security id"},
+            "period_end": {"description": "Fiscal quarter end date"},
+            "fiscal_period": {"description": "Q1..Q4"},
+            "fiscal_year": {"description": "Fiscal year as reported"},
+            "version": {"description": "1 = first filing; each later acceptance (restatement) adds one"},
+            "is_latest": {"description": "The newest version of this period"},
+            "known_at": {"description": "SEC acceptance time (UTC); date-only acceptances mean the end of that day"},
+            "as_of_date": {"description": "First trading session after known_at: filter as_of_date <= D"},
+            "currency": {"description": "Reported currency"},
+            "is_usd": {"description": "Reported in USD (non-USD values are not converted, #222)"},
+            "filing_date": {"description": "SEC filing date"},
+            "statements": {"description": "Which statements this version has (income, balance, cashflow)"},
+            "transform_name": {"description": "Producing transform"},
+            "derived_q4": {"description": "Q4 derived as FY − (Q1 + Q2 + Q3)"},
+        }
+    )
+    return docs
