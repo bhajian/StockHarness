@@ -57,3 +57,16 @@ export function describeSchedule(schedule: Schedule | undefined) {
   if (m === 10080) return `Every ${schedule.weekday !== undefined ? days[schedule.weekday] : 'week'}${at}`;
   return m % 1440 ? `Every ${m} minutes` : `Every ${m / 1440} days${at}`;
 }
+
+/** The next `n` times a schedule fires, exactly as the dispatcher computes them (UI previews, #76/#79). */
+export function nextRunTimes(schedule: Schedule | undefined, n = 5, from = new Date()) {
+  if (!schedule?.enabled) return [];
+  const out: Date[] = [];
+  let t = from;
+  for (let i = 0; i < n; i++) {
+    t = nextScheduledAt(schedule, t);
+    out.push(t);
+    t = new Date(t.getTime() + 1000);
+  }
+  return out;
+}

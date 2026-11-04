@@ -16,6 +16,8 @@ import {
   type DatasetSync,
 } from '../../../packages/core/src/datasetSync.js';
 import { z } from 'zod';
+import { mongo } from '../../../packages/core/src/db.js';
+import { workspaceDatabase } from '../../../packages/core/src/mongoMcp.js';
 import { syncEvents } from '../../../packages/core/src/eventSubscriptions.js';
 import {
   backfills,
@@ -114,6 +116,66 @@ datasetSyncRouter.get('/dataset-syncs/:id', async (req, res) => {
   const doc = await syncsCol().findOne({ _id: String(req.params.id), ownerId: req.principal!.tenantId });
   if (!doc) throw new HttpError(404, 'Dataset sync not found');
   res.json(publicSync(doc));
+});
+
+// Syncs list KPIs (#76): runs, failures and FMP calls since local midnight (the client sends `since`).
+datasetSyncRouter.get('/dataset-sync-stats', async (req, res) => {
+  const since = new Date(typeof req.query.since === 'string' ? req.query.since : Date.now() - 86_400_000);
+  if (Number.isNaN(since.getTime())) throw new HttpError(400, 'since must be an ISO date');
+  const [r] = await datasetSyncRuns()
+    .aggregate<{ runs: number; failed: number; calls: number; rows: number }>([
+      { $match: { ownerId: req.principal!.tenantId, startedAt: { $gte: since } } },
+      {
+        $group: {
+          _id: null,
+          runs: { $sum: 1 },
+          failed: { $sum: { $cond: [{ $eq: ['$status', 'failed'] }, 1, 0] } },
+          calls: { $sum: { $ifNull: ['$calls', 0] } },
+          rows: { $sum: { $ifNull: ['$rows', 0] } },
+        },
+      },
+    ])
+    .toArray();
+  res.json({ runs: r?.runs ?? 0, failed: r?.failed ?? 0, calls: r?.calls ?? 0, rows: r?.rows ?? 0 });
+});
+// The Symbols tab (#76): how many symbols this sync covers, without calling FMP.
+datasetSyncRouter.get('/dataset-syncs/:id/symbols', async (req, res) => {
+  const ownerId = req.principal!.tenantId;
+  const doc = await syncsCol().findOne({ _id: String(req.params.id), ownerId });
+  if (!doc) throw new HttpError(404, 'Dataset sync not found');
+  const last = await datasetSyncRuns().findOne(
+    { ownerId, syncId: doc._id, symbolsAttempted: { $exists: true } },
+    { sort: { startedAt: -1 } },
+  );
+  const lastRun = last
+    ? { attempted: last.symbolsAttempted, covered: last.symbolsCovered, at: last.startedAt }
+    : undefined;
+  if (doc.symbolsMode === 'list')
+    return void res.json({
+      mode: 'list',
+      count: doc.symbols?.length ?? 0,
+      sample: (doc.symbols ?? []).slice(0, 30),
+      lastRun,
+    });
+  if (doc.symbolsMode === 'preset')
+    return void res.json({
+      mode: 'preset',
+      preset: doc.preset,
+      count: last?.symbolsAttempted ?? null,
+      note: 'Resolved by the FMP screener at run time',
+      lastRun,
+    });
+  const uni = mongo.db(workspaceDatabase(ownerId)).collection('universe');
+  const [count, delisted, sample] = await Promise.all([
+    uni.countDocuments({}),
+    uni.countDocuments({ is_delisted: true }),
+    uni
+      .find({}, { projection: { symbol: 1, _id: 0 } })
+      .sort({ marketCap: -1 })
+      .limit(30)
+      .toArray(),
+  ]);
+  res.json({ mode: 'universe', count, delisted, sample: sample.map((r) => r.symbol), lastRun });
 });
 
 datasetSyncRouter.post('/dataset-syncs', async (req, res) => {

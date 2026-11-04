@@ -30,6 +30,8 @@ import {
   bulkDatasetSyncs,
   probeDatasetDepth,
   fetchBackfill,
+  fetchSyncStats,
+  fetchCatalog,
   startBackfill,
   backfillControl,
   type DatasetBackfill,
@@ -45,11 +47,13 @@ import type { Schedule } from '../../../../packages/core/src/schema.js';
 import { Button, IconButton, Field, Modal, SaveForm, Empty, PageTitle, Status } from './ui';
 import { ScheduleFields } from './agentFields';
 import { DataGrid } from './DataGrid';
-import { Tabs } from './kit';
+import { KpiCard, Tabs } from './kit';
+import { fmtNumber } from '../charts/chartData';
 import { TransformsTab } from './TransformsTab';
 import { PipelinesTab } from './PipelinesTab';
 import { CatalogTab } from './CatalogTab';
 import { HealthTab } from './HealthTab';
+import { SyncDetail } from './SyncDetail';
 import {
   DATASET_TABS,
   datasetsPath,
@@ -120,7 +124,7 @@ export function DatasetsPage(props: Props) {
         onChange={(tab) => go({ tab })}
       />
       {route.tab === 'syncs' ? (
-        <SyncsTab {...props} go={go} />
+        <SyncsTab {...props} go={go} item={route.item} />
       ) : route.tab === 'transforms' ? (
         <TransformsTab item={route.item} go={go} isAdmin={props.isAdmin} />
       ) : route.tab === 'pipelines' ? (
@@ -134,7 +138,14 @@ export function DatasetsPage(props: Props) {
   );
 }
 
-function SyncsTab({ data, refresh, act, isAdmin, go }: Props & { go?: (r: DatasetsRoute) => void }) {
+function SyncsTab({
+  data,
+  refresh,
+  act,
+  isAdmin,
+  go,
+  item,
+}: Props & { go?: (r: DatasetsRoute) => void; item?: string }) {
   const [catalog, setCatalog] = useState<DatasetCatalogItem[]>([]);
   const [presets, setPresets] = useState<TickerPreset[]>([]);
   const [selected, setSelected] = useState<string>('');
@@ -250,6 +261,55 @@ function SyncsTab({ data, refresh, act, isAdmin, go }: Props & { go?: (r: Datase
   }
 
   const current = syncs.find((s) => s.id === selected) ?? syncs[0];
+  const detail = item ? syncs.find((s) => s.id === item) : undefined;
+  // List KPIs, filters and the coverage column (#76).
+  const [q, setQ] = useState('');
+  const [fCategory, setFCategory] = useState('');
+  const [fPriority, setFPriority] = useState('');
+  const [fStatus, setFStatus] = useState('');
+  const [fCadence, setFCadence] = useState('');
+  const [stats, setStats] = useState<{ runs: number; failed: number; calls: number; rows: number } | null>(
+    null,
+  );
+  const [coverage, setCoverage] = useState<Map<string, { pct?: number; rows: number }>>(new Map());
+  useEffect(() => {
+    const d = new Date();
+    d.setHours(0, 0, 0, 0);
+    void fetchSyncStats(d).then(setStats, () => undefined);
+    void fetchCatalog().then(
+      (c) =>
+        setCoverage(
+          new Map(
+            c.map((e) => [e.collection, { pct: e.coverage.universeCoveragePct, rows: e.coverage.rows }]),
+          ),
+        ),
+      () => undefined,
+    );
+  }, [data.datasetSyncs]);
+  const statusOf = (s: Record<string, any>) =>
+    s.running ? 'running' : s.queued ? 'queued' : s.enabled ? (s.lastError ? 'failed' : 'ready') : 'disabled';
+  const cadenceOf = (s: Record<string, any>) => {
+    const m = s.schedule?.enabled ? Number(s.schedule.everyMinutes) : 0;
+    return !m ? 'manual' : m < 1440 ? 'intraday' : m === 1440 ? 'daily' : m <= 10080 ? 'weekly' : 'monthly';
+  };
+  const visible = syncs.filter(
+    (s) =>
+      (!q || `${s.name} ${s.dataset}`.toLowerCase().includes(q.toLowerCase())) &&
+      (!fCategory || catalogById.get(s.dataset as string)?.category === fCategory) &&
+      (!fPriority || s.effectivePriority === fPriority) &&
+      (!fStatus || statusOf(s) === fStatus) &&
+      (!fCadence || cadenceOf(s) === fCadence),
+  );
+  const collections = [...new Set(syncs.map(collectionOf).filter(Boolean))];
+  const healthy = syncs.filter((s) => s.enabled && !s.lastError).length;
+  const historyOf = (s: Record<string, any>) =>
+    s.historyPeriods
+      ? `${s.historyPeriods} periods`
+      : s.from
+        ? `from ${String(s.from).slice(0, 10)}`
+        : catalogById.get(s.dataset as string)?.defaultHistoryPeriods
+          ? `${catalogById.get(s.dataset as string)!.defaultHistoryPeriods} periods`
+          : 'incremental';
   const currentCollection = current
     ? (current.targetCollection as string) ||
       catalogById.get(current.dataset as string)?.defaultCollection ||
@@ -390,262 +450,351 @@ function SyncsTab({ data, refresh, act, isAdmin, go }: Props & { go?: (r: Datase
 
   return (
     <>
-      <div className="tab-head">
-        <p>
-          Layer 1: raw market data synced from FMP into MongoDB collections, browsable here and reusable by
-          transforms and agents.
-        </p>
-        {addBtn}
-      </div>
-      {!syncs.length ? (
-        <Empty
-          icon={<Database size={28} />}
-          title="No datasets yet"
-          text="Add a dataset sync to pull raw data from FMP on a schedule into a reusable collection."
-          action={
-            isAdmin && (
-              <div className="dataset-empty-actions">
-                {addBtn}
-                {importBtn}
-              </div>
-            )
+      {detail && go ? (
+        <SyncDetail
+          sync={detail}
+          def={catalogById.get(detail.dataset as string)}
+          mongoId={mongo?.id}
+          isAdmin={isAdmin}
+          go={go}
+          onEdit={() => setEditing(editForm(detail))}
+          onRun={() =>
+            act(async () => {
+              await runDatasetSyncNow(detail.id);
+              setTimeout(() => void refresh(), 4000);
+            })
           }
+          backfill={<BackfillPanel syncId={detail.id} defaultFrom={String(detail.from ?? '')} />}
         />
       ) : (
-        <div className="dataset-v2">
-          {isAdmin && (
-            <div className="dataset-toolbar" role="toolbar" aria-label="Dataset sync actions">
-              <label className="dataset-toolbar-select">
-                <input type="checkbox" checked={allChecked} onChange={toggleAll} />
-                {checkedIds.length ? `${checkedIds.length} of ${syncs.length} selected` : 'Select all'}
-              </label>
-              <div className="dataset-toolbar-actions">
-                <Button
-                  variant="secondary"
-                  title={
-                    checkedIds.length ? 'Export the selected syncs as YAML' : 'Export every sync as YAML'
-                  }
-                  onClick={exportYaml}
+        <>
+          <div className="tab-head">
+            <p>
+              Layer 1: raw market data synced from FMP into MongoDB collections, browsable here and reusable
+              by transforms and agents.
+            </p>
+            {addBtn}
+          </div>
+          {!syncs.length ? (
+            <Empty
+              icon={<Database size={28} />}
+              title="No datasets yet"
+              text="Add a dataset sync to pull raw data from FMP on a schedule into a reusable collection."
+              action={
+                isAdmin && (
+                  <div className="dataset-empty-actions">
+                    {addBtn}
+                    {importBtn}
+                  </div>
+                )
+              }
+            />
+          ) : (
+            <div className="dataset-v2">
+              <div className="kpi-row">
+                <KpiCard
+                  label="Syncs"
+                  value={syncs.length}
+                  footnote={`${syncs.filter((s) => s.enabled).length} enabled`}
+                />
+                <KpiCard
+                  label="Collections"
+                  value={collections.length}
+                  footnote={`${fmtNumber(collections.reduce((n, c) => n + (coverage.get(c)?.rows ?? 0), 0))} rows`}
+                />
+                <KpiCard
+                  label="Healthy"
+                  value={healthy}
+                  footnote={`${syncs.length - healthy} need attention`}
+                />
+                <KpiCard
+                  label="FMP calls today"
+                  value={stats ? fmtNumber(stats.calls) : '—'}
+                  footnote={stats ? `${stats.runs} runs, ${stats.failed} failed` : undefined}
+                />
+              </div>
+              <div className="sync-filters" role="search">
+                <input
+                  aria-label="Search syncs"
+                  placeholder="Search syncs"
+                  value={q}
+                  onChange={(e) => setQ(e.target.value)}
+                />
+                <select
+                  aria-label="Category"
+                  value={fCategory}
+                  onChange={(e) => setFCategory(e.target.value)}
                 >
-                  <Download size={15} /> {checkedIds.length ? 'Export selected' : 'Export all'}
-                </Button>
-                {importBtn}
-                <span className="dataset-toolbar-divider" aria-hidden="true" />
-                <Button
-                  variant="secondary"
-                  disabled={!checkedIds.length || bulkBusy}
-                  onClick={() => bulk('run')}
+                  <option value="">All categories</option>
+                  {[...new Set(catalog.map((c) => c.category))].sort().map((c) => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  aria-label="Priority"
+                  value={fPriority}
+                  onChange={(e) => setFPriority(e.target.value)}
                 >
-                  <Play size={15} /> Run
-                </Button>
-                <Button
-                  variant="secondary"
-                  disabled={!checkedIds.length || bulkBusy}
-                  onClick={() => bulk('enable')}
-                >
-                  <Power size={15} /> Enable
-                </Button>
-                <Button
-                  variant="secondary"
-                  disabled={!checkedIds.length || bulkBusy}
-                  onClick={() => bulk('disable')}
-                >
-                  <PowerOff size={15} /> Disable
-                </Button>
-                <Button
-                  variant="secondary"
-                  disabled={!checkedIds.length || bulkBusy}
-                  title="Forget the sync cursor so the next run re-pulls history from the start date"
-                  onClick={() => bulk('reset')}
-                >
-                  <RotateCcw size={15} /> Reset cursor
-                </Button>
-                <Button
-                  variant="secondary"
-                  disabled={!checkedIds.length || bulkBusy}
-                  title="Pull each selected sync's history (10 years by default) in resumable batches"
-                  onClick={() => {
-                    if (
-                      confirm(
-                        `Start a backfill for ${plural(checkedIds.length, 'sync')}? It runs in the background at the lowest FMP priority.`,
-                      )
-                    )
-                      void bulk('backfill');
-                  }}
-                >
-                  <History size={15} /> Backfill
-                </Button>
-                <Button
-                  variant="danger"
-                  disabled={!checkedIds.length || bulkBusy}
-                  title="Delete every record in the selected collections; the syncs are kept"
-                  onClick={() => setConfirming({ action: 'purge', dropCollections: false })}
-                >
-                  <Eraser size={15} /> Purge records
-                </Button>
-                <Button
-                  variant="danger"
-                  disabled={!checkedIds.length || bulkBusy}
-                  onClick={() => setConfirming({ action: 'delete', dropCollections: false })}
-                >
-                  <Trash2 size={15} /> Delete
-                </Button>
-                {checkedIds.length > 0 && (
-                  <IconButton title="Clear selection" onClick={() => setChecked(new Set())}>
-                    <X size={15} />
-                  </IconButton>
+                  <option value="">All priorities</option>
+                  {['P0', 'P1', 'P2'].map((p) => (
+                    <option key={p}>{p}</option>
+                  ))}
+                </select>
+                <select aria-label="Status" value={fStatus} onChange={(e) => setFStatus(e.target.value)}>
+                  <option value="">All statuses</option>
+                  {['ready', 'running', 'queued', 'failed', 'disabled'].map((p) => (
+                    <option key={p}>{p}</option>
+                  ))}
+                </select>
+                <select aria-label="Cadence" value={fCadence} onChange={(e) => setFCadence(e.target.value)}>
+                  <option value="">Any cadence</option>
+                  {['intraday', 'daily', 'weekly', 'monthly', 'manual'].map((p) => (
+                    <option key={p}>{p}</option>
+                  ))}
+                </select>
+                {visible.length !== syncs.length && (
+                  <span className="muted-line">
+                    {visible.length} of {syncs.length}
+                  </span>
                 )}
               </div>
-            </div>
-          )}
-          {notice && (
-            <div className="notice dataset-notice" role="status">
-              <span>{notice}</span>
-              <IconButton title="Dismiss" onClick={() => setNotice('')}>
-                <X size={14} />
-              </IconButton>
-            </div>
-          )}
-          <div className="table-wrap dataset-table">
-            <table>
-              <thead>
-                <tr>
-                  {isAdmin && (
-                    <th className="dataset-check">
-                      <input
-                        ref={selectAllRef}
-                        type="checkbox"
-                        aria-label="Select all dataset syncs"
-                        checked={allChecked}
-                        onChange={toggleAll}
-                      />
-                    </th>
-                  )}
-                  <th>Name</th>
-                  <th>Dataset</th>
-                  <th>Symbols</th>
-                  <th>Priority</th>
-                  <th>Schedule</th>
-                  <th>Last run</th>
-                  <th>Rows</th>
-                  <th>Status</th>
-                  {isAdmin && <th aria-label="Actions" />}
-                </tr>
-              </thead>
-              <tbody>
-                {syncs.map((s) => (
-                  <tr
-                    key={s.id}
-                    className={`${current?.id === s.id ? 'active' : ''} ${checked.has(s.id) ? 'checked' : ''}`}
-                    onClick={() => setSelected(s.id)}
-                  >
-                    {isAdmin && (
-                      <td className="dataset-check" onClick={(e) => e.stopPropagation()}>
-                        <input
-                          type="checkbox"
-                          aria-label={`Select ${s.name}`}
-                          checked={checked.has(s.id)}
-                          onChange={() => toggle(s.id)}
-                        />
-                      </td>
+              {isAdmin && (
+                <div className="dataset-toolbar" role="toolbar" aria-label="Dataset sync actions">
+                  <label className="dataset-toolbar-select">
+                    <input type="checkbox" checked={allChecked} onChange={toggleAll} />
+                    {checkedIds.length ? `${checkedIds.length} of ${syncs.length} selected` : 'Select all'}
+                  </label>
+                  <div className="dataset-toolbar-actions">
+                    <Button
+                      variant="secondary"
+                      title={
+                        checkedIds.length ? 'Export the selected syncs as YAML' : 'Export every sync as YAML'
+                      }
+                      onClick={exportYaml}
+                    >
+                      <Download size={15} /> {checkedIds.length ? 'Export selected' : 'Export all'}
+                    </Button>
+                    {importBtn}
+                    <span className="dataset-toolbar-divider" aria-hidden="true" />
+                    <Button
+                      variant="secondary"
+                      disabled={!checkedIds.length || bulkBusy}
+                      onClick={() => bulk('run')}
+                    >
+                      <Play size={15} /> Run
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      disabled={!checkedIds.length || bulkBusy}
+                      onClick={() => bulk('enable')}
+                    >
+                      <Power size={15} /> Enable
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      disabled={!checkedIds.length || bulkBusy}
+                      onClick={() => bulk('disable')}
+                    >
+                      <PowerOff size={15} /> Disable
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      disabled={!checkedIds.length || bulkBusy}
+                      title="Forget the sync cursor so the next run re-pulls history from the start date"
+                      onClick={() => bulk('reset')}
+                    >
+                      <RotateCcw size={15} /> Reset cursor
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      disabled={!checkedIds.length || bulkBusy}
+                      title="Pull each selected sync's history (10 years by default) in resumable batches"
+                      onClick={() => {
+                        if (
+                          confirm(
+                            `Start a backfill for ${plural(checkedIds.length, 'sync')}? It runs in the background at the lowest FMP priority.`,
+                          )
+                        )
+                          void bulk('backfill');
+                      }}
+                    >
+                      <History size={15} /> Backfill
+                    </Button>
+                    <Button
+                      variant="danger"
+                      disabled={!checkedIds.length || bulkBusy}
+                      title="Delete every record in the selected collections; the syncs are kept"
+                      onClick={() => setConfirming({ action: 'purge', dropCollections: false })}
+                    >
+                      <Eraser size={15} /> Purge records
+                    </Button>
+                    <Button
+                      variant="danger"
+                      disabled={!checkedIds.length || bulkBusy}
+                      onClick={() => setConfirming({ action: 'delete', dropCollections: false })}
+                    >
+                      <Trash2 size={15} /> Delete
+                    </Button>
+                    {checkedIds.length > 0 && (
+                      <IconButton title="Clear selection" onClick={() => setChecked(new Set())}>
+                        <X size={15} />
+                      </IconButton>
                     )}
-                    <td>
-                      <strong>{s.name}</strong>
-                    </td>
-                    <td>{catalogById.get(s.dataset as string)?.label ?? s.dataset}</td>
-                    <td>{symbolsLabel(s)}</td>
-                    <td>
-                      <span
-                        className={`priority-pill ${String(s.effectivePriority ?? '').toLowerCase()}`}
-                        title={s.priority ? 'Set on this sync' : 'Default for this dataset'}
-                      >
-                        {s.effectivePriority ?? '—'}
-                        {!s.priority && <small> auto</small>}
-                      </span>
-                    </td>
-                    <td>{describeSchedule(s.schedule as Schedule | undefined)}</td>
-                    <td>{s.lastRunAt ? timestamp(s.lastRunAt) : '—'}</td>
-                    <td>{typeof s.lastRows === 'number' ? s.lastRows.toLocaleString() : '—'}</td>
-                    <td>
-                      <Status
-                        status={
-                          s.running
-                            ? 'running'
-                            : s.queued
-                              ? 'queued'
-                              : s.enabled
-                                ? s.lastError
-                                  ? 'failed'
-                                  : 'ready'
-                                : 'disabled'
-                        }
-                      />
-                      {s.backfill &&
-                        ['queued', 'running', 'paused', 'failed'].includes(s.backfill.status) && (
-                          <span className={`backfill-badge ${s.backfill.status}`} title="Backfill progress">
-                            backfill{' '}
-                            {s.backfill.status === 'running' ? `${s.backfill.pct}%` : s.backfill.status}
-                          </span>
-                        )}
-                    </td>
-                    {isAdmin && (
-                      <td className="dataset-row-actions" onClick={(e) => e.stopPropagation()}>
-                        <IconButton
-                          title="Run now"
-                          onClick={() =>
-                            act(async () => {
-                              await runDatasetSyncNow(s.id);
-                              setTimeout(() => void refresh(), 4000);
-                            })
-                          }
-                        >
-                          <Play size={15} />
-                        </IconButton>
-                        <IconButton title="Edit" onClick={() => setEditing(editForm(s))}>
-                          <Pencil size={15} />
-                        </IconButton>
-                        <IconButton
-                          title="Delete"
-                          onClick={() =>
-                            act(async () => {
-                              if (!confirm(`Delete sync "${s.name}"? The collection is kept.`)) return;
-                              await deleteDatasetSync(s.id);
-                              setSelected('');
-                              await refresh();
-                            })
-                          }
-                        >
-                          <Trash2 size={15} />
-                        </IconButton>
-                      </td>
-                    )}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-
-          {current && (
-            <section className="dataset-grid-section">
-              <div className="dataset-grid-head">
-                <div>
-                  <h2>{current.name}</h2>
-                  <div className="dataset-grid-meta">
-                    <code>{currentCollection}</code>
-                    {current.lastError ? (
-                      <span className="dataset-error">· {String(current.lastError)}</span>
-                    ) : null}
                   </div>
                 </div>
-              </div>
-              {mongo && currentCollection ? (
-                <DataGrid connectionId={mongo.id} collection={currentCollection} />
-              ) : (
-                <div className="notice">Connect the built-in MongoDB to browse this collection.</div>
               )}
-            </section>
+              {notice && (
+                <div className="notice dataset-notice" role="status">
+                  <span>{notice}</span>
+                  <IconButton title="Dismiss" onClick={() => setNotice('')}>
+                    <X size={14} />
+                  </IconButton>
+                </div>
+              )}
+              <div className="table-wrap dataset-table">
+                <table>
+                  <thead>
+                    <tr>
+                      {isAdmin && (
+                        <th className="dataset-check">
+                          <input
+                            ref={selectAllRef}
+                            type="checkbox"
+                            aria-label="Select all dataset syncs"
+                            checked={allChecked}
+                            onChange={toggleAll}
+                          />
+                        </th>
+                      )}
+                      <th>Name</th>
+                      <th>Dataset</th>
+                      <th>Symbols</th>
+                      <th>Priority</th>
+                      <th>History</th>
+                      <th>Coverage</th>
+                      <th>Schedule</th>
+                      <th>Next run</th>
+                      <th>Last run</th>
+                      <th>Rows</th>
+                      <th>Status</th>
+                      {isAdmin && <th aria-label="Actions" />}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {visible.map((s) => (
+                      <tr
+                        key={s.id}
+                        className={`${current?.id === s.id ? 'active' : ''} ${checked.has(s.id) ? 'checked' : ''}`}
+                        onClick={() => (go ? go({ tab: 'syncs', item: s.id }) : setSelected(s.id))}
+                      >
+                        {isAdmin && (
+                          <td className="dataset-check" onClick={(e) => e.stopPropagation()}>
+                            <input
+                              type="checkbox"
+                              aria-label={`Select ${s.name}`}
+                              checked={checked.has(s.id)}
+                              onChange={() => toggle(s.id)}
+                            />
+                          </td>
+                        )}
+                        <td>
+                          <strong>{s.name}</strong>
+                        </td>
+                        <td>{catalogById.get(s.dataset as string)?.label ?? s.dataset}</td>
+                        <td>{symbolsLabel(s)}</td>
+                        <td>
+                          <span
+                            className={`priority-pill ${String(s.effectivePriority ?? '').toLowerCase()}`}
+                            title={s.priority ? 'Set on this sync' : 'Default for this dataset'}
+                          >
+                            {s.effectivePriority ?? '—'}
+                            {!s.priority && <small> auto</small>}
+                          </span>
+                        </td>
+                        <td>{historyOf(s)}</td>
+                        <td>
+                          {(() => {
+                            const c = coverage.get(collectionOf(s));
+                            return c?.pct !== undefined ? (
+                              <span className="coverage-bar" title={`${c.pct}% of the universe`}>
+                                <span style={{ width: `${Math.min(100, c.pct)}%` }} />
+                                <small>{c.pct}%</small>
+                              </span>
+                            ) : (
+                              <span className="muted-line">{c ? fmtNumber(c.rows) : '—'}</span>
+                            );
+                          })()}
+                        </td>
+                        <td>{describeSchedule(s.schedule as Schedule | undefined)}</td>
+                        <td>{s.nextRunAt && s.schedule?.enabled ? timestamp(s.nextRunAt) : '—'}</td>
+                        <td>{s.lastRunAt ? timestamp(s.lastRunAt) : '—'}</td>
+                        <td>{typeof s.lastRows === 'number' ? s.lastRows.toLocaleString() : '—'}</td>
+                        <td>
+                          <Status
+                            status={
+                              s.running
+                                ? 'running'
+                                : s.queued
+                                  ? 'queued'
+                                  : s.enabled
+                                    ? s.lastError
+                                      ? 'failed'
+                                      : 'ready'
+                                    : 'disabled'
+                            }
+                          />
+                          {s.backfill &&
+                            ['queued', 'running', 'paused', 'failed'].includes(s.backfill.status) && (
+                              <span
+                                className={`backfill-badge ${s.backfill.status}`}
+                                title="Backfill progress"
+                              >
+                                backfill{' '}
+                                {s.backfill.status === 'running' ? `${s.backfill.pct}%` : s.backfill.status}
+                              </span>
+                            )}
+                        </td>
+                        {isAdmin && (
+                          <td className="dataset-row-actions" onClick={(e) => e.stopPropagation()}>
+                            <IconButton
+                              title="Run now"
+                              onClick={() =>
+                                act(async () => {
+                                  await runDatasetSyncNow(s.id);
+                                  setTimeout(() => void refresh(), 4000);
+                                })
+                              }
+                            >
+                              <Play size={15} />
+                            </IconButton>
+                            <IconButton title="Edit" onClick={() => setEditing(editForm(s))}>
+                              <Pencil size={15} />
+                            </IconButton>
+                            <IconButton
+                              title="Delete"
+                              onClick={() =>
+                                act(async () => {
+                                  if (!confirm(`Delete sync "${s.name}"? The collection is kept.`)) return;
+                                  await deleteDatasetSync(s.id);
+                                  setSelected('');
+                                  await refresh();
+                                })
+                              }
+                            >
+                              <Trash2 size={15} />
+                            </IconButton>
+                          </td>
+                        )}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
           )}
-        </div>
+        </>
       )}
 
       {importing && (
