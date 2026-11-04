@@ -2697,3 +2697,73 @@ textarea::placeholder {
 .caveat-add input {
   flex: 1;
 }
+
+/* Lineage (#97) */
+.lineage-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+  min-height: 34px;
+}
+.lineage-selection {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+}
+.lnode {
+  background: var(--surface);
+  border: 2px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 9px;
+  font-size: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  transition: opacity 0.15s;
+}
+.lnode.dim {
+  opacity: 0.25;
+}
+.lnode.selected {
+  outline: 2px solid var(--blue);
+  outline-offset: 2px;
+}
+.lnode-sync {
+  border-radius: 4px;
+}
+.lnode-transform {
+  background: #f6f3fb;
+}
+.lnode.fresh-fresh {
+  border-color: #2e8b57;
+}
+.lnode.fresh-stale {
+  border-color: #e0a100;
+}
+.lnode.fresh-failed {
+  border-color: #c0392b;
+}
+.lnode.fresh-unknown {
+  border-color: var(--border);
+  border-style: dashed;
+}
+.lnode-head {
+  display: flex;
+  gap: 5px;
+  align-items: center;
+  overflow: hidden;
+}
+.lnode-head strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lnode-meta {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  color: var(--muted);
+  font-size: 11px;
+}

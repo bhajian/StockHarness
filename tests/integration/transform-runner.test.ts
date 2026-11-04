@@ -142,6 +142,22 @@ test('a two-output transform runs in the executor: lookback, window, guard, dq, 
   const cat = await ok('/catalog/tr_returns');
   assert.equal(cat.layer, 2);
   assert.equal(cat.producedBy[0].type, 'transform');
+  assert.deepEqual(
+    [cat.producedBy[0].name, cat.producedBy[0].version],
+    ['tr_returns', 1],
+    'plain name + version (#97)',
+  );
+  assert.equal(cat.freshness.lastStatus, 'ok', "freshness comes from the transform's run");
+  // Lineage (#97): input -> transform -> both outputs.
+  const lin = await ok('/catalog/lineage');
+  const has = (from: string, to: string) => lin.edges.some((e: any) => e.from === from && e.to === to);
+  assert.ok(has('collection:tr_raw', 'transform:tr_returns'));
+  assert.ok(
+    has('transform:tr_returns', 'collection:tr_returns') &&
+      has('transform:tr_returns', 'collection:tr_summary'),
+  );
+  const tnode = lin.nodes.find((n: any) => n.id === 'transform:tr_returns');
+  assert.deepEqual([tnode.kind, tnode.freshness, tnode.lastRun.status], ['transform', 'fresh', 'succeeded']);
   assert.equal(cat.description, 'Daily returns from tr_raw');
   assert.equal(cat.timeSemantics.status, 'pit');
   assert.equal(cat.fields.find((f: any) => f.name === 'ret_1d').unit, 'ratio');

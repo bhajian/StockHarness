@@ -190,6 +190,11 @@ export async function executeTransformRun(
     durationMs: outcome.durationMs,
   };
   if (outcome.status !== 'succeeded') return fail(outcome.error ?? `The code ${outcome.status}`, base);
+  // Record success first, so the catalog refresh below sees this run as the outputs' freshness (#97).
+  await transformRuns().updateOne(
+    { _id: run._id },
+    { $set: { status: 'succeeded', finishedAt: new Date(), ...base } },
+  );
   // oh.describe() docs become curated catalog docs; every output's entry is refreshed.
   for (const d of (Array.isArray(outcome.meta?.describe) ? outcome.meta!.describe : []) as {
     collection?: string;
@@ -204,10 +209,6 @@ export async function executeTransformRun(
         fields: d.fields ?? {},
       }).catch(() => undefined);
   for (const c of outputNames) await refreshCatalogEntry(run.ownerId, c).catch(() => undefined);
-  await transformRuns().updateOne(
-    { _id: run._id },
-    { $set: { status: 'succeeded', finishedAt: new Date(), ...base } },
-  );
   await emitHarnessEvent(run.ownerId, 'transform.completed', {
     transform: t.name,
     transform_id: t._id,

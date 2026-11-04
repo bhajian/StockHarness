@@ -2,6 +2,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { collectionCoverage } from '../../../packages/core/src/catalogCoverage.js';
+import { lineage } from '../../../packages/core/src/lineage.js';
 import { collection } from '../../../packages/core/src/db.js';
 import { HttpError, safeError } from '../../../packages/core/src/security.js';
 import {
@@ -40,6 +41,10 @@ catalogRouter.post('/catalog/export', async (req, res) => {
     (e) => !names || names.includes(e.collection),
   );
   res.type('text/markdown').send(catalogMarkdown(entries));
+});
+// Lineage (#97): syncs -> collections -> transforms -> collections, with freshness per node.
+catalogRouter.get('/catalog/lineage', async (req, res) => {
+  res.json(await lineage(req.principal!.tenantId));
 });
 catalogRouter.get('/catalog/:collection', async (req, res) => {
   res.json(publicEntry(await entryOr404(req.principal!.tenantId, String(req.params.collection))));
