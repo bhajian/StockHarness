@@ -22,6 +22,8 @@ const FIELD_ORDER = [
   'preset',
   'from',
   'to',
+  'historyPeriods',
+  'statementPeriod',
   'targetCollection',
   'retentionDays',
   'params',

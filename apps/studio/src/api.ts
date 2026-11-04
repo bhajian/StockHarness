@@ -116,6 +116,9 @@ export const errorMessage = (error: unknown) =>
 
 // --- Dataset sync (FMP -> MongoDB) -------------------------------------------
 export type DatasetCatalogItem = {
+  defaultHistoryPeriods?: number;
+  periodParam?: string;
+  incremental?: 'timeseries' | 'window' | 'snapshot';
   id: string;
   label: string;
   category: string;
@@ -174,6 +177,23 @@ export async function exportDatasetSyncsYaml(ids: string[] = []) {
 }
 export const importDatasetSyncsYaml = (yaml: string, mode: 'merge' | 'replace', dryRun: boolean) =>
   send<{ applied: boolean; plan: DatasetImportPlan }>('/dataset-syncs/import', { yaml, mode, dryRun });
+export type DepthProbe = {
+  dataset: string;
+  symbol: string;
+  rows: number;
+  earliest?: string;
+  latest?: string;
+  years: number;
+  requested: Record<string, unknown>;
+  probedAt: string;
+};
+export const probeDatasetDepth = (body: {
+  dataset: string;
+  connectionId: string;
+  symbol?: string;
+  statementPeriod?: 'quarter' | 'annual';
+  syncId?: string;
+}) => send<DepthProbe>('/dataset-syncs/probe-depth', body);
 export const fetchDatasetRuns = (id: string) => api<DatasetSyncRun[]>(`/dataset-syncs/${id}/runs`);
 
 // --- Everything is a YAML object (#152) ----------------------------------------------------------

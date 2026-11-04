@@ -7,6 +7,7 @@ import {
   datasetSyncRuns,
   datasetSyncInput,
   enqueueManualRun,
+  probeDatasetDepth,
   syncQueue,
   fmpLimiter,
   effectivePriority,
@@ -135,6 +136,27 @@ datasetSyncRouter.delete('/dataset-syncs/:id', async (req, res) => {
   assertAdmin(req.principal!.user.role);
   await syncsCol().deleteOne({ _id: String(req.params.id), ownerId: req.principal!.tenantId });
   res.status(204).end();
+});
+
+const probeInput = z.object({
+  dataset: z.string().min(1),
+  connectionId: z.string().min(1),
+  symbol: z.string().max(20).optional(),
+  statementPeriod: z.enum(['quarter', 'annual']).optional(),
+  /** When given, the result is also stored on the sync (shown in its form). */
+  syncId: z.string().optional(),
+});
+// Plan-depth probe (#77): how much history FMP really returns for one symbol on the current plan.
+datasetSyncRouter.post('/dataset-syncs/probe-depth', async (req, res) => {
+  assertAdmin(req.principal!.user.role);
+  const input = probeInput.parse(req.body);
+  const result = await probeDatasetDepth(req.principal!.tenantId, input);
+  if (input.syncId)
+    await syncsCol().updateOne(
+      { _id: input.syncId, ownerId: req.principal!.tenantId },
+      { $set: { depthProbe: result } },
+    );
+  res.json(result);
 });
 
 // Apply one action to many syncs at once (Datasets toolbar). `run` returns immediately; the selected

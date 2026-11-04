@@ -50,6 +50,10 @@ export const datasetSyncInput = z.object({
     .optional(),
   retentionDays: z.number().int().min(1).max(36500).optional(),
   params: z.record(z.unknown()).optional(),
+  /** Rows per symbol for limit-based datasets (statements, metrics, estimates); default: the dataset's limit (#77). */
+  historyPeriods: z.number().int().min(1).max(200).optional(),
+  /** Quarterly or annual statements, for datasets with a period parameter (#77). */
+  statementPeriod: z.enum(['quarter', 'annual']).optional(),
   /** P0 prices / corporate actions / calendars, P1 fundamentals / estimates, P2 news / segments / peers. */
   priority: z.enum(SYNC_PRIORITIES).optional(),
   schedule: scheduleSchema,
@@ -210,6 +214,74 @@ async function upsertRows(
 }
 
 /** Do the actual data pull for one sync and return the row count. */
+/** Query parameters for one symbol: the dataset's constants, the sync's depth/period overrides, the window. */
+export function perSymbolParams(
+  def: DatasetDef,
+  sync: Pick<DatasetSync, 'historyPeriods' | 'statementPeriod' | 'cursor' | 'from'>,
+  symbol: string,
+  now: string,
+): Record<string, string | number> {
+  const params: Record<string, string | number> = { ...(def.params ?? {}), symbol };
+  if (sync.historyPeriods && typeof def.params?.limit === 'number') params.limit = sync.historyPeriods;
+  if (sync.statementPeriod && def.params?.period) params.period = sync.statementPeriod;
+  if (isTimeseries(def)) {
+    params.from = sync.cursor || sync.from || addDays(now, -365);
+    params.to = now;
+  }
+  return params;
+}
+
+/**
+ * Plan-depth probe (#77): one FMP call for one symbol asking for as much history as possible, to see what
+ * the current plan really returns before committing to a full backfill.
+ */
+export async function probeDatasetDepth(
+  ownerId: string,
+  input: { dataset: string; connectionId: string; symbol?: string; statementPeriod?: 'quarter' | 'annual' },
+) {
+  const def = catalogById.get(input.dataset);
+  if (!def) throw new HttpError(400, `Unknown dataset: ${input.dataset}`);
+  if (!def.perSymbol) throw new HttpError(400, 'The depth probe is for per-symbol datasets');
+  const apikey = await fmpApiKey(ownerId, input.connectionId);
+  const symbol = (input.symbol || 'AAPL').toUpperCase();
+  const now = today();
+  const params = perSymbolParams(
+    def,
+    {
+      from: '1980-01-01',
+      historyPeriods: typeof def.params?.limit === 'number' ? 200 : undefined,
+      statementPeriod: input.statementPeriod,
+    },
+    symbol,
+    now,
+  );
+  const data = await syncContext.run({ priority: 'P0' }, () => fmpGet(def.endpoint, params, apikey));
+  const list = (Array.isArray(data) ? data : data ? [data] : []).filter(
+    (r): r is Record<string, unknown> => !!r && typeof r === 'object',
+  );
+  const field = def.dateField || 'date';
+  const dates = list
+    .map((r) => r[field])
+    .filter((v): v is string => typeof v === 'string' && v.length >= 10)
+    .sort();
+  const years = dates.length
+    ? (Date.parse(dates[dates.length - 1]) - Date.parse(dates[0])) / (365.25 * 86400000)
+    : 0;
+  return {
+    dataset: def.id,
+    symbol,
+    requested:
+      typeof params.limit === 'number'
+        ? { limit: params.limit, period: params.period }
+        : { from: params.from, to: params.to },
+    rows: list.length,
+    earliest: dates[0],
+    latest: dates[dates.length - 1],
+    years: Math.round(years * 10) / 10,
+    probedAt: new Date().toISOString(),
+  };
+}
+
 async function pull(sync: DatasetSync, def: DatasetDef, apikey: string): Promise<number> {
   const wsDb = mongo.db(workspaceDatabase(sync.ownerId));
   const coll = wsDb.collection(sync.targetCollection || def.defaultCollection);
@@ -224,17 +296,13 @@ async function pull(sync: DatasetSync, def: DatasetDef, apikey: string): Promise
     for (const symbol of symbols) {
       // One symbol's transient throttle (402/429) must never fail the whole dataset.
       try {
-        const params: Record<string, string | number> = { ...(def.params ?? {}), symbol };
-        if (isTimeseries(def)) {
-          params.from = sync.cursor || defaultFrom;
-          params.to = now;
-        }
+        const params = perSymbolParams(def, sync, symbol, now);
         const data = await fmpGet(def.endpoint, params, apikey);
         const list = Array.isArray(data) ? data : data ? [data] : [];
         for (const r of list)
           if (r && typeof r === 'object') {
             (r as Record<string, unknown>).symbol = symbol;
-            if (def.params?.period) (r as Record<string, unknown>).period ??= def.params.period;
+            if (params.period) (r as Record<string, unknown>).period ??= params.period;
             // Append-only snapshots: stamp the sync date so each weekly pull adds rows.
             if (def.snapshotDated) (r as Record<string, unknown>).snapshot_date = now;
           }
