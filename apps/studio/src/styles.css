@@ -7513,3 +7513,8 @@ details.advanced summary {
 .dataset-plan-section ul { margin: 4px 0 0; padding-left: 18px; max-height: 160px; overflow: auto; }
 .dataset-plan-section.error strong { color: var(--danger, #dc2626); }
 .dataset-plan-section.muted { color: var(--muted, #6b7280); }
+/* ---- YAML object export/import (#152) ---- */
+.page-title-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.object-transfer-error { color: var(--danger, #dc2626); font-size: 13px; }
+.configuration-panel { padding: 18px; }
+.configuration-actions { display: flex; gap: 8px; margin-top: 12px; }

@@ -75,7 +75,13 @@ function builtInMongoConnection(input: unknown) {
   // Explicitly false, so turning it off on an update replaces the stored flag.
   if (body.kind !== 'mongodb' || !body.builtIn) return { ...body, builtIn: false };
   if (!config.MONGODB_MCP_URL) throw new HttpError(400, 'This installation has no MongoDB MCP server');
-  const { token: _token, oauthClientId: _id, oauthClientSecret: _secret, database: _database, ...rest } = body;
+  const {
+    token: _token,
+    oauthClientId: _id,
+    oauthClientSecret: _secret,
+    database: _database,
+    ...rest
+  } = body;
   return { ...rest, url: config.MONGODB_MCP_URL, transport: 'http', authType: 'none', builtIn: true };
 }
 async function assertOwned(name: string, ownerId: string, id: string) {
@@ -191,244 +197,256 @@ for (const [kind, schema] of Object.entries(definitions)) {
     if (!record) throw new HttpError(404, 'Resource not found');
     res.json(publicResource(record));
   });
-  for (const method of ['post', 'put'] as const)
-    resources[method](`/${kind}${method === 'put' ? '/:id' : ''}`, async (req, res) => {
-      const ownerId = req.principal!.tenantId;
-      if (kind === 'guardrails' && req.principal!.user.role !== 'admin')
-        throw new HttpError(403, 'Only administrators can change safety policies');
-      const body: any = schema.parse(
-        kind === 'connections' ? builtInMongoConnection(req.body) : req.body,
-      );
-      const id = method === 'put' ? String((req.params as Record<string, string>).id) : randomUUID();
-      const previous = method === 'put' ? await records().findOne({ _id: id, ownerId }) : null;
-      if (kind === 'providers' && previous?.modelType && !body.modelType) body.modelType = previous.modelType;
-      if (method === 'put' && !previous) throw new HttpError(404, 'Resource not found');
-      if (kind === 'providers' || kind === 'connections') await validateRemoteUrl(body.baseUrl ?? body.url);
-      if (kind === 'knowledge')
-        // The store is chosen once; bases from before stores were pluggable are on Weaviate.
-        body.vectorStore = previous
-          ? (body.vectorStore ?? previous.vectorStore ?? 'weaviate')
-          : (body.vectorStore ?? config.VECTOR_STORE);
-      await validateReferences(kind, ownerId, body);
-      if (
-        kind === 'providers' &&
-        previous &&
-        ['kind', 'baseUrl', 'embeddingModel', 'model', 'modelType'].some((k) => previous[k] !== body[k]) &&
-        (await collection<Resource>('knowledge').findOne({ ownerId, providerId: id }))
-      )
-        throw new HttpError(
-          409,
-          'This provider is used by a knowledge base. Create a new provider to change its embedding configuration.',
-        );
-      if (kind === 'knowledge') {
-        if (!configuredVectorStores().includes(body.vectorStore))
-          throw new HttpError(
-            400,
-            `The ${body.vectorStore} vector store is not configured on this deployment`,
-          );
-        if (
-          previous &&
-          (previous.vectorStore ?? 'weaviate') !== body.vectorStore &&
-          (await collection<KnowledgeDocument>('documents').findOne({ ownerId, knowledgeBaseId: id }))
-        )
-          throw new HttpError(
-            409,
-            'Remove the documents before moving this knowledge base to another vector store',
-          );
-      }
-      if (
-        kind === 'knowledge' &&
-        previous &&
-        previous.providerId !== body.providerId &&
-        (await collection<KnowledgeDocument>('documents').findOne({ ownerId, knowledgeBaseId: id }))
-      )
-        throw new HttpError(409, 'Remove the documents before changing the embedding provider');
-      if (
-        kind === 'providers' &&
-        previous?.modelType &&
-        previous.modelType !== body.modelType &&
-        (previous.modelType === 'embedding' || body.modelType === 'embedding')
-      )
-        throw new HttpError(409, 'Create a new model entry to change its type');
-      if (
-        kind === 'providers' &&
-        previous?.modelType === 'vision' &&
-        body.modelType !== 'vision' &&
-        ((await collection('agents').findOne({ ownerId, visionProviderId: id })) ||
-          (await collection('workflows').findOne({ ownerId, 'nodes.config.visionProviderId': id })))
-      )
-        throw new HttpError(409, 'This model is selected for vision in a harness');
-      const data = { ...body };
-      if (kind === 'skills') {
-        if (previous) await snapshotSkill(previous as VersionedSkill);
-        const previousVersion = previous ? skillVersion(previous as VersionedSkill) : '1.0.0';
-        const [major, minor, patch] = previousVersion.split('.').map(Number);
-        let nextPatch = patch + 1;
-        if (previous)
-          while (
-            await collection('skill_versions').findOne({
-              ownerId,
-              skillId: id,
-              version: `${major}.${minor}.${nextPatch}`,
-            })
-          )
-            nextPatch++;
-        data.version = previous ? `${major}.${minor}.${nextPatch}` : '1.0.0';
-        data.files = {
-          ...(previous?.files ?? {}),
-          'SKILL.md': `---\nname: ${JSON.stringify(body.name)}\ndescription: ${JSON.stringify(body.description)}\nversion: ${data.version}\n---\n\n${body.instructions}\n`,
-        };
-      }
-      for (const [plain, encrypted] of [
-        ['apiKey', 'apiKeyEncrypted'],
-        ['token', 'tokenEncrypted'],
-        ['oauthClientSecret', 'clientSecretEncrypted'],
-      ]) {
-        if (data[plain] !== undefined) data[encrypted] = data[plain] ? encrypt(data[plain]) : '';
-        delete data[plain];
-      }
-      const clear: Record<string, string> = {};
-      if (kind === 'agents' && !body.visionProviderId) clear.visionProviderId = '';
-      if (
-        kind === 'connections' &&
-        previous &&
-        ['url', 'authType', 'oauthClientId', 'oauthScope'].some((k) => previous[k] !== body[k])
-      ) {
-        for (const key of ['tools', 'oauthTokensEncrypted', 'oauthClientEncrypted', 'lastCheckedAt'])
-          clear[key] = '';
-      }
-      if (
-        kind === 'workflows' &&
-        previous &&
-        JSON.stringify(previous.schedule) !== JSON.stringify(body.schedule)
-      )
-        clear.nextRunAt = '';
-      const now = new Date();
-      if (method === 'put') {
-        const expected = req.headers['if-match'];
-        if (expected !== undefined && String(previous?.revision ?? 0) !== expected)
-          throw new HttpError(
-            409,
-            'This workflow was changed by a teammate. Close and reopen it before saving.',
-          );
-        const result = await records().updateOne(
-          {
-            _id: id,
-            ownerId,
-            ...(kind === 'skills' ? { updatedAt: previous!.updatedAt } : {}),
-            ...(expected === undefined
-              ? {}
-              : previous?.revision === undefined
-                ? { revision: { $exists: false } }
-                : { revision: previous.revision }),
-          },
-          {
-            $set: { ...data, updatedAt: now, updatedBy: req.principal!.user._id },
-            $inc: { revision: 1 },
-            ...(Object.keys(clear).length ? { $unset: clear } : {}),
-          },
-        );
-        if (!result.matchedCount) throw new HttpError(409, 'This resource changed. Reopen it before saving.');
-      } else
-        await records().insertOne({
-          ...data,
-          _id: id,
-          ownerId,
-          createdBy: req.principal!.user._id,
-          revision: 1,
-          createdAt: now,
-          updatedAt: now,
-        });
-      if (kind === 'connections' && body.kind === 'mongodb' && body.builtIn)
-        await grantWorkspaceDatabase(workspaceDatabase(ownerId));
-      if (kind === 'skills')
-        await snapshotSkill((await records().findOne({ _id: id, ownerId })) as VersionedSkill);
-      if (kind === 'skills' && method === 'post')
-        await emitHarnessEvent(ownerId, 'skill.installed', { skill_id: id, name: body.name });
-      res
-        .status(method === 'post' ? 201 : 200)
-        .json(publicResource((await records().findOne({ _id: id, ownerId }))!));
-    });
+  resources.post(`/${kind}`, async (req, res) => {
+    res.status(201).json(await saveResource(kind as ResourceKind, req.principal!, req.body));
+  });
+  resources.put(`/${kind}/:id`, async (req, res) => {
+    const ifMatch = req.headers['if-match'];
+    res.json(
+      await saveResource(kind as ResourceKind, req.principal!, req.body, {
+        id: String(req.params.id),
+        ifMatch: typeof ifMatch === 'string' ? ifMatch : undefined,
+      }),
+    );
+  });
   resources.delete(`/${kind}/:id`, async (req, res) => {
-    const id = String(req.params.id);
-    const ownerId = req.principal!.tenantId;
-    const blockers: [string, Record<string, unknown>][] =
-      kind === 'providers'
+    await deleteResource(kind as ResourceKind, req.principal!, String(req.params.id));
+    res.status(204).end();
+  });
+}
+
+export type ResourceKind = keyof typeof definitions;
+export type ResourcePrincipal = NonNullable<Express.Request['principal']>;
+/** Create (no `opts.id`) or update a resource with every validation the REST routes apply. Shared with YAML import. */
+export async function saveResource(
+  kind: ResourceKind,
+  principal: ResourcePrincipal,
+  input: unknown,
+  opts: { id?: string; ifMatch?: string } = {},
+) {
+  const isUpdate = opts.id !== undefined;
+  const ownerId = principal.tenantId;
+  if (kind === 'guardrails' && principal.user.role !== 'admin')
+    throw new HttpError(403, 'Only administrators can change safety policies');
+  const body: any = definitions[kind as ResourceKind].parse(
+    kind === 'connections' ? builtInMongoConnection(input) : input,
+  );
+  const id = isUpdate ? String(opts.id) : randomUUID();
+  const previous = isUpdate ? await collection<Resource>(kind).findOne({ _id: id, ownerId }) : null;
+  if (kind === 'providers' && previous?.modelType && !body.modelType) body.modelType = previous.modelType;
+  if (isUpdate && !previous) throw new HttpError(404, 'Resource not found');
+  if (kind === 'providers' || kind === 'connections') await validateRemoteUrl(body.baseUrl ?? body.url);
+  if (kind === 'knowledge')
+    // The store is chosen once; bases from before stores were pluggable are on Weaviate.
+    body.vectorStore = previous
+      ? (body.vectorStore ?? previous.vectorStore ?? 'weaviate')
+      : (body.vectorStore ?? config.VECTOR_STORE);
+  await validateReferences(kind, ownerId, body);
+  if (
+    kind === 'providers' &&
+    previous &&
+    ['kind', 'baseUrl', 'embeddingModel', 'model', 'modelType'].some((k) => previous[k] !== body[k]) &&
+    (await collection<Resource>('knowledge').findOne({ ownerId, providerId: id }))
+  )
+    throw new HttpError(
+      409,
+      'This provider is used by a knowledge base. Create a new provider to change its embedding configuration.',
+    );
+  if (kind === 'knowledge') {
+    if (!configuredVectorStores().includes(body.vectorStore))
+      throw new HttpError(400, `The ${body.vectorStore} vector store is not configured on this deployment`);
+    if (
+      previous &&
+      (previous.vectorStore ?? 'weaviate') !== body.vectorStore &&
+      (await collection<KnowledgeDocument>('documents').findOne({ ownerId, knowledgeBaseId: id }))
+    )
+      throw new HttpError(
+        409,
+        'Remove the documents before moving this knowledge base to another vector store',
+      );
+  }
+  if (
+    kind === 'knowledge' &&
+    previous &&
+    previous.providerId !== body.providerId &&
+    (await collection<KnowledgeDocument>('documents').findOne({ ownerId, knowledgeBaseId: id }))
+  )
+    throw new HttpError(409, 'Remove the documents before changing the embedding provider');
+  if (
+    kind === 'providers' &&
+    previous?.modelType &&
+    previous.modelType !== body.modelType &&
+    (previous.modelType === 'embedding' || body.modelType === 'embedding')
+  )
+    throw new HttpError(409, 'Create a new model entry to change its type');
+  if (
+    kind === 'providers' &&
+    previous?.modelType === 'vision' &&
+    body.modelType !== 'vision' &&
+    ((await collection('agents').findOne({ ownerId, visionProviderId: id })) ||
+      (await collection('workflows').findOne({ ownerId, 'nodes.config.visionProviderId': id })))
+  )
+    throw new HttpError(409, 'This model is selected for vision in a harness');
+  const data = { ...body };
+  if (kind === 'skills') {
+    if (previous) await snapshotSkill(previous as VersionedSkill);
+    const previousVersion = previous ? skillVersion(previous as VersionedSkill) : '1.0.0';
+    const [major, minor, patch] = previousVersion.split('.').map(Number);
+    let nextPatch = patch + 1;
+    if (previous)
+      while (
+        await collection('skill_versions').findOne({
+          ownerId,
+          skillId: id,
+          version: `${major}.${minor}.${nextPatch}`,
+        })
+      )
+        nextPatch++;
+    data.version = previous ? `${major}.${minor}.${nextPatch}` : '1.0.0';
+    data.files = {
+      ...(previous?.files ?? {}),
+      'SKILL.md': `---\nname: ${JSON.stringify(body.name)}\ndescription: ${JSON.stringify(body.description)}\nversion: ${data.version}\n---\n\n${body.instructions}\n`,
+    };
+  }
+  for (const [plain, encrypted] of [
+    ['apiKey', 'apiKeyEncrypted'],
+    ['token', 'tokenEncrypted'],
+    ['oauthClientSecret', 'clientSecretEncrypted'],
+  ]) {
+    if (data[plain] !== undefined) data[encrypted] = data[plain] ? encrypt(data[plain]) : '';
+    delete data[plain];
+  }
+  const clear: Record<string, string> = {};
+  if (kind === 'agents' && !body.visionProviderId) clear.visionProviderId = '';
+  if (
+    kind === 'connections' &&
+    previous &&
+    ['url', 'authType', 'oauthClientId', 'oauthScope'].some((k) => previous[k] !== body[k])
+  ) {
+    for (const key of ['tools', 'oauthTokensEncrypted', 'oauthClientEncrypted', 'lastCheckedAt'])
+      clear[key] = '';
+  }
+  if (kind === 'workflows' && previous && JSON.stringify(previous.schedule) !== JSON.stringify(body.schedule))
+    clear.nextRunAt = '';
+  const now = new Date();
+  if (isUpdate) {
+    const expected = opts.ifMatch;
+    if (expected !== undefined && String(previous?.revision ?? 0) !== expected)
+      throw new HttpError(409, 'This workflow was changed by a teammate. Close and reopen it before saving.');
+    const result = await collection<Resource>(kind).updateOne(
+      {
+        _id: id,
+        ownerId,
+        ...(kind === 'skills' ? { updatedAt: previous!.updatedAt } : {}),
+        ...(expected === undefined
+          ? {}
+          : previous?.revision === undefined
+            ? { revision: { $exists: false } }
+            : { revision: previous.revision }),
+      },
+      {
+        $set: { ...data, updatedAt: now, updatedBy: principal.user._id },
+        $inc: { revision: 1 },
+        ...(Object.keys(clear).length ? { $unset: clear } : {}),
+      },
+    );
+    if (!result.matchedCount) throw new HttpError(409, 'This resource changed. Reopen it before saving.');
+  } else
+    await collection<Resource>(kind).insertOne({
+      ...data,
+      _id: id,
+      ownerId,
+      createdBy: principal.user._id,
+      revision: 1,
+      createdAt: now,
+      updatedAt: now,
+    });
+  if (kind === 'connections' && body.kind === 'mongodb' && body.builtIn)
+    await grantWorkspaceDatabase(workspaceDatabase(ownerId));
+  if (kind === 'skills')
+    await snapshotSkill((await collection<Resource>(kind).findOne({ _id: id, ownerId })) as VersionedSkill);
+  if (kind === 'skills' && !isUpdate)
+    await emitHarnessEvent(ownerId, 'skill.installed', { skill_id: id, name: body.name });
+  return publicResource((await collection<Resource>(kind).findOne({ _id: id, ownerId }))!);
+}
+/** Delete a resource, refusing while anything still references it. Shared with YAML import (replace mode). */
+export async function deleteResource(kind: ResourceKind, principal: ResourcePrincipal, id: string) {
+  const ownerId = principal.tenantId;
+  const blockers: [string, Record<string, unknown>][] =
+    kind === 'providers'
+      ? [
+          [
+            'agents',
+            {
+              $or: [{ providerId: id }, { visionProviderId: id }, { 'patternConfig.judgeProviderId': id }],
+            },
+          ],
+          ['knowledge', { providerId: id }],
+          [
+            'workflows',
+            {
+              $or: [
+                { 'nodes.config.providerId': id },
+                { 'nodes.config.visionProviderId': id },
+                { 'nodes.config.patternConfig.judgeProviderId': id },
+              ],
+            },
+          ],
+        ]
+      : kind === 'connections'
         ? [
-            [
-              'agents',
-              {
-                $or: [{ providerId: id }, { visionProviderId: id }, { 'patternConfig.judgeProviderId': id }],
-              },
-            ],
-            ['knowledge', { providerId: id }],
+            ['agents', { 'connections.connectionId': id }],
             [
               'workflows',
               {
                 $or: [
-                  { 'nodes.config.providerId': id },
-                  { 'nodes.config.visionProviderId': id },
-                  { 'nodes.config.patternConfig.judgeProviderId': id },
+                  { 'nodes.connectionId': id },
+                  { 'resources.connectionId': id },
+                  { 'nodes.config.connections.connectionId': id },
                 ],
               },
             ],
           ]
-        : kind === 'connections'
+        : kind === 'skills'
           ? [
-              ['agents', { 'connections.connectionId': id }],
-              [
-                'workflows',
-                {
-                  $or: [
-                    { 'nodes.connectionId': id },
-                    { 'resources.connectionId': id },
-                    { 'nodes.config.connections.connectionId': id },
-                  ],
-                },
-              ],
+              ['agents', { skillIds: id }],
+              ['workflows', { 'nodes.config.skillIds': id }],
             ]
-          : kind === 'skills'
-            ? [
-                ['agents', { skillIds: id }],
-                ['workflows', { 'nodes.config.skillIds': id }],
-              ]
-            : kind === 'agents'
-              ? [['workflows', { $or: [{ 'nodes.agentId': id }, { 'nodes.agentIds': id }] }]]
-              : kind === 'knowledge'
-                ? [
-                    ['agents', { knowledgeBaseIds: id }],
-                    ['documents', { knowledgeBaseId: id }],
-                    [
-                      'workflows',
-                      { $or: [{ 'resources.knowledgeBaseId': id }, { 'nodes.config.knowledgeBaseIds': id }] },
-                    ],
-                  ]
-                : [];
-    for (const [name, query] of blockers)
-      if (await collection<Resource>(name).findOne({ ownerId, ...query }))
-        throw new HttpError(409, `Remove this resource’s references in ${name} first`);
-    if (kind === 'guardrails') {
-      if (req.principal!.user.role !== 'admin')
-        throw new HttpError(403, 'Only administrators can delete safety policies');
-      if (
-        (await collection('agents').findOne({ ownerId, guardrailIds: id })) ||
-        (await collection('workflows').findOne({
-          ownerId,
-          $or: [{ guardrailIds: id }, { 'resources.policyId': id }, { 'nodes.config.guardrailIds': id }],
-        })) ||
-        (await collection('tenants').findOne({ _id: ownerId, guardrailIds: id }))
-      )
-        throw new HttpError(409, 'Remove this policy’s attachments first');
-    }
-    const removed = await records().findOneAndDelete({ _id: id, ownerId });
-    if (!removed) throw new HttpError(404, 'Resource not found');
-    if (kind === 'knowledge')
-      await dropKnowledgeIndex(removed as { _id: string; vectorStore?: 'weaviate' | 'qdrant' }).catch(
-        (error) => console.warn('Could not remove a knowledge index:', safeError(error)),
-      );
-    if (kind === 'skills') await emitHarnessEvent(ownerId, 'skill.uninstalled', { skill_id: id });
-    res.status(204).end();
-  });
+          : kind === 'agents'
+            ? [['workflows', { $or: [{ 'nodes.agentId': id }, { 'nodes.agentIds': id }] }]]
+            : kind === 'knowledge'
+              ? [
+                  ['agents', { knowledgeBaseIds: id }],
+                  ['documents', { knowledgeBaseId: id }],
+                  [
+                    'workflows',
+                    { $or: [{ 'resources.knowledgeBaseId': id }, { 'nodes.config.knowledgeBaseIds': id }] },
+                  ],
+                ]
+              : [];
+  for (const [name, query] of blockers)
+    if (await collection<Resource>(name).findOne({ ownerId, ...query }))
+      throw new HttpError(409, `Remove this resource’s references in ${name} first`);
+  if (kind === 'guardrails') {
+    if (principal.user.role !== 'admin')
+      throw new HttpError(403, 'Only administrators can delete safety policies');
+    if (
+      (await collection('agents').findOne({ ownerId, guardrailIds: id })) ||
+      (await collection('workflows').findOne({
+        ownerId,
+        $or: [{ guardrailIds: id }, { 'resources.policyId': id }, { 'nodes.config.guardrailIds': id }],
+      })) ||
+      (await collection('tenants').findOne({ _id: ownerId, guardrailIds: id }))
+    )
+      throw new HttpError(409, 'Remove this policy’s attachments first');
+  }
+  const removed = await collection<Resource>(kind).findOneAndDelete({ _id: id, ownerId });
+  if (!removed) throw new HttpError(404, 'Resource not found');
+  if (kind === 'knowledge')
+    await dropKnowledgeIndex(removed as { _id: string; vectorStore?: 'weaviate' | 'qdrant' }).catch((error) =>
+      console.warn('Could not remove a knowledge index:', safeError(error)),
+    );
+  if (kind === 'skills') await emitHarnessEvent(ownerId, 'skill.uninstalled', { skill_id: id });
 }
 async function testChatModel(provider: ProviderRecord) {
   if (provider.modelType !== 'vision')
