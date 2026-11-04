@@ -132,7 +132,13 @@ before(async () => {
     { symbol: 'ZZZ', companyName: 'Not in the universe' },
   ]);
   await insert('delisted_companies', [
-    { symbol: 'DDD', companyName: 'Delta Ltd', delistedDate: '2020-05-01', ipoDate: '2010-01-04' },
+    {
+      symbol: 'DDD',
+      companyName: 'Delta Ltd',
+      exchange: 'NYSE',
+      delistedDate: '2020-05-01',
+      ipoDate: '2010-01-04',
+    },
   ]);
   await insert('dividends_calendar', [
     { symbol: 'AAA', date: '2016-01-11', dividend: 0.1, declarationDate: '2016-01-04' },
@@ -199,6 +205,7 @@ before(async () => {
       freeCashFlow: 15,
     })),
   );
+  await insert('historical_market_cap', [{ symbol: 'AAA', date: '2016-01-05', marketCap: 5e9 }]);
   await insert('sector_performance', [{ date: '2016-01-04', sector: 'Technology', averageChange: 0.5 }]);
   await insert('eod_prices', [
     // AAA has one zero close (a DQ error) on 2016-01-07.
@@ -360,4 +367,41 @@ test('fundamentals_pit (#100): restatement versions, known_at / as_of, TTM as kn
   assert.equal(again.outputs.fundamentals_pit.written, 0, 'idempotent');
   const cat = await ok('/catalog/fundamentals_pit');
   assert.deepEqual([cat.layer, cat.timeSemantics.status], [2, 'pit']);
+});
+
+test('universe_daily (#101): filters as of each date, delisted names only while listed, counts published', async () => {
+  const id = await transformId('universe_daily');
+  const t = await ok(`/transforms/${id}`);
+  // Small test data: a $1 price floor, no liquidity or market-cap floor (0 turns a filter off).
+  await ok(
+    `/transforms/${id}`,
+    { ...t, params: { ...t.params, min_price: 1, min_adv_20d: 0, min_market_cap: 0 } },
+    'PUT',
+  );
+  const run = await runAndWait('universe_daily', { range: 'custom', start: '2016-01-04', end: '2020-03-06' });
+  assert.equal(run.status, 'succeeded', run.stderr);
+  const rows = (await docs('universe_daily', `&sort=${encodeURIComponent('{"date":1}')}`)).documents;
+  assert.equal(rows.length, 19, 'one row per priced security-day');
+  const ddd = rows.filter(
+    (r: any) => r.security_id === rows.find((x: any) => x.date === '2018-01-02')?.security_id,
+  );
+  assert.deepEqual(
+    [ddd[0].date, ddd.at(-1).date, ddd.every((r: any) => r.in_universe)],
+    ['2018-01-02', '2018-01-05', true],
+  );
+  assert.ok(
+    !rows.some((r: any) => r.security_id === ddd[0].security_id && r.date >= '2020-05-01'),
+    'not after delisting',
+  );
+  const aaa = rows.find((r: any) => r.date === '2016-01-07');
+  assert.deepEqual(
+    [aaa.in_universe, aaa.fails],
+    [false, ['price']],
+    'the zero close fails the price filter that day',
+  );
+  const counts = (await docs('universe_counts', `&filter=${encodeURIComponent('{"date":"2018-01-03"}')}`))
+    .documents[0];
+  assert.deepEqual([counts.members, counts.priced], [1, 1]);
+  const cat = await ok('/catalog/universe_counts');
+  assert.deepEqual([cat.layer, cat.producedBy[0].name], [2, 'universe_daily']);
 });

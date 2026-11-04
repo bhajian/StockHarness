@@ -112,3 +112,10 @@ class TestBuildSecurities(unittest.TestCase):
         self.assertEqual(doc["sector_history"][0]["valid_from"], "2016-01-04")
         self.assertTrue(doc["sector_is_backfilled"])
         self.assertEqual(doc["sector_observed_from"], "2026-10-23", "H4: the old datetime became a date")
+
+
+class TestDelistedExchange(unittest.TestCase):
+    def test_delisted_names_get_their_exchange(self):
+        [doc] = s.build_securities_docs([], [], [{"symbol": "DDD", "companyName": "Delta", "exchange": "NYSE", "delistedDate": "2020-05-01"}], [], {"DDD": "2018-01-02"}, "2026-11-04")
+        self.assertEqual(doc["exchange_history"], [{"value": "NYSE", "valid_from": "2018-01-02", "valid_to": None}])
+        self.assertFalse(doc["is_active"])
