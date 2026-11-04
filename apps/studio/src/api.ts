@@ -199,7 +199,7 @@ export const probeDatasetDepth = (body: {
 export const fetchDatasetRuns = (id: string) => api<DatasetSyncRun[]>(`/dataset-syncs/${id}/runs`);
 
 // --- Everything is a YAML object (#152) ----------------------------------------------------------
-export type ObjectKind = 'Skill' | 'Agent' | 'Harness' | 'DatasetSync';
+export type ObjectKind = 'Skill' | 'Agent' | 'Harness' | 'DatasetSync' | 'Transform' | 'CatalogEntry';
 export type ObjectImportPlan = {
   mode: 'merge' | 'replace';
   items: { kind: ObjectKind; name: string; action: 'create' | 'update' | 'unchanged' | 'remove' }[];
@@ -211,8 +211,11 @@ export type ObjectImportResult = {
   partial?: ObjectImportPlan['items'];
   error?: string;
 };
-export async function exportObjectsYaml(kinds: ObjectKind[] = []) {
-  const response = await fetch(`/api/objects/export${kinds.length ? `?kinds=${kinds.join(',')}` : ''}`, {
+export async function exportObjectsYaml(kinds: ObjectKind[] = [], names: string[] = []) {
+  const q = new URLSearchParams();
+  if (kinds.length) q.set('kinds', kinds.join(','));
+  if (names.length) q.set('names', names.join(','));
+  const response = await fetch(`/api/objects/export${q.size ? `?${q}` : ''}`, {
     credentials: 'same-origin',
   });
   if (!response.ok) throw new Error(`Export failed (${response.status})`);
@@ -268,3 +271,76 @@ export const startBackfill = (syncId: string, body: { from?: string; to?: string
   send<DatasetBackfill>(`/dataset-syncs/${syncId}/backfill`, body);
 export const backfillControl = (syncId: string, action: 'pause' | 'resume' | 'cancel' | 'retry') =>
   send<DatasetBackfill>(`/dataset-syncs/${syncId}/backfill/${action}`);
+
+// Layer 2 transforms (#94).
+import type { TransformDraft } from './transformTemplates';
+export type { TransformDraft };
+export type TransformRun = {
+  id: string;
+  transformId: string;
+  transformName: string;
+  version: number;
+  trigger: 'manual' | 'schedule' | 'event';
+  batchId?: string;
+  window?: { start: string; end: string; lookback_start: string };
+  status: 'queued' | 'running' | 'succeeded' | 'failed';
+  outputs?: Record<string, { written?: number; unchanged?: number; dq?: number }>;
+  reads?: Record<string, number>;
+  stdout?: string;
+  stderr?: string;
+  error?: string;
+  durationMs?: number;
+  createdAt: string;
+  startedAt?: string;
+  finishedAt?: string;
+};
+export type Transform = TransformDraft & {
+  id: string;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+  nextRunAt?: string;
+  lastRun?: TransformRun | null;
+};
+export const fetchTransforms = () => api<Transform[]>('/transforms');
+export const fetchTransform = (id: string) => api<Transform>(`/transforms/${encodeURIComponent(id)}`);
+export const saveTransform = (body: TransformDraft, id?: string) =>
+  send<Transform>(id ? `/transforms/${encodeURIComponent(id)}` : '/transforms', body, id ? 'PUT' : 'POST');
+export const deleteTransform = (id: string) =>
+  send<void>(`/transforms/${encodeURIComponent(id)}`, undefined, 'DELETE');
+export const runTransform = (
+  id: string,
+  body: { range: 'last_day' | 'custom' | 'full'; start?: string; end?: string },
+) => send<TransformRun[]>(`/transforms/${encodeURIComponent(id)}/run`, body);
+export const fetchTransformRuns = (id: string) =>
+  api<TransformRun[]>(`/transforms/${encodeURIComponent(id)}/runs`);
+export const fetchRecentTransformRuns = (since: Date) =>
+  api<TransformRun[]>(`/transform-runs?since=${encodeURIComponent(since.toISOString())}`);
+export const fetchTransformRun = (runId: string) =>
+  api<TransformRun>(`/transform-runs/${encodeURIComponent(runId)}`);
+
+// Schema catalog (#84).
+export type CatalogField = {
+  name: string;
+  type: string;
+  null_pct: number;
+  description?: string;
+  unit?: string;
+  example?: unknown;
+};
+export type CatalogListItem = {
+  collection: string;
+  layer: 1 | 2 | null;
+  description: string;
+  grain: string;
+  primaryKey: string[];
+  fieldCount: number;
+  producedBy: { type: string; name: string; id?: string }[];
+  timeSemantics: { status: 'pit' | 'current_only' | 'static' | 'unknown'; text: string };
+  coverage: { rows: number; symbols?: number; dateField?: string; dateMin?: string; dateMax?: string };
+  freshness: { lastUpdated?: string; lastStatus?: 'ok' | 'failed'; lastError?: string };
+  docCompletenessPct: number;
+};
+export type CatalogEntryDetail = Omit<CatalogListItem, 'fieldCount'> & { fields: CatalogField[] };
+export const fetchCatalog = () => api<CatalogListItem[]>('/catalog');
+export const fetchCatalogEntry = (c: string) => api<CatalogEntryDetail>(`/catalog/${encodeURIComponent(c)}`);

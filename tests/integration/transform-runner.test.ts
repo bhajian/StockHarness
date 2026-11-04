@@ -139,6 +139,15 @@ test('a two-output transform runs in the executor: lookback, window, guard, dq, 
   assert.equal(cat.description, 'Daily returns from tr_raw');
   assert.equal(cat.timeSemantics.status, 'pit');
   assert.equal(cat.fields.find((f: any) => f.name === 'ret_1d').unit, 'ratio');
+  // The list shows each transform's latest run; the recent-runs feed backs the KPIs (#94).
+  const listed = (await ok('/transforms')).find((x: any) => x.id === t.id);
+  assert.equal(listed.lastRun.id, run.id);
+  assert.equal(listed.lastRun.stdout, undefined, 'the list omits logs');
+  const recent = await ok(
+    `/transform-runs?since=${encodeURIComponent(new Date(Date.now() - 3600_000).toISOString())}`,
+  );
+  assert.ok(recent.some((r: any) => r.id === run.id));
+  assert.equal((await request('/transform-runs?since=nope')).status, 400);
 });
 
 test('re-running the same window is idempotent; a full backfill runs yearly chunks in order', async () => {

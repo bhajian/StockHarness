@@ -18,9 +18,32 @@ const adminOnly = (role: string) => {
 };
 const pub = ({ _id, ownerId, ...rest }: Record<string, any>) => ({ id: _id, ...rest });
 
+const RUN_SUMMARY = { stdout: 0, stderr: 0 } as const;
 transformsRouter.get('/transforms', async (req, res) => {
-  const list = await transforms().find({ ownerId: req.principal!.tenantId }).sort({ name: 1 }).toArray();
-  res.json(list.map(pub));
+  const ownerId = req.principal!.tenantId;
+  const list = await transforms().find({ ownerId }).sort({ name: 1 }).toArray();
+  // The list shows each transform's latest run (#94).
+  const last = await transformRuns()
+    .aggregate<{ _id: string; run: Record<string, any> }>([
+      { $match: { ownerId } },
+      { $sort: { createdAt: -1 } },
+      { $project: RUN_SUMMARY },
+      { $group: { _id: '$transformId', run: { $first: '$$ROOT' } } },
+    ])
+    .toArray();
+  const lastBy = new Map(last.map((l) => [l._id, pub(l.run)]));
+  res.json(list.map((t) => ({ ...pub(t), lastRun: lastBy.get(t._id) ?? null })));
+});
+// Recent runs across all transforms (KPIs: runs today, failed, rows written).
+transformsRouter.get('/transform-runs', async (req, res) => {
+  const since = new Date(typeof req.query.since === 'string' ? req.query.since : Date.now() - 86_400_000);
+  if (Number.isNaN(since.getTime())) throw new HttpError(400, 'since must be an ISO date');
+  const runs = await transformRuns()
+    .find({ ownerId: req.principal!.tenantId, createdAt: { $gte: since } }, { projection: RUN_SUMMARY })
+    .sort({ createdAt: -1 })
+    .limit(1000)
+    .toArray();
+  res.json(runs.map(pub));
 });
 transformsRouter.post('/transforms', async (req, res) => {
   adminOnly(req.principal!.user.role);

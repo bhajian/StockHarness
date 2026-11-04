@@ -45,6 +45,7 @@ import { Button, IconButton, Field, Modal, SaveForm, Empty, PageTitle, Status } 
 import { ScheduleFields } from './agentFields';
 import { DataGrid } from './DataGrid';
 import { Tabs } from './kit';
+import { TransformsTab } from './TransformsTab';
 import {
   DATASET_TABS,
   datasetsPath,
@@ -116,11 +117,7 @@ export function DatasetsPage(props: Props) {
       {route.tab === 'syncs' ? (
         <SyncsTab {...props} />
       ) : route.tab === 'transforms' ? (
-        <Empty
-          icon={<Code2 size={28} />}
-          title="Transforms"
-          text="Layer 2 Python transforms: inputs, outputs, schedule and runs."
-        />
+        <TransformsTab item={route.item} go={go} isAdmin={props.isAdmin} />
       ) : route.tab === 'catalog' ? (
         <Empty
           icon={<BookOpen size={28} />}
