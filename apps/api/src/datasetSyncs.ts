@@ -11,6 +11,12 @@ import {
   applyDatasetSyncBulk,
   type DatasetSync,
 } from '../../../packages/core/src/datasetSync.js';
+import { z } from 'zod';
+import {
+  exportDatasetSyncConfig,
+  planDatasetSyncImport,
+  applyDatasetSyncImport,
+} from '../../../packages/core/src/datasetSyncConfig.js';
 
 /** Backend FMP -> workspace-MongoDB dataset syncs. Mounted under /api with requireSession. */
 export const datasetSyncRouter = Router();
@@ -44,6 +50,33 @@ datasetSyncRouter.get('/datasetSyncs', async (req, res) =>
 datasetSyncRouter.get('/dataset-syncs', async (req, res) =>
   res.json(await listSyncs(req.principal!.tenantId)),
 );
+
+// YAML export of sync configurations (all, or `?ids=a,b`). Registered before `/:id`.
+datasetSyncRouter.get('/dataset-syncs/export', async (req, res) => {
+  const ids = typeof req.query.ids === 'string' && req.query.ids ? req.query.ids.split(',') : undefined;
+  const { yaml } = await exportDatasetSyncConfig(req.principal!.tenantId, ids);
+  const stamp = new Date().toISOString().slice(0, 10);
+  res
+    .type('application/yaml')
+    .set('Content-Disposition', `attachment; filename="dataset-syncs-${stamp}.yaml"`)
+    .send(yaml);
+});
+
+const importInput = z.object({
+  yaml: z.string().min(1).max(5_000_000),
+  mode: z.enum(['merge', 'replace']).default('merge'),
+  dryRun: z.boolean().default(true),
+});
+// Import YAML. dryRun (default) only returns the plan; otherwise applies it all-or-nothing.
+datasetSyncRouter.post('/dataset-syncs/import', async (req, res) => {
+  assertAdmin(req.principal!.user.role);
+  const { yaml, mode, dryRun } = importInput.parse(req.body);
+  const ownerId = req.principal!.tenantId;
+  if (dryRun)
+    return void res.json({ applied: false, plan: await planDatasetSyncImport(ownerId, yaml, mode) });
+  const result = await applyDatasetSyncImport(ownerId, yaml, mode, req.principal!.user._id);
+  res.json(result); // applied: false + plan.errors when nothing was written
+});
 
 datasetSyncRouter.get('/dataset-syncs/:id', async (req, res) => {
   const doc = await syncsCol().findOne({ _id: String(req.params.id), ownerId: req.principal!.tenantId });

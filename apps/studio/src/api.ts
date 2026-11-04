@@ -153,4 +153,25 @@ export type DatasetBulkResult = {
 };
 export const bulkDatasetSyncs = (ids: string[], action: DatasetBulkAction, dropCollections = false) =>
   send<DatasetBulkResult>('/dataset-syncs/bulk', { ids, action, dropCollections });
+export type DatasetImportPlan = {
+  mode: 'merge' | 'replace';
+  create: { name: string; dataset: string }[];
+  update: { id: string; name: string; changed: string[] }[];
+  unchanged: { id: string; name: string }[];
+  remove: { id: string; name: string }[];
+  errors: { index: number; name?: string; message: string }[];
+};
+/** YAML text of the selected syncs' configuration (all syncs when `ids` is empty). */
+export async function exportDatasetSyncsYaml(ids: string[] = []) {
+  const response = await fetch(
+    `/api/dataset-syncs/export${ids.length ? `?ids=${ids.map(encodeURIComponent).join(',')}` : ''}`,
+    {
+      credentials: 'same-origin',
+    },
+  );
+  if (!response.ok) throw new Error(`Export failed (${response.status})`);
+  return response.text();
+}
+export const importDatasetSyncsYaml = (yaml: string, mode: 'merge' | 'replace', dryRun: boolean) =>
+  send<{ applied: boolean; plan: DatasetImportPlan }>('/dataset-syncs/import', { yaml, mode, dryRun });
 export const fetchDatasetRuns = (id: string) => api<DatasetSyncRun[]>(`/dataset-syncs/${id}/runs`);

@@ -7506,3 +7506,10 @@ details.advanced summary {
 .dataset-table tbody tr.checked { background: rgba(79, 70, 229, 0.05); }
 .dataset-notice { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .dataset-confirm-list { margin: 8px 0 12px; padding-left: 18px; font-size: 13px; }
+.dataset-toolbar-divider { width: 1px; align-self: stretch; margin: 2px 4px; background: var(--border, #e5e7eb); }
+.dataset-empty-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+.dataset-import-text { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+.dataset-plan { display: flex; flex-direction: column; gap: 10px; font-size: 13px; }
+.dataset-plan-section ul { margin: 4px 0 0; padding-left: 18px; max-height: 160px; overflow: auto; }
+.dataset-plan-section.error strong { color: var(--danger, #dc2626); }
+.dataset-plan-section.muted { color: var(--muted, #6b7280); }

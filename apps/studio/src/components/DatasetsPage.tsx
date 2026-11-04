@@ -1,5 +1,18 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Database, Plus, Play, Pencil, Trash2, Power, PowerOff, RotateCcw, Eraser, X } from 'lucide-react';
+import {
+  Database,
+  Plus,
+  Play,
+  Pencil,
+  Trash2,
+  Power,
+  PowerOff,
+  RotateCcw,
+  Eraser,
+  X,
+  Download,
+  Upload,
+} from 'lucide-react';
 import {
   type Data,
   type DatasetCatalogItem,
@@ -9,6 +22,9 @@ import {
   deleteDatasetSync,
   runDatasetSyncNow,
   bulkDatasetSyncs,
+  exportDatasetSyncsYaml,
+  importDatasetSyncsYaml,
+  type DatasetImportPlan,
   type DatasetBulkAction,
   timestamp,
 } from '../api';
@@ -53,6 +69,13 @@ export function DatasetsPage({ data, refresh, act, isAdmin }: Props) {
   } | null>(null);
   const [bulkBusy, setBulkBusy] = useState(false);
   const [notice, setNotice] = useState('');
+  const [importing, setImporting] = useState<{
+    yaml: string;
+    mode: 'merge' | 'replace';
+    plan?: DatasetImportPlan;
+    busy?: boolean;
+    error?: string;
+  } | null>(null);
 
   useEffect(() => {
     fetchDatasetCatalog()
@@ -225,7 +248,48 @@ export function DatasetsPage({ data, refresh, act, isAdmin }: Props) {
     return 'Universe';
   };
 
+  async function exportYaml() {
+    await act(async () => {
+      const text = await exportDatasetSyncsYaml(checkedIds);
+      const url = URL.createObjectURL(new Blob([text], { type: 'application/yaml' }));
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `dataset-syncs-${new Date().toISOString().slice(0, 10)}.yaml`;
+      a.click();
+      URL.revokeObjectURL(url);
+      setNotice(`Exported ${plural(checkedIds.length || syncs.length, 'sync')} to YAML.`);
+    });
+  }
+  async function runImport(dryRun: boolean) {
+    if (!importing) return;
+    setImporting({ ...importing, busy: true, error: undefined });
+    try {
+      const r = await importDatasetSyncsYaml(importing.yaml, importing.mode, dryRun);
+      if (dryRun || !r.applied) return setImporting({ ...importing, plan: r.plan, busy: false });
+      setImporting(null);
+      setChecked(new Set());
+      setSelected('');
+      const p = r.plan;
+      setNotice(
+        `Imported YAML: ${p.create.length} created, ${p.update.length} updated, ${p.unchanged.length} unchanged${
+          p.remove.length ? `, ${p.remove.length} removed` : ''
+        }.`,
+      );
+      await refresh();
+    } catch (e) {
+      setImporting({ ...importing, busy: false, error: e instanceof Error ? e.message : String(e) });
+    }
+  }
+  const editImport = (patch: Partial<NonNullable<typeof importing>>) =>
+    // Any edit invalidates the preview: Apply always applies what was last previewed.
+    importing && setImporting({ ...importing, ...patch, plan: undefined, error: undefined });
+
   const selectedItem = editing ? catalogById.get(editing.dataset) : undefined;
+  const importBtn = isAdmin && (
+    <Button variant="secondary" onClick={() => setImporting({ yaml: '', mode: 'merge' })}>
+      <Upload size={16} /> Import YAML
+    </Button>
+  );
   const addBtn = isAdmin && (
     <Button onClick={() => setEditing(blankForm())} disabled={!catalog.length}>
       <Plus size={16} /> Add dataset sync
@@ -245,7 +309,14 @@ export function DatasetsPage({ data, refresh, act, isAdmin }: Props) {
           icon={<Database size={28} />}
           title="No datasets yet"
           text="Add a dataset sync to pull raw data from FMP on a schedule into a reusable collection."
-          action={addBtn}
+          action={
+            isAdmin && (
+              <div className="dataset-empty-actions">
+                {addBtn}
+                {importBtn}
+              </div>
+            )
+          }
         />
       ) : (
         <div className="dataset-v2">
@@ -256,6 +327,17 @@ export function DatasetsPage({ data, refresh, act, isAdmin }: Props) {
                 {checkedIds.length ? `${checkedIds.length} of ${syncs.length} selected` : 'Select all'}
               </label>
               <div className="dataset-toolbar-actions">
+                <Button
+                  variant="secondary"
+                  title={
+                    checkedIds.length ? 'Export the selected syncs as YAML' : 'Export every sync as YAML'
+                  }
+                  onClick={exportYaml}
+                >
+                  <Download size={15} /> {checkedIds.length ? 'Export selected' : 'Export all'}
+                </Button>
+                {importBtn}
+                <span className="dataset-toolbar-divider" aria-hidden="true" />
                 <Button
                   variant="secondary"
                   disabled={!checkedIds.length || bulkBusy}
@@ -431,6 +513,72 @@ export function DatasetsPage({ data, refresh, act, isAdmin }: Props) {
             </section>
           )}
         </div>
+      )}
+
+      {importing && (
+        <Modal title="Import dataset syncs from YAML" onClose={() => setImporting(null)} wide>
+          <div className="form-content">
+            <Field label="YAML file" hint="A file from Export, or the deploy/config-io dataset-syncs.json.">
+              <input
+                type="file"
+                accept=".yaml,.yml,.json,application/yaml,text/yaml"
+                onChange={async (e) => {
+                  const file = e.target.files?.[0];
+                  if (file) editImport({ yaml: await file.text() });
+                }}
+              />
+            </Field>
+            <Field label="Or paste YAML">
+              <textarea
+                className="dataset-import-text"
+                rows={10}
+                spellCheck={false}
+                value={importing.yaml}
+                onChange={(e) => editImport({ yaml: e.target.value })}
+                placeholder={
+                  'syncs:\n  - name: Daily EOD prices\n    dataset: eod_prices\n    connection: FMP\n    ...'
+                }
+              />
+            </Field>
+            <Field label="Mode">
+              <select
+                value={importing.mode}
+                onChange={(e) => editImport({ mode: e.target.value as 'merge' | 'replace' })}
+              >
+                <option value="merge">Merge: create new syncs and update ones with the same name</option>
+                <option value="replace">Replace: also remove syncs that are not in the file</option>
+              </select>
+            </Field>
+            <p className="field-help">
+              Syncs are matched by name. Updated syncs keep their cursor, so they don&apos;t re-pull history.
+              Collections and their records are never changed by an import.
+            </p>
+            {importing.error && <div className="notice error">{importing.error}</div>}
+            {importing.plan && <ImportPlanView plan={importing.plan} />}
+          </div>
+          <div className="form-actions">
+            <Button type="button" variant="secondary" onClick={() => setImporting(null)}>
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={!importing.yaml.trim() || importing.busy}
+              onClick={() => runImport(true)}
+            >
+              Preview
+            </Button>
+            <Button
+              type="button"
+              variant={importing.plan?.remove.length ? 'danger' : 'primary'}
+              disabled={!importing.plan || importing.plan.errors.length > 0 || importing.busy}
+              title={!importing.plan ? 'Preview the import first' : undefined}
+              onClick={() => runImport(false)}
+            >
+              <Upload size={15} /> Apply import
+            </Button>
+          </div>
+        </Modal>
       )}
 
       {confirming && (
@@ -634,5 +782,48 @@ export function DatasetsPage({ data, refresh, act, isAdmin }: Props) {
         </Modal>
       )}
     </>
+  );
+}
+
+function ImportPlanView({ plan }: { plan: DatasetImportPlan }) {
+  const section = (title: string, items: string[], tone = '') =>
+    items.length > 0 && (
+      <div className={`dataset-plan-section ${tone}`}>
+        <strong>
+          {title} ({items.length})
+        </strong>
+        <ul>
+          {items.map((t, i) => (
+            <li key={i}>{t}</li>
+          ))}
+        </ul>
+      </div>
+    );
+  const nothing = !plan.errors.length && !plan.create.length && !plan.update.length && !plan.remove.length;
+  return (
+    <div className="dataset-plan" aria-live="polite">
+      {section(
+        'Errors - fix these first; nothing is applied',
+        plan.errors.map((e) => `Entry ${e.index + 1}${e.name ? ` "${e.name}"` : ''}: ${e.message}`),
+        'error',
+      )}
+      {section(
+        'Create',
+        plan.create.map((c) => `${c.name} (${c.dataset})`),
+      )}
+      {section(
+        'Update',
+        plan.update.map((u) => `${u.name}: ${u.changed.join(', ')}`),
+      )}
+      {section(
+        'Remove',
+        plan.remove.map((r) => `${r.name} (sync only; collection kept)`),
+        'error',
+      )}
+      {plan.unchanged.length > 0 && (
+        <div className="dataset-plan-section muted">Unchanged: {plan.unchanged.length}</div>
+      )}
+      {nothing && <div className="dataset-plan-section muted">Nothing to change.</div>}
+    </div>
   );
 }
