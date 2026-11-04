@@ -2,7 +2,8 @@
 // "Export for agents"), and a collection page: header (description, grain, key, time rule, freshness) and
 // tabs Fields (inline docs), Coverage (charts), Caveats, Sample (DataGrid), Joins and Agent view.
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { BookOpen, Bot, Download, Pencil, RefreshCw, Search, X } from 'lucide-react';
+import { BookOpen, Bot, Download, GitFork, Pencil, RefreshCw, Search, X } from 'lucide-react';
+import { LineageGraph } from './LineageGraph';
 import {
   type CatalogCoverage,
   type CatalogDetail,
@@ -88,6 +89,18 @@ export function CatalogTab({
         text="Collections appear here after their first sync or transform run."
       />
     );
+  if (item === '_graph')
+    return (
+      <>
+        <div className="tab-head">
+          <p>Lineage: what feeds what, from dataset syncs through transforms to every output collection.</p>
+          <Button variant="secondary" onClick={() => go({ tab: 'catalog' })}>
+            <BookOpen size={15} /> Collections
+          </Button>
+        </div>
+        <LineageGraph go={go} height={640} />
+      </>
+    );
   const selected = item ?? groups[0]?.items[0]?.collection;
   return (
     <div className="catalog-panes">
@@ -101,6 +114,9 @@ export function CatalogTab({
             onChange={(e) => setQ(e.target.value)}
           />
         </label>
+        <Button variant="secondary" onClick={() => go({ tab: 'catalog', item: '_graph' })}>
+          <GitFork size={14} /> Lineage graph
+        </Button>
         <Button
           variant="secondary"
           disabled={!picked.size}
@@ -163,7 +179,7 @@ export function CatalogTab({
   );
 }
 
-type Tab = 'fields' | 'coverage' | 'caveats' | 'sample' | 'joins' | 'agent';
+type Tab = 'fields' | 'coverage' | 'caveats' | 'sample' | 'joins' | 'lineage' | 'agent';
 function CollectionPage({
   name,
   isAdmin,
@@ -301,6 +317,7 @@ function CollectionPage({
           { id: 'caveats', label: `Caveats (${e.caveats.length})` },
           { id: 'sample', label: 'Sample' },
           { id: 'joins', label: `Joins (${e.joins.length})` },
+          { id: 'lineage', label: 'Lineage' },
           { id: 'agent', label: 'Agent view' },
         ]}
         value={tab}
@@ -318,6 +335,8 @@ function CollectionPage({
         ) : (
           <p className="muted-line">Connect the built-in MongoDB to browse rows.</p>
         )
+      ) : tab === 'lineage' ? (
+        <LineageGraph go={go} focus={e.collection} height={380} />
       ) : tab === 'joins' ? (
         e.joins.length ? (
           <div className="table-wrap">

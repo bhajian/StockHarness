@@ -125,3 +125,42 @@ export function ganttBars(
     }),
   };
 }
+
+/**
+ * A plain left-to-right DAG layout (lineage, #97): column = longest path from a source; rows ordered by the
+ * average row of each node's parents (one barycenter pass) to reduce edge crossings.
+ */
+export function layoutDag(nodes: { id: string; after: string[] }[], w = NODE_W, h = 64, gx = 70, gy = 16) {
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+  const depth = new Map<string, number>();
+  const d = (id: string, seen = new Set<string>()): number => {
+    if (depth.has(id)) return depth.get(id)!;
+    if (seen.has(id)) return 0;
+    seen.add(id);
+    const n = byId.get(id);
+    const v = Math.max(0, ...(n?.after ?? []).filter((u) => byId.has(u)).map((u) => d(u, seen) + 1));
+    depth.set(id, v);
+    return v;
+  };
+  nodes.forEach((n) => d(n.id));
+  const cols = new Map<number, string[]>();
+  for (const n of nodes) cols.set(depth.get(n.id)!, [...(cols.get(depth.get(n.id)!) ?? []), n.id]);
+  const row = new Map<string, number>();
+  const pos: Record<string, { x: number; y: number }> = {};
+  for (const c of [...cols.keys()].sort((a, b) => a - b)) {
+    const ids = cols.get(c)!;
+    const key = (id: string) => {
+      const ps = byId
+        .get(id)!
+        .after.filter((u) => row.has(u))
+        .map((u) => row.get(u)!);
+      return ps.length ? ps.reduce((a, b) => a + b, 0) / ps.length : Number.MAX_SAFE_INTEGER;
+    };
+    ids.sort((a, b) => key(a) - key(b) || a.localeCompare(b));
+    ids.forEach((id, i) => {
+      row.set(id, i);
+      pos[id] = { x: c * (w + gx), y: i * (h + gy) };
+    });
+  }
+  return pos;
+}

@@ -117,5 +117,15 @@ test('build, run, inspect, re-run and round-trip a pipeline in the UI', async ({
   expect(await api('/objects/export?kinds=Pipeline')).toBe(yaml);
   await page.goto('/datasets/pipelines/ui-daily');
   await expect(page.locator('.pnode')).toHaveCount(3);
+
+  // Lineage (#97): Catalog > Graph shows input -> transform -> output; open the output's catalog page.
+  await page.goto('/datasets/catalog/_graph');
+  await expect(page.locator('.lnode-transform', { hasText: 'pb_daily' })).toBeVisible();
+  await expect(page.locator('.lnode-transform', { hasText: 'pb_daily' })).toHaveClass(/fresh-fresh/);
+  await page.locator('.lnode-collection', { hasText: 'pb_daily_out' }).click();
+  await page.getByRole('button', { name: 'Open collection' }).click();
+  await expect(page).toHaveURL(/\/datasets\/catalog\/pb_daily_out$/);
+  await page.getByRole('tab', { name: 'Lineage' }).click();
+  await expect(page.locator('.lnode')).toHaveCount(3);
   expect(errors).toEqual([]);
 });

@@ -39,7 +39,13 @@ export type CatalogEntry = {
   ownerId: string;
   collection: string;
   layer: 1 | 2 | null;
-  producedBy: { type: 'sync' | 'pipeline' | 'transform'; name: string; id?: string; dataset?: string }[];
+  producedBy: {
+    type: 'sync' | 'pipeline' | 'transform';
+    name: string;
+    id?: string;
+    dataset?: string;
+    version?: number;
+  }[];
   description: string;
   grain: string;
   primaryKey: string[];
@@ -226,14 +232,30 @@ export async function refreshCatalogEntry(ownerId: string, name: string, syncs?:
       description?: string;
       grain?: string;
     }[];
+    trigger?: { schedule?: Parameters<typeof describeSchedule>[0]; after?: string[] };
   }>('transforms').findOne(
     { ownerId, 'outputs.collection': name },
-    { projection: { name: 1, version: 1, outputs: 1 } },
+    { projection: { name: 1, version: 1, outputs: 1, trigger: 1 } },
   );
   const tOut = tr?.outputs.find((o) => o.collection === name);
+  // A transform output's freshness is its producer's latest finished run.
+  const transformRun = tOut
+    ? await collection<{
+        _id: string;
+        transformId: string;
+        status: string;
+        finishedAt?: Date;
+        error?: string;
+        createdAt: Date;
+      }>('transform_runs')
+        .find({ ownerId, transformId: tr!._id, status: { $in: ['succeeded', 'failed'] } })
+        .sort({ createdAt: -1 })
+        .limit(1)
+        .next()
+    : null;
   const l2 = tOut
     ? {
-        name: `${tr!.name} v${tr!.version}`,
+        name: tr!.name,
         description: tOut.description ?? `Output of the transform ${tr!.name}.`,
         grain: tOut.grain ?? grainOf(tOut.key),
         key: tOut.key,
@@ -355,10 +377,9 @@ export async function refreshCatalogEntry(ownerId: string, name: string, syncs?:
     layer: l2 ? 2 : def || SIDE_OUTPUTS[name] ? 1 : null,
     producedBy: l2
       ? [
-          {
-            type: (l2 as { transform?: boolean }).transform ? ('transform' as const) : ('pipeline' as const),
-            name: l2.name,
-          },
+          tr && tOut
+            ? { type: 'transform' as const, name: tr.name, id: tr._id, version: tr.version }
+            : { type: 'pipeline' as const, name: l2.name },
         ]
       : producers.map((s) => ({ type: 'sync' as const, name: s.name, id: s._id, dataset: s.dataset })),
     description:
@@ -376,13 +397,30 @@ export async function refreshCatalogEntry(ownerId: string, name: string, syncs?:
     timeSemantics,
     fields,
     coverage,
-    freshness: {
-      ...(producers[0]?.schedule ? { cadence: describeSchedule(producers[0].schedule) } : {}),
-      ...(lastRun?.lastRunAt
-        ? { lastUpdated: lastRun.lastRunAt, lastStatus: lastRun.lastError ? 'failed' : 'ok' }
-        : {}),
-      ...(lastRun?.lastError ? { lastError: lastRun.lastError } : {}),
-    },
+    freshness: transformRun
+      ? {
+          ...(tr?.trigger?.schedule?.enabled
+            ? { cadence: describeSchedule(tr.trigger.schedule) }
+            : tr?.trigger?.after?.length
+              ? { cadence: `after ${tr.trigger.after.join(', ')}` }
+              : {}),
+          ...(transformRun.finishedAt
+            ? {
+                lastUpdated: transformRun.finishedAt,
+                lastStatus: transformRun.status === 'failed' ? 'failed' : 'ok',
+              }
+            : {}),
+          ...(transformRun.status === 'failed' && transformRun.error
+            ? { lastError: transformRun.error }
+            : {}),
+        }
+      : {
+          ...(producers[0]?.schedule ? { cadence: describeSchedule(producers[0].schedule) } : {}),
+          ...(lastRun?.lastRunAt
+            ? { lastUpdated: lastRun.lastRunAt, lastStatus: lastRun.lastError ? 'failed' : 'ok' }
+            : {}),
+          ...(lastRun?.lastError ? { lastError: lastRun.lastError } : {}),
+        },
     joins,
     caveats: caveatsFor(
       { collection: name, dateMin: coverage.dateMin, dateField: coverage.dateField, firstSnapshot },

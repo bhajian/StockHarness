@@ -58,3 +58,20 @@ test('critical path and Gantt bars', () => {
   assert.deepEqual([by.features.runLeftPct, by.features.runWidthPct], [50, 25]);
   assert.equal(by.idle.runLeftPct, undefined, 'a node that never started has no running bar');
 });
+
+test('layoutDag: columns by depth, children placed near their parents', async () => {
+  const { layoutDag } = await import('../../apps/studio/src/pipelineLayout.js');
+  const p = layoutDag([
+    { id: 'sync:b', after: [] },
+    { id: 'sync:a', after: [] },
+    { id: 'col:a', after: ['sync:a'] },
+    { id: 'col:b', after: ['sync:b'] },
+    { id: 't', after: ['col:a', 'col:b'] },
+    { id: 'out1', after: ['t'] },
+    { id: 'out2', after: ['t'] },
+  ]);
+  assert.equal(p['sync:a'].x, 0);
+  assert.ok(p['col:a'].x > p['sync:a'].x && p.t.x > p['col:a'].x && p.out1.x > p.t.x);
+  assert.equal(p.out1.x, p.out2.x, 'a transform fans out into one column');
+  assert.ok(p['col:a'].y < p['col:b'].y, 'children follow their parents’ order');
+});
