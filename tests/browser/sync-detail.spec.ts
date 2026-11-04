@@ -87,5 +87,24 @@ test('syncs list and the sync detail page', async ({ page }) => {
   await page.getByLabel('Name').fill('EOD fixture (renamed)');
   await page.getByRole('button', { name: 'Save' }).click();
   await expect(page.locator('.sync-detail h2')).toHaveText('EOD fixture (renamed)');
+  // Schedule modes (#79): weekly preview, an intraday warning for an EOD dataset, Event validation (#82).
+  await page.getByRole('button', { name: 'Edit' }).click();
+  await page.getByRole('radio', { name: 'Weekly' }).click();
+  await expect(page.getByLabel('Next runs').locator('li')).toHaveCount(5);
+  await page.getByRole('radio', { name: 'Interval' }).click();
+  await expect(page.locator('.schedule-warning')).toContainText('updates once a day');
+  await page.getByRole('radio', { name: 'Event' }).click();
+  await expect(page.getByLabel('Days after earnings')).toHaveValue('2');
+  await page.getByRole('button', { name: 'Save' }).click();
+  await expect(page.locator('.modal')).toContainText('After earnings needs an earnings calendar sync');
+  await page.getByRole('radio', { name: 'Daily' }).click();
+  await page.getByRole('button', { name: 'Save' }).click();
+  await expect(page.locator('.modal')).toHaveCount(0);
+  const saved = await api(`/dataset-syncs/${sync.id}`);
+  expect([saved.schedule.enabled, saved.schedule.everyMinutes, saved.trigger]).toEqual([
+    true,
+    1440,
+    undefined,
+  ]);
   expect(errors).toEqual([]);
 });

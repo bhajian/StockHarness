@@ -62,6 +62,26 @@ export const datasetSyncInput = z.object({
   /** P0 prices / corporate actions / calendars, P1 fundamentals / estimates, P2 news / segments / peers. */
   priority: z.enum(SYNC_PRIORITIES).optional(),
   schedule: scheduleSchema,
+  /**
+   * Event triggers (#82): run after other syncs/transforms complete (`dataset:<collection>`, `transform:<name>`),
+   * and/or N days after each company's earnings report, for just the reporting symbols.
+   */
+  trigger: z
+    .object({
+      after: z
+        .array(
+          z
+            .string()
+            .regex(
+              /^(dataset|transform):[A-Za-z][A-Za-z0-9_]{0,62}$/,
+              'dataset:<collection> or transform:<name>',
+            ),
+        )
+        .max(20)
+        .default([]),
+      afterEarnings: z.object({ days: z.number().int().min(0).max(60) }).optional(),
+    })
+    .optional(),
 });
 export type DatasetSyncInput = z.infer<typeof datasetSyncInput>;
 
@@ -82,7 +102,7 @@ export type DatasetSyncRun = {
   ownerId: string;
   syncId: string;
   scheduleKey?: string;
-  trigger: 'schedule' | 'manual' | 'pipeline';
+  trigger: 'schedule' | 'manual' | 'pipeline' | 'event';
   status: 'running' | 'succeeded' | 'failed';
   rows?: number;
   /** Universe coverage of a per-symbol run (pipeline gates, #156). */
@@ -504,7 +524,12 @@ async function pullChecked(
 /** Run one sync end to end: records a run, pulls data, updates the sync's cursor/status. */
 export async function runDatasetSync(
   sync: DatasetSync,
-  opts: { trigger: 'schedule' | 'manual' | 'pipeline'; scheduleKey?: string } = { trigger: 'manual' },
+  opts: {
+    trigger: 'schedule' | 'manual' | 'pipeline' | 'event';
+    scheduleKey?: string;
+    /** Pull only these symbols (earnings-triggered runs, #82); the cursor is left alone. */
+    symbols?: string[];
+  } = { trigger: 'manual' },
 ) {
   if (opts.scheduleKey) {
     const existing = await datasetSyncRuns().findOne({ scheduleKey: opts.scheduleKey });
@@ -527,8 +552,9 @@ export async function runDatasetSync(
   try {
     const apikey = await fmpApiKey(sync.ownerId, sync.connectionId);
     const windowFrom = isTimeseries(def) ? sync.cursor || sync.from || addDays(today(), -365) : undefined;
+    const target = opts.symbols ? { ...sync, symbolsMode: 'list' as const, symbols: opts.symbols } : sync;
     const rows = await syncContext.run({ priority: effectivePriority(sync), calls }, () =>
-      pull(sync, def, apikey, stats),
+      pull(target, def, apikey, stats),
     );
     await datasetSyncRuns().updateOne(
       { _id: run._id },
@@ -551,7 +577,8 @@ export async function runDatasetSync(
         $set: {
           lastRunAt: new Date(),
           lastRows: rows,
-          ...(isTimeseries(def) ? { cursor: today() } : {}),
+          // A partial (earnings-triggered) run must not move the cursor past the other symbols' history.
+          ...(isTimeseries(def) && !opts.symbols ? { cursor: today() } : {}),
         },
         $unset: { lastError: '' },
       },

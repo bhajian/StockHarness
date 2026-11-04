@@ -16,6 +16,7 @@ import {
   type DatasetSync,
 } from '../../../packages/core/src/datasetSync.js';
 import { z } from 'zod';
+import { assertSyncTriggers } from '../../../packages/core/src/syncTriggers.js';
 import { mongo } from '../../../packages/core/src/db.js';
 import { workspaceDatabase } from '../../../packages/core/src/mongoMcp.js';
 import { syncEvents } from '../../../packages/core/src/eventSubscriptions.js';
@@ -182,6 +183,7 @@ datasetSyncRouter.post('/dataset-syncs', async (req, res) => {
   assertAdmin(req.principal!.user.role);
   const body = datasetSyncInput.parse(req.body);
   if (!catalogById.has(body.dataset)) throw new HttpError(400, `Unknown dataset: ${body.dataset}`);
+  await assertSyncTriggers(req.principal!.tenantId, body);
   const now = new Date();
   const doc: DatasetSync = {
     ...body,
@@ -201,10 +203,15 @@ datasetSyncRouter.put('/dataset-syncs/:id', async (req, res) => {
   if (!catalogById.has(body.dataset)) throw new HttpError(400, `Unknown dataset: ${body.dataset}`);
   const id = String(req.params.id);
   const ownerId = req.principal!.tenantId;
-  // Editing a sync clears nextRunAt so the (possibly new) schedule re-seeds on the next tick.
+  await assertSyncTriggers(ownerId, body, id);
+  // Editing a sync clears nextRunAt so the (possibly new) schedule re-seeds on the next tick; a removed
+  // trigger is removed (with its pending state).
   const updated = await syncsCol().updateOne(
     { _id: id, ownerId },
-    { $set: { ...body, updatedAt: new Date() }, $unset: { nextRunAt: '' } },
+    {
+      $set: { ...body, updatedAt: new Date() },
+      $unset: { nextRunAt: '', ...(body.trigger ? {} : { trigger: '', triggerState: '' }) },
+    },
   );
   if (!updated.matchedCount) throw new HttpError(404, 'Dataset sync not found');
   res.json(publicSync((await syncsCol().findOne({ _id: id, ownerId }))!));

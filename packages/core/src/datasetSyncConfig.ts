@@ -28,6 +28,7 @@ const FIELD_ORDER = [
   'retentionDays',
   'params',
   'schedule',
+  'trigger',
 ] as const;
 
 type ConnectionLite = { _id: string; name: string; kind: string; enabled?: boolean; url?: string };
@@ -96,6 +97,12 @@ export function parseDatasetSyncConfig(text: string): {
     const { connectionId: _ignored, ...config } = parsed.data;
     if (!catalogById.has(config.dataset)) {
       errors.push({ index, name, message: `Unknown dataset: ${config.dataset}` });
+      return;
+    }
+    // Triggers may name syncs later in the same file, so only a sync triggering itself is refused here.
+    const own = config.targetCollection || catalogById.get(config.dataset)!.defaultCollection;
+    if (config.trigger?.after.includes(`dataset:${own}`)) {
+      errors.push({ index, name, message: `Trigger dataset:${own}: a sync cannot run after itself` });
       return;
     }
     if (seen.has(config.name)) {
