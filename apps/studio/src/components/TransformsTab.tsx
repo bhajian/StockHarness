@@ -45,7 +45,8 @@ import type { Schedule } from '../../../../packages/core/src/schema.js';
 import { TEMPLATES, readSnippet, type TemplateOutput } from '../transformTemplates';
 import type { DatasetsRoute } from '../datasetsRoute';
 import { Button, Empty, Field, IconButton, Modal } from './ui';
-import { KpiCard, Skeleton, StatusPill } from './kit';
+import { KpiCard, Skeleton, StatusPill, Tabs } from './kit';
+import { BackfillProgress, RunHistory, VersionsPanel } from './TransformHistory';
 import { ScheduleFields } from './agentFields';
 import { ObjectTransfer } from './ObjectTransfer';
 import { CodeEditor, tracebackMarkers } from '../editor/CodeEditor';
@@ -427,6 +428,7 @@ function TransformEditor({
   }, [activeRun, loadRuns]);
 
   // Preview (#95): the current draft on a sample, nothing written. Its traceback matches the editor's code.
+  const [bottom, setBottom] = useState<'latest' | 'runs' | 'versions'>('latest');
   const [preview, setPreview] = useState<TransformPreview | null>(null);
   const [previewCode, setPreviewCode] = useState('');
   const previewing = preview?.status === 'running';
@@ -837,7 +839,38 @@ function TransformEditor({
         </aside>
       </div>
       {preview && <PreviewPanel preview={preview} onClose={() => setPreview(null)} />}
-      {transform && <LatestRun run={latest} runs={runs} reload={loadRuns} />}
+      {transform && (
+        <section className="transform-bottom">
+          <Tabs
+            tabs={[
+              { id: 'latest', label: 'Latest run' },
+              { id: 'runs', label: `Run history (${runs.length})` },
+              { id: 'versions', label: `Versions (${transform.version})` },
+            ]}
+            value={bottom}
+            onChange={setBottom}
+          />
+          <BackfillProgress runs={runs} />
+          {bottom === 'latest' ? (
+            <LatestRun run={latest} runs={runs} reload={loadRuns} />
+          ) : bottom === 'runs' ? (
+            <RunHistory runs={runs} />
+          ) : (
+            <VersionsPanel
+              transform={transform}
+              isAdmin={isAdmin}
+              onRestored={async (t, from) => {
+                const d = toDraft(t);
+                setSaved(d);
+                setDraft(d);
+                setParamsText(JSON.stringify(d.params, null, 2));
+                setMessage(`Restored v${from} as v${t.version}`);
+                await onSaved();
+              }}
+            />
+          )}
+        </section>
+      )}
       {running && transform && (
         <RunDialog
           transform={transform}

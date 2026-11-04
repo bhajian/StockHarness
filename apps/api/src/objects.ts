@@ -41,6 +41,10 @@ import {
   transformSpec,
   transforms,
   updateTransform,
+  transformHistory,
+  restoreTransformHistory,
+  transformHistorySchema,
+  type TransformHistoryEntry,
 } from '../../../packages/core/src/transforms.js';
 
 /** Kinds stored through the generic resource routes (the others have dedicated importers). */
@@ -133,6 +137,7 @@ export async function exportObjects(
   ownerId: string,
   kinds: ObjectKind[] = [...OBJECT_KINDS],
   names?: string[],
+  opts: { withHistory?: boolean } = {},
 ) {
   const { byId } = await referenceIndex(ownerId);
   const wanted = (n: string) => !names?.length || names.includes(n);
@@ -154,7 +159,14 @@ export async function exportObjects(
       for (const t of await transforms().find({ ownerId }).toArray()) {
         if (!wanted(t.name)) continue;
         const { name, ...spec } = transformSpec(t);
-        docs.push({ apiVersion: API_VERSION, kind, metadata: { name, version: String(t.version) }, spec });
+        // With history (#96): earlier versions, oldest first, so an import keeps diff and restore working.
+        const history = opts.withHistory ? await transformHistory(ownerId, t) : [];
+        docs.push({
+          apiVersion: API_VERSION,
+          kind,
+          metadata: { name, version: String(t.version) },
+          spec: history.length ? { ...spec, history } : spec,
+        });
       }
       continue;
     }
@@ -246,6 +258,24 @@ async function plan(
         message: `${issue.path.join('.') || 'spec'}: ${issue.message}`,
       });
       continue;
+    }
+    if (doc.spec.history !== undefined) {
+      const h = transformHistorySchema.safeParse(doc.spec.history);
+      const bad = h.success
+        ? h.data
+            .filter((e) => e.spec)
+            .map((e) => transformInputSchema.safeParse({ ...e.spec, name }))
+            .find((r) => !r.success)
+        : undefined;
+      if (!h.success || bad) {
+        const issue = (h.success ? bad!.error! : h.error).issues[0];
+        result.errors.push({
+          kind: 'Transform',
+          name,
+          message: `history: ${issue.path.join('.') || 'entry'}: ${issue.message}`,
+        });
+        continue;
+      }
     }
     const current = await transforms().findOne({ ownerId, name });
     // Inputs and triggers may point at transforms (or their outputs) created by this same import.
@@ -436,9 +466,20 @@ export async function applyObjectImport(
     for (let pass = 0; pendingT.length && pass <= pendingT.length + 1; pass++)
       for (const p of [...pendingT]) {
         try {
-          const body = { ...p.doc.spec, name: p.doc.metadata.name };
+          const { history, ...spec } = p.doc.spec;
+          const body = { ...spec, name: p.doc.metadata.name };
           if (p.existingId) await updateTransform(ownerId, p.existingId, body, principal.user._id);
-          else await createTransform(ownerId, body, principal.user._id);
+          else {
+            // History is restored only for transforms this import creates (an existing one keeps its own).
+            const t = await createTransform(ownerId, body, principal.user._id);
+            if (Array.isArray(history) && history.length)
+              await restoreTransformHistory(
+                ownerId,
+                t._id,
+                transformHistorySchema.parse(history) as TransformHistoryEntry[],
+                principal.user._id,
+              );
+          }
           done.push({ kind: 'Transform', name: p.doc.metadata.name, action: p.action });
           pendingT.splice(pendingT.indexOf(p), 1);
         } catch (e) {
@@ -508,7 +549,8 @@ objectsRouter.get('/objects/export', async (req, res) => {
   const kinds = kindList.parse(typeof req.query.kinds === 'string' ? req.query.kinds : undefined);
   const names =
     typeof req.query.names === 'string' && req.query.names ? req.query.names.split(',') : undefined;
-  const { yaml } = await exportObjects(req.principal!.tenantId, kinds, names);
+  const withHistory = req.query.history === '1' || req.query.history === 'true';
+  const { yaml } = await exportObjects(req.principal!.tenantId, kinds, names, { withHistory });
   res
     .type('application/yaml')
     .set(

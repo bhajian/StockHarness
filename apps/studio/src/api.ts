@@ -211,10 +211,11 @@ export type ObjectImportResult = {
   partial?: ObjectImportPlan['items'];
   error?: string;
 };
-export async function exportObjectsYaml(kinds: ObjectKind[] = [], names: string[] = []) {
+export async function exportObjectsYaml(kinds: ObjectKind[] = [], names: string[] = [], withHistory = false) {
   const q = new URLSearchParams();
   if (kinds.length) q.set('kinds', kinds.join(','));
   if (names.length) q.set('names', names.join(','));
+  if (withHistory) q.set('history', '1');
   const response = await fetch(`/api/objects/export${q.size ? `?${q}` : ''}`, {
     credentials: 'same-origin',
   });
@@ -378,3 +379,30 @@ export const startTransformPreview = (draft: TransformDraft, id?: string) =>
   });
 export const fetchTransformPreview = (id: string) =>
   api<TransformPreview>(`/transform-previews/${encodeURIComponent(id)}`);
+
+// Transform versions and run history (#96).
+export type TransformVersion = {
+  id: string;
+  transformId: string;
+  version: number;
+  note?: string;
+  createdAt: string;
+  createdBy?: string;
+  spec?: TransformDraft;
+};
+export const fetchTransformVersions = (id: string) =>
+  api<TransformVersion[]>(`/transforms/${encodeURIComponent(id)}/versions`);
+export const fetchTransformVersion = (id: string, version: number) =>
+  api<TransformVersion>(`/transforms/${encodeURIComponent(id)}/versions/${version}`);
+export const restoreTransformVersion = (id: string, version: number) =>
+  send<Transform>(`/transforms/${encodeURIComponent(id)}/versions/${version}/restore`, {});
+export type DqIssue = {
+  collection: string;
+  issue_type: string;
+  severity: string;
+  security_id?: string | null;
+  date?: string | null;
+  context?: Record<string, unknown> | null;
+};
+export const fetchTransformRunDq = (runId: string) =>
+  api<DqIssue[]>(`/transform-runs/${encodeURIComponent(runId)}/dq`);

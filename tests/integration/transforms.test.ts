@@ -18,6 +18,8 @@ const { exportObjects, planObjectImport, applyObjectImport } = await import('../
 
 const A = `tr-a-${randomUUID()}`;
 const B = `tr-b-${randomUUID()}`;
+const C = `tr-c-${randomUUID()}`;
+const D = `tr-d-${randomUUID()}`;
 const who = (t: string) => ({ tenantId: t, user: { _id: 'u', role: 'admin' } }) as any;
 const CODE = [
   'import oh',
@@ -63,7 +65,7 @@ const features = {
 before(async () => {
   if (!DIRECT_MONGO) return;
   await mongo.connect();
-  for (const o of [A, B]) {
+  for (const o of [A, B, C, D]) {
     await collection<any>('dataset_syncs').insertOne({
       _id: `${o}-eod`,
       ownerId: o,
@@ -85,8 +87,8 @@ before(async () => {
 after(async () => {
   if (!DIRECT_MONGO) return;
   for (const c of ['dataset_syncs', 'transforms', 'transform_versions', 'dataset_catalog'])
-    await collection<any>(c).deleteMany({ ownerId: { $in: [A, B] } });
-  for (const o of [A, B]) await mongo.db(workspaceDatabase(o)).dropDatabase();
+    await collection<any>(c).deleteMany({ ownerId: { $in: [A, B, C, D] } });
+  for (const o of [A, B, C, D]) await mongo.db(workspaceDatabase(o)).dropDatabase();
   await mongo.close();
 });
 
@@ -168,5 +170,54 @@ test(
     const again = (await exportObjects(B, ['Transform'])).yaml.replace(/version: "\d+"/g, '');
     assert.equal(again, yaml.replace(/version: "\d+"/g, ''), 'identical apart from the version counter');
     assert.ok((await planObjectImport(who(B), yaml, 'merge')).items.every((i) => i.action === 'unchanged'));
+  },
+);
+
+test(
+  'YAML round trip with history: versions, notes and restore survive an import (#96)',
+  { skip: skipReason },
+  async () => {
+    const t = await T.createTransform(C, prices, 'u');
+    await T.updateTransform(C, t._id, { ...prices, description: 'v2' }, 'u');
+    await T.updateTransform(C, t._id, { ...prices, description: 'v3', code: CODE + '# v3\n' }, 'u');
+    await T.restoreTransformVersion(C, t._id, 2, 'u'); // v4 = v2, noted
+    const { yaml } = await exportObjects(C, ['Transform'], ['prices_daily'], { withHistory: true });
+    assert.match(yaml, /version: "4"/);
+    assert.match(yaml, /history:/);
+    assert.match(yaml, /note: Restored from v2/, "the current version's note");
+    assert.ok(!(await exportObjects(C, ['Transform'])).yaml.includes('history:'), 'history only on request');
+    const r = await applyObjectImport(who(D), yaml, 'merge');
+    assert.equal(r.applied, true, JSON.stringify(r));
+    const d = (await T.transforms().findOne({ ownerId: D, name: 'prices_daily' }))!;
+    assert.equal(d.version, 4);
+    const versions = await T.transformVersions()
+      .find({ ownerId: D, transformId: d._id })
+      .sort({ version: 1 })
+      .toArray();
+    assert.deepEqual(
+      versions.map((v) => [v.version, v.spec.description]),
+      [
+        [1, prices.description],
+        [2, 'v2'],
+        [3, 'v3'],
+        [4, 'v2'],
+      ],
+    );
+    assert.equal(versions[3].note, 'Restored from v2');
+    assert.ok(versions[2].spec.code.endsWith('# v3\n'), 'each version keeps its own code');
+    assert.equal(
+      (await exportObjects(D, ['Transform'], ['prices_daily'], { withHistory: true })).yaml,
+      yaml,
+      'identical round trip, version counter included',
+    );
+    // Restoring v1 after the import creates v5 with v1's content.
+    const v5 = await T.restoreTransformVersion(D, d._id, 1, 'u');
+    assert.equal(v5.version, 5);
+    assert.equal(v5.description, prices.description);
+    // A history out of order is refused by the plan.
+    const broken = yaml.replace(/version: 1\n/, 'version: 7\n');
+    assert.notEqual(broken, yaml);
+    const plan = await planObjectImport(who(`tr-e-${randomUUID()}`), broken, 'merge');
+    assert.match(plan.errors.map((e) => e.message).join(' '), /history/);
   },
 );
