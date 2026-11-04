@@ -16,6 +16,7 @@ import {
   SyncWorkQueue,
   SYNC_PRIORITIES,
   defaultPriority,
+  type LimiterPriority,
   type SyncPriority,
 } from './syncScheduler.js';
 
@@ -26,7 +27,7 @@ export const fmpLimiter = new PriorityRateLimiter(MAX_RPM);
 /** Background sync runs: priority first, never twice at once, never blocking the dispatcher tick. */
 export const syncQueue = new SyncWorkQueue(Math.max(1, Number(process.env.DATASET_SYNC_CONCURRENCY) || 3));
 /** The priority of the sync whose code is running, so every FMP call it makes is scheduled at that priority. */
-const syncContext = new AsyncLocalStorage<{ priority: SyncPriority }>();
+export const syncContext = new AsyncLocalStorage<{ priority: LimiterPriority }>();
 
 export const datasetSyncInput = z.object({
   name: z.string().min(1).max(200),
@@ -92,10 +93,10 @@ export const effectivePriority = (s: Pick<DatasetSync, 'dataset' | 'priority'>):
 export const datasetSyncs = () => collection<DatasetSync>('dataset_syncs');
 export const datasetSyncRuns = () => collection<DatasetSyncRun>('dataset_sync_runs');
 
-const today = () => new Date().toISOString().slice(0, 10);
-const addDays = (iso: string, days: number) =>
+export const today = () => new Date().toISOString().slice(0, 10);
+export const addDays = (iso: string, days: number) =>
   new Date(new Date(iso + 'T00:00:00Z').getTime() + days * 86400000).toISOString().slice(0, 10);
-function chunkRanges(from: string, to: string, days: number): [string, string][] {
+export function chunkRanges(from: string, to: string, days: number): [string, string][] {
   const out: [string, string][] = [];
   let a = from;
   while (a <= to) {
@@ -107,7 +108,7 @@ function chunkRanges(from: string, to: string, days: number): [string, string][]
 }
 const isTimeseries = (def: DatasetDef) => def.incremental === 'timeseries';
 
-async function fmpApiKey(ownerId: string, connectionId: string) {
+export async function fmpApiKey(ownerId: string, connectionId: string) {
   const connection = await ownedConnection(ownerId, connectionId);
   let key: string | null = null;
   try {
@@ -119,7 +120,7 @@ async function fmpApiKey(ownerId: string, connectionId: string) {
   return key;
 }
 
-async function fmpGet(
+export async function fmpGet(
   endpoint: string,
   params: Record<string, string | number>,
   apikey: string,
@@ -161,7 +162,7 @@ const objToStr = (o: Record<string, string | number>) =>
   Object.fromEntries(Object.entries(o).map(([k, v]) => [k, String(v)]));
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-async function resolveSymbols(sync: DatasetSync, wsDb: ReturnType<typeof mongo.db>, apikey: string) {
+export async function resolveSymbols(sync: DatasetSync, wsDb: ReturnType<typeof mongo.db>, apikey: string) {
   if (sync.symbolsMode === 'list' && sync.symbols?.length) return sync.symbols;
   if (sync.symbolsMode === 'preset' && sync.preset) {
     const preset = presetById.get(sync.preset);
@@ -191,7 +192,7 @@ async function resolveSymbols(sync: DatasetSync, wsDb: ReturnType<typeof mongo.d
   return symbols;
 }
 
-async function upsertRows(
+export async function upsertRows(
   coll: ReturnType<ReturnType<typeof mongo.db>['collection']>,
   rows: unknown[],
   keyFields: string[],
@@ -255,7 +256,23 @@ export async function probeDatasetDepth(
     symbol,
     now,
   );
-  const data = await syncContext.run({ priority: 'P0' }, () => fmpGet(def.endpoint, params, apikey));
+  // Some endpoints refuse a large limit on the current plan (402): step down until one is accepted.
+  const limits =
+    typeof params.limit === 'number' ? [200, 100, 40, 20, 10, Number(def.params?.limit) || 10] : [undefined];
+  let data: unknown;
+  let lastError: unknown;
+  for (const limit of [...new Set(limits)]) {
+    if (limit !== undefined) params.limit = limit;
+    try {
+      data = await syncContext.run({ priority: 'P0' }, () => fmpGet(def.endpoint, params, apikey));
+      lastError = undefined;
+      break;
+    } catch (e) {
+      lastError = e;
+      if (!(e instanceof HttpError && e.status === 402)) break;
+    }
+  }
+  if (lastError) throw lastError;
   const list = (Array.isArray(data) ? data : data ? [data] : []).filter(
     (r): r is Record<string, unknown> => !!r && typeof r === 'object',
   );
@@ -563,7 +580,15 @@ export function enqueueManualRun(sync: DatasetSync) {
 export type { Stored };
 
 // --- Bulk operations (Datasets toolbar) -------------------------------------------------------
-export const DATASET_BULK_ACTIONS = ['run', 'enable', 'disable', 'reset', 'purge', 'delete'] as const;
+export const DATASET_BULK_ACTIONS = [
+  'run',
+  'enable',
+  'disable',
+  'reset',
+  'purge',
+  'delete',
+  'backfill',
+] as const;
 export type DatasetBulkAction = (typeof DATASET_BULK_ACTIONS)[number];
 export const datasetBulkInput = z.object({
   ids: z.array(z.string().min(1)).min(1).max(500),
@@ -582,6 +607,9 @@ export type DatasetBulkResult = {
   collections?: { name: string; deleted?: number; dropped?: boolean }[];
   /** Collections kept on delete because another sync still writes to them. */
   keptCollections?: string[];
+  /** backfill: syncs whose backfill was queued, and ones skipped with the reason. */
+  backfillsQueued?: string[];
+  backfillsSkipped?: { id: string; reason: string }[];
 };
 
 /** The collection a sync writes to: its override, else the catalog default. */
@@ -665,6 +693,20 @@ export async function applyDatasetSyncBulk(
         }
         result.keptCollections = keep;
       }
+      break;
+    }
+    case 'backfill': {
+      // Imported lazily: datasetBackfill imports this module.
+      const { createBackfill } = await import('./datasetBackfill.js');
+      result.backfillsQueued = [];
+      result.backfillsSkipped = [];
+      for (const s of selected)
+        try {
+          await createBackfill(ownerId, s._id);
+          result.backfillsQueued.push(s._id);
+        } catch (e) {
+          result.backfillsSkipped.push({ id: s._id, reason: e instanceof Error ? e.message : String(e) });
+        }
       break;
     }
     case 'run': {

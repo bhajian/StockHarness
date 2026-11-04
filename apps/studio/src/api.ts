@@ -145,7 +145,7 @@ export const saveDatasetSync = (body: Record<string, unknown>, id?: string) =>
   send<Entity>(`/dataset-syncs${id ? `/${id}` : ''}`, body, id ? 'PUT' : 'POST');
 export const deleteDatasetSync = (id: string) => api(`/dataset-syncs/${id}`, { method: 'DELETE' });
 export const runDatasetSyncNow = (id: string) => send(`/dataset-syncs/${id}/run`);
-export type DatasetBulkAction = 'run' | 'enable' | 'disable' | 'reset' | 'purge' | 'delete';
+export type DatasetBulkAction = 'run' | 'enable' | 'disable' | 'reset' | 'purge' | 'delete' | 'backfill';
 export type DatasetBulkResult = {
   action: DatasetBulkAction;
   matched: number;
@@ -153,6 +153,8 @@ export type DatasetBulkResult = {
   alreadyRunning?: string[];
   collections?: { name: string; deleted?: number; dropped?: boolean }[];
   keptCollections?: string[];
+  backfillsQueued?: string[];
+  backfillsSkipped?: { id: string; reason: string }[];
 };
 export const bulkDatasetSyncs = (ids: string[], action: DatasetBulkAction, dropCollections = false) =>
   send<DatasetBulkResult>('/dataset-syncs/bulk', { ids, action, dropCollections });
@@ -245,3 +247,24 @@ export type ConfigBackupStatus = {
 };
 export const fetchConfigBackup = () => api<ConfigBackupStatus>('/config-backup');
 export const runConfigBackupNow = () => send<ConfigBackupStatus>('/config-backup/run');
+export type DatasetBackfill = {
+  id: string;
+  status: 'queued' | 'running' | 'paused' | 'completed' | 'failed' | 'cancelled';
+  from: string;
+  to: string;
+  mode: string;
+  rows: number;
+  calls: number;
+  symbolCount?: number;
+  lastError?: string;
+  startedAt?: string;
+  finishedAt?: string;
+  batches: { i: number; label: string; status: string; rows: number; errors: number; error?: string }[];
+  progress: { pct: number; batchesDone: number; batchesFailed: number; batchesTotal: number; etaMs?: number };
+};
+export const fetchBackfill = (syncId: string) =>
+  api<DatasetBackfill | null>(`/dataset-syncs/${syncId}/backfill`);
+export const startBackfill = (syncId: string, body: { from?: string; to?: string }) =>
+  send<DatasetBackfill>(`/dataset-syncs/${syncId}/backfill`, body);
+export const backfillControl = (syncId: string, action: 'pause' | 'resume' | 'cancel' | 'retry') =>
+  send<DatasetBackfill>(`/dataset-syncs/${syncId}/backfill/${action}`);

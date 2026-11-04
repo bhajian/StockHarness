@@ -12,6 +12,7 @@ import {
   X,
   Download,
   Upload,
+  History,
 } from 'lucide-react';
 import {
   type Data,
@@ -23,6 +24,10 @@ import {
   runDatasetSyncNow,
   bulkDatasetSyncs,
   probeDatasetDepth,
+  fetchBackfill,
+  startBackfill,
+  backfillControl,
+  type DatasetBackfill,
   type DepthProbe,
   exportDatasetSyncsYaml,
   importDatasetSyncsYaml,
@@ -146,6 +151,11 @@ export function DatasetsPage({ data, refresh, act, isAdmin }: Props) {
         const r = await bulkDatasetSyncs(checkedIds, action, dropCollections);
         const n = plural(r.matched, 'sync');
         const messages: Record<DatasetBulkAction, string> = {
+          backfill: `Backfill queued for ${plural(r.backfillsQueued?.length ?? 0, 'sync')}${
+            r.backfillsSkipped?.length
+              ? `; skipped ${r.backfillsSkipped.length} (${[...new Set(r.backfillsSkipped.map((x) => x.reason))].join(' / ')})`
+              : ''
+          }. History is pulled in resumable batches at the lowest priority.`,
           run: `Queued ${plural(r.queued?.length ?? 0, 'sync')} by priority (they share the FMP rate limit)${
             r.alreadyRunning?.length ? ` (${r.alreadyRunning.length} already running)` : ''
           }.`,
@@ -383,6 +393,21 @@ export function DatasetsPage({ data, refresh, act, isAdmin }: Props) {
                   <RotateCcw size={15} /> Reset cursor
                 </Button>
                 <Button
+                  variant="secondary"
+                  disabled={!checkedIds.length || bulkBusy}
+                  title="Pull each selected sync's history (10 years by default) in resumable batches"
+                  onClick={() => {
+                    if (
+                      confirm(
+                        `Start a backfill for ${plural(checkedIds.length, 'sync')}? It runs in the background at the lowest FMP priority.`,
+                      )
+                    )
+                      void bulk('backfill');
+                  }}
+                >
+                  <History size={15} /> Backfill
+                </Button>
+                <Button
                   variant="danger"
                   disabled={!checkedIds.length || bulkBusy}
                   title="Delete every record in the selected collections; the syncs are kept"
@@ -487,6 +512,13 @@ export function DatasetsPage({ data, refresh, act, isAdmin }: Props) {
                                 : 'disabled'
                         }
                       />
+                      {s.backfill &&
+                        ['queued', 'running', 'paused', 'failed'].includes(s.backfill.status) && (
+                          <span className={`backfill-badge ${s.backfill.status}`} title="Backfill progress">
+                            backfill{' '}
+                            {s.backfill.status === 'running' ? `${s.backfill.pct}%` : s.backfill.status}
+                          </span>
+                        )}
                     </td>
                     {isAdmin && (
                       <td className="dataset-row-actions" onClick={(e) => e.stopPropagation()}>
@@ -822,6 +854,8 @@ export function DatasetsPage({ data, refresh, act, isAdmin }: Props) {
               </Field>
             </div>
 
+            {editing.id && selectedItem && <BackfillPanel syncId={editing.id} defaultFrom={editing.from} />}
+
             <ScheduleFields
               value={editing.schedule}
               onChange={(schedule) => setEditing({ ...editing, schedule })}
@@ -969,6 +1003,114 @@ function DepthFields({
               'Asks FMP for as much history as possible for one symbol (AAPL), to check what the plan allows.'}
         </span>
       </div>
+    </div>
+  );
+}
+
+/** Backfill (#80): history in resumable batches; progress refreshes while it runs. */
+function BackfillPanel({ syncId, defaultFrom }: { syncId: string; defaultFrom: string }) {
+  const tenYearsAgo = new Date(Date.now() - 10 * 365.25 * 86400000).toISOString().slice(0, 10);
+  const [from, setFrom] = useState(defaultFrom || tenYearsAgo);
+  const [bf, setBf] = useState<DatasetBackfill | null>(null);
+  const [error, setError] = useState('');
+  const load = () =>
+    fetchBackfill(syncId)
+      .then(setBf)
+      .catch((e) => setError(String(e)));
+  useEffect(() => {
+    void load();
+  }, [syncId]);
+  useEffect(() => {
+    if (!bf || !['queued', 'running'].includes(bf.status)) return;
+    const t = setInterval(() => void load(), 5000);
+    return () => clearInterval(t);
+  }, [bf?.status]);
+  const act = async (fn: () => Promise<DatasetBackfill>) => {
+    setError('');
+    try {
+      setBf(await fn());
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
+  const active = bf && ['queued', 'running', 'paused'].includes(bf.status);
+  const eta = bf?.progress.etaMs ? `${Math.max(1, Math.round(bf.progress.etaMs / 60000))} min left` : '';
+  return (
+    <div className="backfill-panel">
+      <strong>History backfill</strong>
+      <p className="field-help">
+        Pulls this sync's history in resumable batches at the lowest FMP priority, so scheduled syncs always
+        go first. It never changes the incremental cursor. Safe to pause, and it resumes after a restart.
+      </p>
+      {!active && (
+        <div className="backfill-start">
+          <Field label="History from">
+            <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
+          </Field>
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={() => act(() => startBackfill(syncId, { from }))}
+          >
+            <History size={15} /> Start backfill
+          </Button>
+        </div>
+      )}
+      {bf && (
+        <div className="backfill-status">
+          <div className="backfill-bar" aria-label={`Backfill ${bf.progress.pct}%`}>
+            <span style={{ width: `${bf.progress.pct}%` }} />
+          </div>
+          <div className="field-help">
+            <Status status={bf.status === 'completed' ? 'succeeded' : bf.status} /> {bf.progress.pct}% ·{' '}
+            {bf.from} → {bf.to} · batches {bf.progress.batchesDone}/{bf.progress.batchesTotal}
+            {bf.progress.batchesFailed ? `, ${bf.progress.batchesFailed} failed` : ''} ·{' '}
+            {bf.rows.toLocaleString()} rows · {bf.calls.toLocaleString()} FMP calls
+            {bf.symbolCount ? ` · ${bf.symbolCount} symbols` : ''}
+            {eta ? ` · ${eta}` : ''}
+          </div>
+          {bf.lastError && <div className="notice error">{bf.lastError}</div>}
+          <div className="backfill-actions">
+            {['queued', 'running'].includes(bf.status) && (
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => act(() => backfillControl(syncId, 'pause'))}
+              >
+                Pause
+              </Button>
+            )}
+            {bf.status === 'paused' && (
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => act(() => backfillControl(syncId, 'resume'))}
+              >
+                Resume
+              </Button>
+            )}
+            {active && (
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => act(() => backfillControl(syncId, 'cancel'))}
+              >
+                Cancel
+              </Button>
+            )}
+            {bf.progress.batchesFailed > 0 && ['failed', 'completed'].includes(bf.status) && (
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => act(() => backfillControl(syncId, 'retry'))}
+              >
+                Retry failed ({bf.progress.batchesFailed})
+              </Button>
+            )}
+          </div>
+        </div>
+      )}
+      {error && <div className="notice error">{error}</div>}
     </div>
   );
 }

@@ -4,6 +4,9 @@
 
 export const SYNC_PRIORITIES = ['P0', 'P1', 'P2'] as const;
 export type SyncPriority = (typeof SYNC_PRIORITIES)[number];
+/** Limiter levels: the sync priorities, then BACKFILL, which always yields to scheduled work (#80). */
+export const LIMITER_PRIORITIES = [...SYNC_PRIORITIES, 'BACKFILL'] as const;
+export type LimiterPriority = (typeof LIMITER_PRIORITIES)[number];
 
 const P0 = new Set([
   'universe',
@@ -42,7 +45,7 @@ const realTimers: Timers = { now: () => Date.now(), setTimer: (fn, ms) => setTim
  * highest-priority waiter (FIFO within a priority). `cooldown(ms)` pauses all slots, e.g. after an FMP 429.
  */
 export class PriorityRateLimiter {
-  private queues: Record<SyncPriority, (() => void)[]> = { P0: [], P1: [], P2: [] };
+  private queues: Record<LimiterPriority, (() => void)[]> = { P0: [], P1: [], P2: [], BACKFILL: [] };
   private lastRelease = -Infinity;
   private cooldownUntil = 0;
   private timer: unknown = null;
@@ -53,7 +56,7 @@ export class PriorityRateLimiter {
   ) {
     this.interval = 60000 / Math.max(1, rpm);
   }
-  acquire(priority: SyncPriority): Promise<void> {
+  acquire(priority: LimiterPriority): Promise<void> {
     return new Promise((resolve) => {
       this.queues[priority].push(resolve);
       this.pump();
@@ -63,19 +66,24 @@ export class PriorityRateLimiter {
   cooldown(ms: number) {
     this.cooldownUntil = Math.max(this.cooldownUntil, this.timers.now() + ms);
   }
-  waiting(): Record<SyncPriority, number> {
-    return { P0: this.queues.P0.length, P1: this.queues.P1.length, P2: this.queues.P2.length };
+  waiting(): Record<LimiterPriority, number> {
+    return {
+      P0: this.queues.P0.length,
+      P1: this.queues.P1.length,
+      P2: this.queues.P2.length,
+      BACKFILL: this.queues.BACKFILL.length,
+    };
   }
   private pump() {
     if (this.timer !== null) return;
-    if (!SYNC_PRIORITIES.some((p) => this.queues[p].length)) return;
+    if (!LIMITER_PRIORITIES.some((p) => this.queues[p].length)) return;
     const at = Math.max(this.lastRelease + this.interval, this.cooldownUntil);
     const wait = Math.max(0, at - this.timers.now());
     this.timer = this.timers.setTimer(() => {
       this.timer = null;
       // A cooldown may have been extended while waiting.
       if (this.timers.now() < this.cooldownUntil) return this.pump();
-      const p = SYNC_PRIORITIES.find((x) => this.queues[x].length);
+      const p = LIMITER_PRIORITIES.find((x) => this.queues[x].length);
       if (p) {
         this.lastRelease = this.timers.now();
         this.queues[p].shift()!();
