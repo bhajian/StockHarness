@@ -6,7 +6,10 @@ import {
   datasetSyncs as syncsCol,
   datasetSyncRuns,
   datasetSyncInput,
-  runDatasetSync,
+  enqueueManualRun,
+  syncQueue,
+  fmpLimiter,
+  effectivePriority,
   datasetBulkInput,
   applyDatasetSyncBulk,
   type DatasetSync,
@@ -41,7 +44,14 @@ async function listSyncs(ownerId: string) {
     .project<{ syncId: string }>({ syncId: 1 })
     .toArray();
   const busy = new Set(running.map((r) => r.syncId));
-  return items.map((s) => ({ ...publicSync(s), running: busy.has(s._id) }));
+  const q = syncQueue.status();
+  const queued = new Set(q.queued.map((j) => j.id));
+  return items.map((s) => ({
+    ...publicSync(s),
+    running: busy.has(s._id) || q.running.some((j) => j.id === s._id),
+    queued: queued.has(s._id),
+    effectivePriority: effectivePriority(s),
+  }));
 }
 // The studio auto-loads `/datasetSyncs` (collections key); `/dataset-syncs` is the REST alias.
 datasetSyncRouter.get('/datasetSyncs', async (req, res) =>
@@ -50,6 +60,11 @@ datasetSyncRouter.get('/datasetSyncs', async (req, res) =>
 datasetSyncRouter.get('/dataset-syncs', async (req, res) =>
   res.json(await listSyncs(req.principal!.tenantId)),
 );
+
+// The background sync queue and the shared FMP limiter, for the Syncs page.
+datasetSyncRouter.get('/dataset-syncs/queue', (_req, res) => {
+  res.json({ ...syncQueue.status(), fmpWaiting: fmpLimiter.waiting(), fmpIntervalMs: fmpLimiter.interval });
+});
 
 // YAML export of sync configurations (all, or `?ids=a,b`). Registered before `/:id`.
 datasetSyncRouter.get('/dataset-syncs/export', async (req, res) => {
@@ -135,8 +150,8 @@ datasetSyncRouter.post('/dataset-syncs/:id/run', async (req, res) => {
   assertAdmin(req.principal!.user.role);
   const doc = await syncsCol().findOne({ _id: String(req.params.id), ownerId: req.principal!.tenantId });
   if (!doc) throw new HttpError(404, 'Dataset sync not found');
-  void runDatasetSync(doc, { trigger: 'manual' }).catch(() => undefined);
-  res.status(202).json({ started: true });
+  const queued = enqueueManualRun(doc);
+  res.status(202).json({ started: queued, alreadyQueued: !queued });
 });
 
 datasetSyncRouter.get('/dataset-syncs/:id/runs', async (req, res) => {

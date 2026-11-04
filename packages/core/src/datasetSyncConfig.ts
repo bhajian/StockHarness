@@ -16,6 +16,7 @@ const FIELD_ORDER = [
   'dataset',
   'connection',
   'enabled',
+  'priority',
   'symbolsMode',
   'symbols',
   'preset',

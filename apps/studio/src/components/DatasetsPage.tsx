@@ -53,6 +53,7 @@ type SyncForm = {
   to: string;
   targetCollection: string;
   retentionDays: string;
+  priority: '' | 'P0' | 'P1' | 'P2';
   enabled: boolean;
   schedule: Schedule;
 };
@@ -141,7 +142,7 @@ export function DatasetsPage({ data, refresh, act, isAdmin }: Props) {
         const r = await bulkDatasetSyncs(checkedIds, action, dropCollections);
         const n = plural(r.matched, 'sync');
         const messages: Record<DatasetBulkAction, string> = {
-          run: `Queued ${plural(r.queued?.length ?? 0, 'sync')} to run one after another${
+          run: `Queued ${plural(r.queued?.length ?? 0, 'sync')} by priority (they share the FMP rate limit)${
             r.alreadyRunning?.length ? ` (${r.alreadyRunning.length} already running)` : ''
           }.`,
           enable: `Enabled ${n}.`,
@@ -185,6 +186,7 @@ export function DatasetsPage({ data, refresh, act, isAdmin }: Props) {
     to: '',
     targetCollection: '',
     retentionDays: '',
+    priority: '',
     enabled: true,
     schedule: {
       enabled: true,
@@ -206,6 +208,7 @@ export function DatasetsPage({ data, refresh, act, isAdmin }: Props) {
     to: s.to ?? '',
     targetCollection: s.targetCollection ?? '',
     retentionDays: s.retentionDays ? String(s.retentionDays) : '',
+    priority: s.priority ?? '',
     enabled: s.enabled ?? true,
     schedule: s.schedule ?? blankForm().schedule,
   });
@@ -235,6 +238,7 @@ export function DatasetsPage({ data, refresh, act, isAdmin }: Props) {
     }
     if (editing.targetCollection.trim()) body.targetCollection = editing.targetCollection.trim();
     if (editing.retentionDays) body.retentionDays = Number(editing.retentionDays);
+    if (editing.priority) body.priority = editing.priority;
     await saveDatasetSync(body, editing.id);
     await refresh();
     setEditing(null);
@@ -416,6 +420,7 @@ export function DatasetsPage({ data, refresh, act, isAdmin }: Props) {
                   <th>Name</th>
                   <th>Dataset</th>
                   <th>Symbols</th>
+                  <th>Priority</th>
                   <th>Schedule</th>
                   <th>Last run</th>
                   <th>Rows</th>
@@ -445,13 +450,30 @@ export function DatasetsPage({ data, refresh, act, isAdmin }: Props) {
                     </td>
                     <td>{catalogById.get(s.dataset as string)?.label ?? s.dataset}</td>
                     <td>{symbolsLabel(s)}</td>
+                    <td>
+                      <span
+                        className={`priority-pill ${String(s.effectivePriority ?? '').toLowerCase()}`}
+                        title={s.priority ? 'Set on this sync' : 'Default for this dataset'}
+                      >
+                        {s.effectivePriority ?? '—'}
+                        {!s.priority && <small> auto</small>}
+                      </span>
+                    </td>
                     <td>{describeSchedule(s.schedule as Schedule | undefined)}</td>
                     <td>{s.lastRunAt ? timestamp(s.lastRunAt) : '—'}</td>
                     <td>{typeof s.lastRows === 'number' ? s.lastRows.toLocaleString() : '—'}</td>
                     <td>
                       <Status
                         status={
-                          s.running ? 'running' : s.enabled ? (s.lastError ? 'failed' : 'ready') : 'disabled'
+                          s.running
+                            ? 'running'
+                            : s.queued
+                              ? 'queued'
+                              : s.enabled
+                                ? s.lastError
+                                  ? 'failed'
+                                  : 'ready'
+                                : 'disabled'
                         }
                       />
                     </td>
@@ -754,6 +776,22 @@ export function DatasetsPage({ data, refresh, act, isAdmin }: Props) {
                   onChange={(e) => setEditing({ ...editing, targetCollection: e.target.value })}
                   placeholder={selectedItem?.defaultCollection ?? ''}
                 />
+              </Field>
+              <Field
+                label="Priority"
+                hint="Which syncs get FMP capacity first when the rate limit is reached."
+              >
+                <select
+                  value={editing.priority}
+                  onChange={(e) =>
+                    setEditing({ ...editing, priority: e.target.value as SyncForm['priority'] })
+                  }
+                >
+                  <option value="">Auto (dataset default)</option>
+                  <option value="P0">P0: prices, corporate actions, calendars</option>
+                  <option value="P1">P1: fundamentals, estimates, ownership</option>
+                  <option value="P2">P2: news, segments, peers, movers</option>
+                </select>
               </Field>
               <Field label="Retention (days)" hint="Optional: prune rows older than this.">
                 <input
