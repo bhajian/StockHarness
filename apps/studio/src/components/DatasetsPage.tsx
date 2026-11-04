@@ -48,6 +48,7 @@ import { DataGrid } from './DataGrid';
 import { Tabs } from './kit';
 import { TransformsTab } from './TransformsTab';
 import { PipelinesTab } from './PipelinesTab';
+import { CatalogTab } from './CatalogTab';
 import {
   DATASET_TABS,
   datasetsPath,
@@ -118,17 +119,13 @@ export function DatasetsPage(props: Props) {
         onChange={(tab) => go({ tab })}
       />
       {route.tab === 'syncs' ? (
-        <SyncsTab {...props} />
+        <SyncsTab {...props} go={go} />
       ) : route.tab === 'transforms' ? (
         <TransformsTab item={route.item} go={go} isAdmin={props.isAdmin} />
       ) : route.tab === 'pipelines' ? (
         <PipelinesTab item={route.item} go={go} isAdmin={props.isAdmin} data={props.data} />
       ) : route.tab === 'catalog' ? (
-        <Empty
-          icon={<BookOpen size={28} />}
-          title="Catalog"
-          text="Every collection with its schema, time semantics and caveats."
-        />
+        <CatalogTab item={route.item} go={go} isAdmin={props.isAdmin} data={props.data} />
       ) : (
         <Empty
           icon={<Activity size={28} />}
@@ -140,7 +137,7 @@ export function DatasetsPage(props: Props) {
   );
 }
 
-function SyncsTab({ data, refresh, act, isAdmin }: Props) {
+function SyncsTab({ data, refresh, act, isAdmin, go }: Props & { go?: (r: DatasetsRoute) => void }) {
   const [catalog, setCatalog] = useState<DatasetCatalogItem[]>([]);
   const [presets, setPresets] = useState<TickerPreset[]>([]);
   const [selected, setSelected] = useState<string>('');
@@ -929,6 +926,24 @@ function SyncsTab({ data, refresh, act, isAdmin }: Props) {
             </div>
 
             {editing.id && selectedItem && <BackfillPanel syncId={editing.id} defaultFrom={editing.from} />}
+            {editing.id && go && (
+              <p className="muted-line">
+                Schema, coverage and caveats of{' '}
+                <a
+                  href={`/datasets/catalog/${editing.targetCollection || selectedItem?.defaultCollection || ''}`}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    const c = editing.targetCollection || selectedItem?.defaultCollection;
+                    if (c) {
+                      setEditing(null);
+                      go({ tab: 'catalog', item: c });
+                    }
+                  }}
+                >
+                  {editing.targetCollection || selectedItem?.defaultCollection} in the Catalog
+                </a>
+              </p>
+            )}
 
             <ScheduleFields
               value={editing.schedule}

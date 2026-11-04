@@ -335,6 +335,8 @@ export type CatalogField = {
   description?: string;
   unit?: string;
   example?: unknown;
+  /** curated (edited), dictionary (built-in, auto-filled) or none (undocumented). */
+  doc?: 'curated' | 'dictionary' | 'none';
 };
 export type CatalogListItem = {
   collection: string;
@@ -345,7 +347,14 @@ export type CatalogListItem = {
   fieldCount: number;
   producedBy: { type: string; name: string; id?: string }[];
   timeSemantics: { status: 'pit' | 'current_only' | 'static' | 'unknown'; text: string };
-  coverage: { rows: number; symbols?: number; dateField?: string; dateMin?: string; dateMax?: string };
+  coverage: {
+    rows: number;
+    symbols?: number;
+    universeCoveragePct?: number;
+    dateField?: string;
+    dateMin?: string;
+    dateMax?: string;
+  };
   freshness: { lastUpdated?: string; lastStatus?: 'ok' | 'failed'; lastError?: string };
   docCompletenessPct: number;
 };
@@ -532,3 +541,57 @@ export const pipelineNodeAction = (
   );
 export const cancelPipelineRun = (runId: string) =>
   send<PipelineRun>(`/pipeline-runs/${encodeURIComponent(runId)}/cancel`, {});
+
+// Catalog UI (#87).
+export type CatalogCaveat = {
+  id: string;
+  severity: 'info' | 'warn' | 'blocking';
+  text: string;
+  source: string;
+  fix?: string;
+};
+export type CatalogDetail = CatalogEntryDetail & {
+  caveats: CatalogCaveat[];
+  joins: { to: string; on: string | string[] }[];
+  curated?: {
+    description?: string;
+    grain?: string;
+    fields?: Record<string, { description?: string; unit?: string }>;
+    caveats?: { id: string; severity: 'info' | 'warn' | 'blocking'; text: string }[];
+    dismissedCaveats?: string[];
+  };
+  timeSemantics: CatalogListItem['timeSemantics'];
+  refreshedAt?: string;
+};
+export const fetchCatalogDetail = (c: string) => api<CatalogDetail>(`/catalog/${encodeURIComponent(c)}`);
+export const patchCatalogEntry = (c: string, body: NonNullable<CatalogDetail['curated']>) =>
+  send<CatalogDetail>(`/catalog/${encodeURIComponent(c)}`, body, 'PATCH');
+export type CatalogCoverage = {
+  computing: boolean;
+  dateField?: string;
+  daily: { dates: string[]; series: Record<string, (number | null)[]>; downsampled?: number };
+  heatmap: { years: string[]; cells: [number, number, number][]; value: 'symbols' | 'rows' };
+  days: number;
+  computedAt: string;
+  error?: string;
+};
+export async function fetchCatalogCoverage(c: string, refresh = false) {
+  const r = await fetch(`/api/catalog/${encodeURIComponent(c)}/coverage${refresh ? '?refresh=1' : ''}`, {
+    credentials: 'same-origin',
+  });
+  if (r.status === 202) return null; // computing
+  if (!r.ok) throw new Error(`Coverage failed (${r.status})`);
+  return (await r.json()) as CatalogCoverage;
+}
+export const fetchAgentView = (c: string) =>
+  api<{ text: string; tokens: number }>(`/catalog/${encodeURIComponent(c)}/agent-view`);
+export async function exportCatalogMarkdown(collections: string[]) {
+  const r = await fetch('/api/catalog/export', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ collections }),
+  });
+  if (!r.ok) throw new Error(`Export failed (${r.status})`);
+  return r.text();
+}
