@@ -15,6 +15,7 @@ import {
   recoverInterruptedDatasetSyncRuns,
 } from '../../../packages/core/src/datasetSync.js';
 import { dispatchBackfills, recoverBackfills } from '../../../packages/core/src/datasetBackfill.js';
+import { dispatchTransforms, recoverTransformRuns } from '../../../packages/core/src/transformRunner.js';
 import { safeError } from '../../../packages/core/src/security.js';
 import { dispatchConfigBackup } from './configBackup.js';
 import { refreshAllCatalogs } from './catalog.js';
@@ -25,6 +26,8 @@ if (interrupted) console.warn(`Marked ${interrupted} interrupted dataset sync ru
 // Backfills are persisted: ones that were running resume from their last finished symbol (#80).
 const resumed = await recoverBackfills();
 if (resumed) console.warn(`Resuming ${resumed} dataset backfill(s)`);
+const failedTransforms = await recoverTransformRuns();
+if (failedTransforms) console.warn(`Marked ${failedTransforms} interrupted transform run(s) as failed`);
 await provisionMongoMcp(
   async () =>
     (await collection('connections').distinct('ownerId', { kind: 'mongodb', builtIn: true })) as string[],
@@ -44,6 +47,7 @@ async function tick() {
     await dispatchSchedules();
     await dispatchDatasetSyncs();
     await dispatchBackfills();
+    await dispatchTransforms();
     await deliverWebhooks();
     await dispatchReflections();
     await dispatchGuardrailEvaluations();

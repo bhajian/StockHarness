@@ -9,6 +9,8 @@ import {
   transforms,
   updateTransform,
 } from '../../../packages/core/src/transforms.js';
+import { z } from 'zod';
+import { requestTransformRun, transformRuns } from '../../../packages/core/src/transformRunner.js';
 
 export const transformsRouter = Router();
 const adminOnly = (role: string) => {
@@ -49,6 +51,46 @@ transformsRouter.delete('/transforms/:id', async (req, res) => {
   await deleteTransform(req.principal!.tenantId, String(req.params.id));
   res.status(204).end();
 });
+const runInput = z.object({
+  range: z.enum(['last_day', 'custom', 'full']).default('last_day'),
+  start: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional(),
+  end: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional(),
+});
+// Run now (#90): last day, a custom range, or a full backfill in yearly chunks (run in order).
+transformsRouter.post('/transforms/:id/run', async (req, res) => {
+  adminOnly(req.principal!.user.role);
+  const runs = await requestTransformRun(req.principal!.tenantId, String(req.params.id), {
+    ...runInput.parse(req.body ?? {}),
+    requestedBy: req.principal!.user._id,
+  });
+  res.status(202).json(runs.map(pub));
+});
+transformsRouter.get('/transforms/:id/runs', async (req, res) => {
+  const runs = await transformRuns()
+    .find(
+      { ownerId: req.principal!.tenantId, transformId: String(req.params.id) },
+      { projection: { stdout: 0, stderr: 0 } },
+    )
+    .sort({ createdAt: -1 })
+    .limit(100)
+    .toArray();
+  res.json(runs.map(pub));
+});
+transformsRouter.get('/transform-runs/:runId', async (req, res) => {
+  const r = await transformRuns().findOne({
+    _id: String(req.params.runId),
+    ownerId: req.principal!.tenantId,
+  });
+  if (!r) throw new HttpError(404, 'Run not found');
+  res.json(pub(r));
+});
+
 transformsRouter.get('/transforms/:id/versions', async (req, res) => {
   const list = await transformVersions()
     .find(

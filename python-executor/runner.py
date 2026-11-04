@@ -55,6 +55,18 @@ def _tail(path: Path, limit: int) -> tuple[str, bool]:
         return handle.read().decode("utf-8", "replace"), False
 
 
+def _meta(stats_path: Path, describe_path: Path) -> dict:
+    """What the SDK recorded: per-collection stats and oh.describe() docs (bounded, best effort)."""
+    meta = {}
+    for key, path in (("stats", stats_path), ("describe", describe_path)):
+        if path.exists() and path.stat().st_size <= RESULT_LIMIT:
+            try:
+                meta[key] = json.loads(path.read_text(encoding="utf-8"))
+            except ValueError:
+                pass
+    return meta
+
+
 def main() -> int:
     url, token = os.environ["OH_JOB_URL"], os.environ["OH_JOB_TOKEN"]
     work = Path(os.environ.get("OH_WORKDIR", "/work"))
@@ -65,6 +77,7 @@ def main() -> int:
     (work / "main.py").write_text(job["code"], encoding="utf-8")
     shutil.copy(Path(__file__).with_name("oh.py"), work / "oh.py")
     result_path = work / ".oh-result.json"
+    describe_path, stats_path = work / ".oh-describe.json", work / ".oh-stats.json"
     stdout_path, stderr_path = work / ".stdout", work / ".stderr"
     env = {
         "PATH": os.environ.get("PATH", ""),
@@ -74,7 +87,14 @@ def main() -> int:
         "OH_PARAMS": json.dumps(job.get("params") or {}),
         "OH_RESULT_PATH": str(result_path),
         "OH_JOB_ID": str(job.get("id", "")),
+        "OH_DESCRIBE_PATH": str(describe_path),
+        "OH_STATS_PATH": str(stats_path),
     }
+    # Transform context (#90): only these OH_* names, set by the API, never by job env.
+    for name in ("OH_WINDOW", "OH_OUTPUTS", "OH_DQ_COLLECTION"):
+        value = (job.get("context") or {}).get(name)
+        if isinstance(value, str) and value:
+            env[name] = value
     if job.get("mongodbUri"):
         env["MONGODB_URI"] = job["mongodbUri"]
     # Secrets the step or agent was given, as environment variables; reserved names are never overridden.
@@ -126,6 +146,7 @@ def main() -> int:
             "truncated": stdout_truncated or stderr_truncated,
             "result": result,
             "durationMs": int((time.time() - started) * 1000),
+            "meta": _meta(stats_path, describe_path),
         },
     )
     return 0 if status == "succeeded" else 1
