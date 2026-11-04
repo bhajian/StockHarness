@@ -8,6 +8,7 @@ import { describeSchedule } from './schedule.js';
 import { catalogById, DATASET_CATALOG, UNIVERSE_COLLECTION, type DatasetDef } from './datasetCatalog.js';
 import { KNOWN_AT, describeKnownAt, type KnownAtRule } from './knownAt.js';
 import { FIELD_DOCS } from './fieldDocs.js';
+import { caveatsFor, type Caveat, type CaveatSeverity } from './catalogCaveats.js';
 import type { DatasetSync } from './datasetSync.js';
 
 export type FieldType =
@@ -28,6 +29,10 @@ export type CatalogCurated = {
   description?: string;
   grain?: string;
   fields?: Record<string, { description?: string; unit?: string }>;
+  /** Extra caveats (#85), e.g. known data problems. */
+  caveats?: { id: string; severity: CaveatSeverity; text: string }[];
+  /** Built-in caveat ids that do not apply to this workspace. */
+  dismissedCaveats?: string[];
 };
 export type CatalogEntry = {
   _id: string; // `${ownerId}:${collection}`
@@ -55,6 +60,7 @@ export type CatalogEntry = {
   };
   freshness: { cadence?: string; lastUpdated?: Date; lastStatus?: 'ok' | 'failed'; lastError?: string };
   joins: { to: string; on: string | string[] }[];
+  caveats: Caveat[];
   curated?: CatalogCurated;
   docCompletenessPct: number;
   refreshedAt: Date;
@@ -310,6 +316,10 @@ export async function refreshCatalogEntry(ownerId: string, name: string, syncs?:
       ...(lastRun?.lastError ? { lastError: lastRun.lastError } : {}),
     },
     joins,
+    caveats: caveatsFor(
+      { collection: name, dateMin: coverage.dateMin, dateField: coverage.dateField },
+      curated,
+    ),
     ...(curated ? { curated } : {}),
     docCompletenessPct: fields.length ? Math.round((documented / fields.length) * 100) : 0,
     refreshedAt: new Date(),
@@ -353,6 +363,16 @@ export async function patchCatalogEntry(ownerId: string, name: string, patch: Ca
     ...(patch.description !== undefined ? { description: patch.description } : {}),
     ...(patch.grain !== undefined ? { grain: patch.grain } : {}),
     fields: { ...(prior?.curated?.fields ?? {}), ...(patch.fields ?? {}) },
+    ...(patch.caveats !== undefined
+      ? { caveats: patch.caveats }
+      : prior?.curated?.caveats
+        ? { caveats: prior.curated.caveats }
+        : {}),
+    ...(patch.dismissedCaveats !== undefined
+      ? { dismissedCaveats: patch.dismissedCaveats }
+      : prior?.curated?.dismissedCaveats
+        ? { dismissedCaveats: prior.curated.dismissedCaveats }
+        : {}),
   };
   await catalogEntries().updateOne(
     { _id: id },
@@ -370,6 +390,9 @@ export function agentView(e: CatalogEntry) {
     `Grain: ${e.grain || 'unknown'}. Key: ${e.primaryKey.join(', ') || 'none'}.`,
     `Point in time: ${e.timeSemantics.status === 'current_only' ? 'CURRENT ONLY (never use historically). ' : ''}${e.timeSemantics.text}`,
     `Coverage: ${e.coverage.rows.toLocaleString('en-US')} rows${e.coverage.symbols !== undefined ? `, ${e.coverage.symbols} symbols` : ''}${e.coverage.universeCoveragePct !== undefined ? ` (${e.coverage.universeCoveragePct}% of the universe)` : ''}${e.coverage.dateMin ? `, ${e.coverage.dateField} ${e.coverage.dateMin} → ${e.coverage.dateMax}` : ''}.`,
+    ...((e.caveats ?? []).length
+      ? ['Caveats:', ...e.caveats.map((c) => `- [${c.severity.toUpperCase()}] ${c.text}`)]
+      : []),
     ...(e.joins.length
       ? [
           `Joins: ${e.joins.map((j) => `${j.to} on ${Array.isArray(j.on) ? j.on.join(' + ') : j.on}`).join('; ')}.`,

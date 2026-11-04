@@ -148,3 +148,41 @@ test('curated docs survive refreshes and round-trip as CatalogEntry YAML', { ski
   assert.equal((await exportObjects(B, ['CatalogEntry'])).yaml, yaml, 'identical round trip');
   assert.ok((await planObjectImport(who(B), yaml, 'merge')).items.every((i) => i.action === 'unchanged'));
 });
+
+test(
+  'caveats: built-in plan limits, live dates, dismiss + custom, in the agent view and YAML',
+  { skip: skipReason },
+  async () => {
+    const { agentView } = await import('../../packages/core/src/schemaCatalog.js');
+    await ws(A)
+      .collection('insider_trades')
+      .insertOne({ symbol: 'UXIN', filingDate: '2026-10-22', transactionType: 'P-Purchase' });
+    await refreshCatalog(A);
+    const ins = (await catalogEntries().findOne({ ownerId: A, collection: 'insider_trades' }))!;
+    assert.deepEqual(
+      ins.caveats.map((c) => c.id),
+      ['feed-history'],
+    );
+    const eod = (await catalogEntries().findOne({ ownerId: A, collection: 'eod_prices' }))!;
+    assert.ok(eod.caveats.some((c) => c.id === 'delisted-coverage' && c.severity === 'warn'));
+    assert.match(agentView(eod).text, /Caveats:\n- \[WARN\] Survivorship bias/);
+    await patchCatalogEntry(A, 'eod_prices', {
+      dismissedCaveats: ['delisted-coverage'],
+      caveats: [{ id: 'gap-2024', severity: 'warn', text: 'Missing 2024-03-01 for 40 symbols.' }],
+    });
+    const after = (await catalogEntries().findOne({ ownerId: A, collection: 'eod_prices' }))!;
+    assert.deepEqual(
+      after.caveats.map((c) => `${c.id}:${c.source}`),
+      ['gap-2024:curated'],
+    );
+    const { yaml } = await exportObjects(A, ['CatalogEntry']);
+    assert.match(yaml, /dismissedCaveats:\n\s+- delisted-coverage/);
+    assert.equal((await applyObjectImport(who(B), yaml, 'merge')).applied, true);
+    const b = (await catalogEntries().findOne({ ownerId: B, collection: 'eod_prices' }))!;
+    assert.deepEqual(
+      b.caveats.map((c) => c.id),
+      ['gap-2024'],
+      'dismissals and custom caveats round-trip',
+    );
+  },
+);

@@ -47,6 +47,8 @@ const catalogSpec = (c: CatalogCurated | undefined) => {
       .sort(([a], [b]) => a.localeCompare(b)),
   );
   if (Object.keys(fields).length) spec.fields = fields;
+  if (c?.caveats?.length) spec.caveats = [...c.caveats].sort((x, y) => x.id.localeCompare(y.id));
+  if (c?.dismissedCaveats?.length) spec.dismissedCaveats = [...c.dismissedCaveats].sort();
   return spec;
 };
 
@@ -361,6 +363,8 @@ export async function applyObjectImport(
         description: spec.description,
         grain: spec.grain,
         fields: spec.fields ?? {},
+        caveats: spec.caveats ?? [],
+        dismissedCaveats: spec.dismissedCaveats ?? [],
       });
       done.push({ kind: 'CatalogEntry', name: p.doc.metadata.name, action: p.action });
     }
