@@ -33,6 +33,15 @@ import {
   patchCatalogEntry,
   type CatalogCurated,
 } from '../../../packages/core/src/schemaCatalog.js';
+import {
+  createTransform,
+  deleteTransform,
+  transformInputSchema,
+  transformProblems,
+  transformSpec,
+  transforms,
+  updateTransform,
+} from '../../../packages/core/src/transforms.js';
 
 /** Kinds stored through the generic resource routes (the others have dedicated importers). */
 const isResourceKind = (k: ObjectKind): k is 'Skill' | 'Agent' | 'Harness' => k in RESOURCE_KIND;
@@ -141,6 +150,14 @@ export async function exportObjects(
       }
       continue;
     }
+    if (kind === 'Transform') {
+      for (const t of await transforms().find({ ownerId }).toArray()) {
+        if (!wanted(t.name)) continue;
+        const { name, ...spec } = transformSpec(t);
+        docs.push({ apiVersion: API_VERSION, kind, metadata: { name, version: String(t.version) }, spec });
+      }
+      continue;
+    }
     if (kind === 'CatalogEntry') {
       for (const e of await catalogEntries()
         .find({ ownerId, curated: { $exists: true } })
@@ -151,6 +168,7 @@ export async function exportObjects(
       }
       continue;
     }
+    if (!isResourceKind(kind)) continue;
     for (const r of await collection<Rec>(RESOURCE_KIND[kind]!).find({ ownerId }).toArray()) {
       if (!wanted(r.name)) continue;
       docs.push({
@@ -208,6 +226,61 @@ async function plan(
     for (const r of p.remove) result.items.push({ kind: 'DatasetSync', name: r.name, action: 'remove' });
     for (const e of p.errors) result.errors.push({ kind: 'DatasetSync', name: e.name, message: e.message });
   }
+
+  // Transforms: validated by their schema and workspace rules; matched by name.
+  const transformDocs = docs.filter((d) => d.kind === 'Transform');
+  const incomingTransformNames = new Set(transformDocs.map((d) => d.metadata.name));
+  const incomingOutputs = new Set(
+    transformDocs.flatMap((d) =>
+      ((d.spec.outputs as { collection: string }[]) ?? []).map((o) => o.collection),
+    ),
+  );
+  for (const doc of transformDocs) {
+    const name = doc.metadata.name;
+    const parsed = transformInputSchema.safeParse({ ...doc.spec, name });
+    if (!parsed.success) {
+      const issue = parsed.error.issues[0];
+      result.errors.push({
+        kind: 'Transform',
+        name,
+        message: `${issue.path.join('.') || 'spec'}: ${issue.message}`,
+      });
+      continue;
+    }
+    const current = await transforms().findOne({ ownerId, name });
+    // Inputs and triggers may point at transforms (or their outputs) created by this same import.
+    const problems = (await transformProblems(ownerId, parsed.data, current?._id)).filter(
+      (p) =>
+        !(p.startsWith('Input ') && [...incomingOutputs].some((c) => p.startsWith(`Input ${c} `))) &&
+        !(
+          p.startsWith('Trigger transform:') &&
+          [...incomingTransformNames].some((n) => p.startsWith(`Trigger transform:${n}:`))
+        ),
+    );
+    if (problems.length) {
+      result.errors.push({ kind: 'Transform', name, message: problems.join('; ') });
+      continue;
+    }
+    const action = !current
+      ? 'create'
+      : stableJson(transformSpec(current)) === stableJson(parsed.data)
+        ? 'unchanged'
+        : 'update';
+    prepared.push({ doc, existingId: current?._id, action });
+    result.items.push({ kind: 'Transform', name, action });
+  }
+  if (mode === 'replace' && transformDocs.length)
+    for (const t of await transforms()
+      .find({ ownerId }, { projection: { name: 1 } })
+      .toArray())
+      if (!incomingTransformNames.has(t.name)) {
+        prepared.push({
+          doc: { apiVersion: API_VERSION, kind: 'Transform', metadata: { name: t.name }, spec: {} },
+          existingId: t._id,
+          action: 'remove',
+        });
+        result.items.push({ kind: 'Transform', name: t.name, action: 'remove' });
+      }
 
   // Catalog docs: curated descriptions only, matched by collection name (merge semantics in both modes).
   for (const doc of docs.filter((d) => d.kind === 'CatalogEntry')) {
@@ -355,6 +428,31 @@ export async function applyObjectImport(
     if (hasSyncs) {
       const r = await applyDatasetSyncImport(ownerId, syncYaml, mode, principal.user._id);
       if (!r.applied) throw new HttpError(400, r.plan.errors[0]?.message ?? 'Dataset sync import failed');
+    }
+    // Transforms after syncs (they read sync outputs); producers before consumers (retry until ordered).
+    const pendingT = prepared.filter(
+      (x) => x.doc.kind === 'Transform' && (x.action === 'create' || x.action === 'update'),
+    );
+    for (let pass = 0; pendingT.length && pass <= pendingT.length + 1; pass++)
+      for (const p of [...pendingT]) {
+        try {
+          const body = { ...p.doc.spec, name: p.doc.metadata.name };
+          if (p.existingId) await updateTransform(ownerId, p.existingId, body, principal.user._id);
+          else await createTransform(ownerId, body, principal.user._id);
+          done.push({ kind: 'Transform', name: p.doc.metadata.name, action: p.action });
+          pendingT.splice(pendingT.indexOf(p), 1);
+        } catch (e) {
+          if (!pendingT.length) throw e;
+        }
+      }
+    if (pendingT.length)
+      throw new HttpError(
+        400,
+        `Could not import transforms: ${pendingT.map((p) => p.doc.metadata.name).join(', ')}`,
+      );
+    for (const p of prepared.filter((x) => x.doc.kind === 'Transform' && x.action === 'remove')) {
+      await deleteTransform(ownerId, p.existingId!);
+      done.push({ kind: 'Transform', name: p.doc.metadata.name, action: 'remove' });
     }
     // Catalog docs last: their collections may be targets of the syncs just imported.
     for (const p of prepared.filter((x) => x.doc.kind === 'CatalogEntry' && x.action !== 'unchanged')) {

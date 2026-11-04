@@ -16,6 +16,7 @@ export const BACKUP_FILES: Record<ObjectKind, string> = {
   Agent: 'agents.yaml',
   Harness: 'harnesses.yaml',
   DatasetSync: 'dataset-syncs.yaml',
+  Transform: 'transforms.yaml',
   CatalogEntry: 'catalog.yaml',
 };
 /** Older export files, removed from the repo once the new files are written. */
