@@ -1,6 +1,6 @@
-# OpenHarness platform reference
+# StockHarness platform reference
 
-StockHarness is built on a fork of [OpenHarness](https://github.com/deepfinery/OpenHarness), a self-hosted studio for agent harnesses, MCP tools and knowledge. This page is the upstream platform reference, kept because it still describes the engine StockHarness runs on: agents, harnesses, the runner, the Python executor, MCP, knowledge, schedules, the API, configuration and operations.
+This is the reference for the platform StockHarness runs on: agents, harnesses, the durable runner, the Python executor, MCP, knowledge, schedules, the API, configuration and operations. The platform was forked from the open-source [OpenHarness](https://github.com/deepfinery/OpenHarness) project, so the sections below keep the upstream wording and screenshots. Product names such as "OpenHarness" and the "Open Harness API" below refer to that platform layer and its API standard. For the product itself, see the [README](../README.md) and the [product guide](../PRODUCT.md).
 
 > **Differences in StockHarness.**
 >
