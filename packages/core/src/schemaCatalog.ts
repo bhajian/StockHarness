@@ -379,6 +379,18 @@ export async function refreshCatalogEntry(ownerId: string, name: string, syncs?:
   if (name !== 'prices_daily' && symbolField === 'security_id' && names.has('date'))
     joins.push({ to: 'prices_daily', on: ['security_id', 'date'] });
 
+  const drift = await collection<{
+    _id: string;
+    kind: string;
+    field: string;
+    detail: string;
+    breaking: boolean;
+    lastSeenAt: Date;
+  }>('schema_drift')
+    .find({ ownerId, collection: name, resolved: false })
+    .limit(20)
+    .toArray()
+    .catch(() => []);
   const documented = fields.filter((f) => f.doc !== 'none').length;
   const entry: Omit<CatalogEntry, '_id'> = {
     ownerId,
@@ -431,10 +443,23 @@ export async function refreshCatalogEntry(ownerId: string, name: string, syncs?:
           ...(lastRun?.lastError ? { lastError: lastRun.lastError } : {}),
         },
     joins,
-    caveats: caveatsFor(
-      { collection: name, dateMin: coverage.dateMin, dateField: coverage.dateField, firstSnapshot },
-      curated,
-    ),
+    caveats: [
+      ...caveatsFor(
+        { collection: name, dateMin: coverage.dateMin, dateField: coverage.dateField, firstSnapshot },
+        curated,
+      ),
+      // Unresolved schema drift (#83) is a caveat until someone resolves the alert.
+      ...drift.map((d) => ({
+        id: `drift-${d.kind}-${d.field}`
+          .toLowerCase()
+          .replace(/[^a-z0-9-]+/g, '-')
+          .slice(0, 60),
+        severity: d.breaking ? ('blocking' as const) : ('warn' as const),
+        text: `Schema drift: ${d.field} ${d.kind.replace('_', ' ')} (${d.detail}), last seen ${d.lastSeenAt.toISOString().slice(0, 10)}`,
+        source: 'data' as const,
+        fix: 'Datasets → Health → Drift alerts',
+      })),
+    ],
     ...(curated ? { curated } : {}),
     docCompletenessPct: fields.length ? Math.round((documented / fields.length) * 100) : 0,
     refreshedAt: new Date(),

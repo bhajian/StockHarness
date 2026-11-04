@@ -612,7 +612,21 @@ export type HealthRow = {
   error?: string;
   gaps: { date: string; rows: number | null }[] | null;
 };
+export type DriftAlert = {
+  id: string;
+  collection: string;
+  kind: 'missing_field' | 'added_field' | 'type_change' | 'null_rate';
+  field: string;
+  detail: string;
+  breaking: boolean;
+  count: number;
+  lastSeenAt: string;
+  syncName?: string;
+};
+export const resolveDrift = (id: string) =>
+  send<{ resolved: boolean }>(`/datasets/drift/${encodeURIComponent(id)}/resolve`, {});
 export type DataHealth = {
+  drift: DriftAlert[];
   kpis: { fresh: number; stale: number; failed: number; drift: number };
   indicator: { level: 'green' | 'amber' | 'red'; text: string };
   expected: string[];

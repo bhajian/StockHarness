@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { collectionCoverage } from '../../../packages/core/src/catalogCoverage.js';
 import { lineage } from '../../../packages/core/src/lineage.js';
 import { dataHealth } from '../../../packages/core/src/dataHealth.js';
+import { driftAlerts } from '../../../packages/core/src/ingestValidation.js';
 import { collection } from '../../../packages/core/src/db.js';
 import { HttpError, safeError } from '../../../packages/core/src/security.js';
 import {
@@ -47,6 +48,28 @@ catalogRouter.post('/catalog/export', async (req, res) => {
 catalogRouter.get('/datasets/health', async (req, res) => {
   const days = Math.min(250, Math.max(10, Number(req.query.days) || 60));
   res.json(await dataHealth(req.principal!.tenantId, { days }));
+});
+// Schema drift alerts (#83): list, and resolve (the next drifted response re-opens it).
+catalogRouter.get('/datasets/drift', async (req, res) => {
+  const all = req.query.all === '1';
+  const list = await driftAlerts()
+    .find({ ownerId: req.principal!.tenantId, ...(all ? {} : { resolved: false }) })
+    .sort({ lastSeenAt: -1 })
+    .limit(500)
+    .toArray();
+  res.json(list.map(({ _id, ownerId, ...d }) => ({ id: _id, ...d })));
+});
+catalogRouter.post('/datasets/drift/:id/resolve', async (req, res) => {
+  if (req.principal!.user.role !== 'admin')
+    throw new HttpError(403, 'Only administrators can resolve drift alerts');
+  const r = await driftAlerts().findOneAndUpdate(
+    { _id: String(req.params.id), ownerId: req.principal!.tenantId },
+    { $set: { resolved: true } },
+    { returnDocument: 'after' },
+  );
+  if (!r) throw new HttpError(404, 'Drift alert not found');
+  await refreshCatalogEntry(req.principal!.tenantId, r.collection).catch(() => undefined);
+  res.json({ id: r._id, resolved: true });
 });
 // One collection's gap strip over the last N expected sessions; computes coverage if needed (202 meanwhile).
 catalogRouter.get('/datasets/health/:collection/gaps', async (req, res) => {
