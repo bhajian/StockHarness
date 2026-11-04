@@ -743,5 +743,10 @@ export function catalogView() {
     defaultHistoryPeriods: typeof d.params?.limit === 'number' ? d.params.limit : undefined,
     periodParam: typeof d.params?.period === 'string' ? d.params.period : undefined,
     incremental: d.incremental,
+    // The sync detail Source tab (#76).
+    endpoint: d.endpoint,
+    keyFields: d.keyFields,
+    dateField: d.dateField,
+    appendOnly: Boolean(d.snapshotDated) || d.keyFields.includes('acceptedDate'),
   }));
 }

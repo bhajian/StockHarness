@@ -128,16 +128,40 @@ export type DatasetCatalogItem = {
   supportsDateRange: boolean;
   recommendedEveryMinutes: number;
   defaultCollection: string;
+  endpoint?: string;
+  keyFields?: string[];
+  dateField?: string;
+  appendOnly?: boolean;
 };
 export type DatasetSyncRun = {
   id: string;
   status: 'running' | 'succeeded' | 'failed';
-  trigger: 'schedule' | 'manual';
+  trigger: 'schedule' | 'manual' | 'pipeline';
   rows?: number;
   error?: string;
   startedAt: string;
   finishedAt?: string;
+  calls?: number;
+  symbolsAttempted?: number;
+  symbolsCovered?: number;
+  symbolErrors?: { symbol: string; error: string }[];
 };
+export const fetchSyncRuns = (id: string) =>
+  api<DatasetSyncRun[]>(`/dataset-syncs/${encodeURIComponent(id)}/runs`);
+export const fetchSyncSymbols = (id: string) =>
+  api<{
+    mode: 'list' | 'preset' | 'universe';
+    count: number | null;
+    delisted?: number;
+    preset?: string;
+    sample?: string[];
+    note?: string;
+    lastRun?: { attempted?: number; covered?: number; at: string };
+  }>(`/dataset-syncs/${encodeURIComponent(id)}/symbols`);
+export const fetchSyncStats = (since: Date) =>
+  api<{ runs: number; failed: number; calls: number; rows: number }>(
+    `/dataset-sync-stats?since=${encodeURIComponent(since.toISOString())}`,
+  );
 export type TickerPreset = { id: string; label: string; description: string };
 export const fetchDatasetCatalog = () =>
   api<{ datasets: DatasetCatalogItem[]; presets: TickerPreset[] }>('/datasets/catalog');

@@ -30,7 +30,8 @@ export const fmpLimiter = new PriorityRateLimiter(MAX_RPM);
 /** Background sync runs: priority first, never twice at once, never blocking the dispatcher tick. */
 export const syncQueue = new SyncWorkQueue(Math.max(1, Number(process.env.DATASET_SYNC_CONCURRENCY) || 3));
 /** The priority of the sync whose code is running, so every FMP call it makes is scheduled at that priority. */
-export const syncContext = new AsyncLocalStorage<{ priority: LimiterPriority }>();
+/** Per-pull context: the limiter priority and, for sync runs, a counter of FMP calls (#76). */
+export const syncContext = new AsyncLocalStorage<{ priority: LimiterPriority; calls?: { n: number } }>();
 
 export const datasetSyncInput = z.object({
   name: z.string().min(1).max(200),
@@ -87,6 +88,9 @@ export type DatasetSyncRun = {
   /** Universe coverage of a per-symbol run (pipeline gates, #156). */
   symbolsAttempted?: number;
   symbolsCovered?: number;
+  /** FMP requests made (retries included) and the first per-symbol errors (#76). */
+  calls?: number;
+  symbolErrors?: { symbol: string; error: string }[];
   error?: string;
   startedAt: Date;
   finishedAt?: Date;
@@ -137,6 +141,8 @@ export async function fmpGet(
   const priority = syncContext.getStore()?.priority ?? 'P1';
   for (let attempt = 0; attempt < 8; attempt++) {
     await fmpLimiter.acquire(priority);
+    const counter = syncContext.getStore()?.calls;
+    if (counter) counter.n++;
     try {
       const res = await fetch(url, {
         headers: { 'user-agent': 'stockharness-dataset-sync' },
@@ -305,7 +311,12 @@ export async function probeDatasetDepth(
   };
 }
 
-type PullStats = { symbolsAttempted?: number; symbolsCovered?: number };
+type PullStats = {
+  symbolsAttempted?: number;
+  symbolsCovered?: number;
+  /** The first per-symbol errors of a run (#76). */
+  symbolErrors?: { symbol: string; error: string }[];
+};
 async function pull(
   sync: DatasetSync,
   def: DatasetDef,
@@ -370,6 +381,8 @@ async function pullChecked(
       } catch (error) {
         errors++;
         lastSymbolError = `${symbol}: ${safeError(error)}`;
+        if ((stats.symbolErrors ??= []).length < 50)
+          stats.symbolErrors.push({ symbol, error: safeError(error) });
         if (errors <= 5) console.warn(`dataset ${def.id} ${symbol}: ${safeError(error)}`);
       }
     }
@@ -509,11 +522,12 @@ export async function runDatasetSync(
     startedAt: new Date(),
   };
   await datasetSyncRuns().insertOne(run);
+  const stats: PullStats = {};
+  const calls = { n: 0 };
   try {
     const apikey = await fmpApiKey(sync.ownerId, sync.connectionId);
-    const stats: PullStats = {};
     const windowFrom = isTimeseries(def) ? sync.cursor || sync.from || addDays(today(), -365) : undefined;
-    const rows = await syncContext.run({ priority: effectivePriority(sync) }, () =>
+    const rows = await syncContext.run({ priority: effectivePriority(sync), calls }, () =>
       pull(sync, def, apikey, stats),
     );
     await datasetSyncRuns().updateOne(
@@ -526,6 +540,8 @@ export async function runDatasetSync(
           ...(stats.symbolsAttempted !== undefined
             ? { symbolsAttempted: stats.symbolsAttempted, symbolsCovered: stats.symbolsCovered }
             : {}),
+          calls: calls.n,
+          ...(stats.symbolErrors?.length ? { symbolErrors: stats.symbolErrors } : {}),
         },
       },
     );
@@ -564,7 +580,15 @@ export async function runDatasetSync(
     const message = safeError(error);
     await datasetSyncRuns().updateOne(
       { _id: run._id },
-      { $set: { status: 'failed', error: message, finishedAt: new Date() } },
+      {
+        $set: {
+          status: 'failed',
+          error: message,
+          finishedAt: new Date(),
+          calls: calls.n,
+          ...(stats.symbolErrors?.length ? { symbolErrors: stats.symbolErrors } : {}),
+        },
+      },
     );
     await datasetSyncs().updateOne(
       { _id: sync._id },
