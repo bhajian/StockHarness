@@ -203,3 +203,25 @@ export const importObjectsYaml = (
   legacyKind?: ObjectKind,
 ) =>
   send<ObjectImportResult>('/objects/import', { yaml, mode, dryRun, ...(legacyKind ? { legacyKind } : {}) });
+export type ConfigBackupStatus = {
+  configured: boolean;
+  repo?: string;
+  branch: string;
+  base: string;
+  path: string;
+  intervalMinutes: number;
+  pendingChanges: boolean;
+  state?: {
+    lastCheckedAt?: string;
+    lastChangeAt?: string;
+    lastCommitSha?: string;
+    lastCommitAt?: string;
+    prUrl?: string;
+    inSyncWithBase?: boolean;
+    outOfSyncSince?: string;
+    lastError?: string;
+    objects?: Record<string, number>;
+  } | null;
+};
+export const fetchConfigBackup = () => api<ConfigBackupStatus>('/config-backup');
+export const runConfigBackupNow = () => send<ConfigBackupStatus>('/config-backup/run');

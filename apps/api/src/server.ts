@@ -15,6 +15,7 @@ import {
   recoverInterruptedDatasetSyncRuns,
 } from '../../../packages/core/src/datasetSync.js';
 import { safeError } from '../../../packages/core/src/security.js';
+import { dispatchConfigBackup } from './configBackup.js';
 
 await connectDatabase();
 const interrupted = await recoverInterruptedDatasetSyncRuns();
@@ -60,9 +61,17 @@ const notifications = setInterval(async () => {
   }
 }, 3000);
 const timer = setInterval(() => void tick(), 3000);
+// Config backup to git (#149): first check a minute after start, then every CONFIG_BACKUP_INTERVAL_MINUTES.
+const backupStart = setTimeout(() => void dispatchConfigBackup(), 60_000);
+const backupTimer = setInterval(
+  () => void dispatchConfigBackup(),
+  config.CONFIG_BACKUP_INTERVAL_MINUTES * 60_000,
+);
 void tick();
 async function shutdown() {
   clearInterval(timer);
+  clearTimeout(backupStart);
+  clearInterval(backupTimer);
   clearInterval(notifications);
   server.close();
   await closeQueue();

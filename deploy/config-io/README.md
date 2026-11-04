@@ -41,4 +41,33 @@ elsewhere are never removed. No third-party Python packages are needed.
 2. Run `python3 config_io.py apply --dry-run`, fix any reported missing references, then
    `python3 config_io.py apply`.
 
-Data rows are not part of this; back them up with MongoDB. Keeping `exports/` current automatically is #149.
+Data rows are not part of this; back them up with MongoDB.
+
+## Automatic backup to git (#149)
+
+The app keeps `exports/` current by itself:
+
+- Every `CONFIG_BACKUP_INTERVAL_MINUTES` (default 5), plus a forced daily run, it renders the four files
+  with the same renderer as the export.
+- When they changed, it commits them to the **`config-backup`** branch and opens or updates one
+  **"Config snapshot"** PR into `main`. Merge that PR to make `main` the recovery point. It's never
+  auto-merged.
+- Only the export files are touched. There are no empty commits, and legacy files are deleted.
+- Status appears in **Settings → Configuration (YAML) → Backup to git**: last check, last change, last
+  commit, the PR, and whether `main` is in sync. The page also has **Back up now**.
+
+Setup:
+
+1. Create a **fine-grained GitHub token** for `bhajian/StockHarness` only, with _Contents: read and write_
+   and _Pull requests: read and write_.
+2. Store it in the cluster (never in git):
+   ```bash
+   kubectl -n openharness create secret generic openharness-config-backup \
+     --from-literal=CONFIG_BACKUP_GITHUB_TOKEN=github_pat_...
+   kubectl -n openharness rollout restart deployment/app
+   ```
+3. `CONFIG_BACKUP_REPO` is set in the AWS overlay. Optional settings: `CONFIG_BACKUP_BRANCH`,
+   `CONFIG_BACKUP_BASE`, `CONFIG_BACKUP_PATH`, `CONFIG_BACKUP_OWNER_ID` (the default is the first
+   administrator's workspace), `CONFIG_BACKUP_INTERVAL_MINUTES`.
+
+Without the token the backup runs in detect-only mode: it records changes but pushes nothing.

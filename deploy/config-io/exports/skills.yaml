@@ -1,1594 +1,444 @@
-- name: stock
-  description: When someone asks to provide daily stock analysis for the known list
-  instructions: "---\nname: stock-analyst\ndescription: Daily trader brief for the user's stock watchlist,\
-    \ using FMP data tools only (no code execution). Covers market regime and position sizing, new long\
-    \ setups with trigger, stop and targets, a tracker of earlier setups, movers with news, breakdowns,\
-    \ extended names, rate-sensitive holdings, earnings, and sector leadership. Use whenever the user\
-    \ asks for daily stock analysis, the daily, morning or evening brief, a watchlist scan, \"analysis\
-    \ for the known list\", setups, or what to buy, trim or avoid.\n---\n\n# Stock Analyst: Daily Trader\
-    \ Brief (text-only edition)\n\nYour job is to hand the user a brief they can act on in five minutes.\
-    \ Lead with decisions, not data audits. This edition runs with FMP tool calls and your own reading\
-    \ only; there is no code execution, so the rules below are built to keep arithmetic to a minimum and\
-    \ make every number traceable.\n\n---\n\n## Part 1. Rules that protect the numbers\n\nEarlier runs\
-    \ failed because the model eyeballed averages, counted long lists in its head, and mixed up dates.\
-    \ These rules prevent that.\n\n1. **Use precomputed values whenever FMP provides them.** The quote\
-    \ already contains `priceAvg50` (SMA50), `priceAvg200` (SMA200), `yearHigh`, `yearLow`, `changePercentage`,\
-    \ `dayHigh`, `dayLow`, `previousClose`. Never compute an average, RSI or return yourself.\n\n2. **Allowed\
-    \ arithmetic is one step on numbers you can see:** a comparison (A > B), a subtraction, or a multiplication\
-    \ by a constant written in this skill (for example 1.03 x SMA50). Whenever you derive a number that\
-    \ appears in the report, write the calculation once in the work log, like `KLAC stop: 812.40 x 0.99\
-    \ = 804.28`.\n\n3. **Never estimate.** No \"approximately\", \"roughly\", \"based on the trend\",\
-    \ or \"about\". If a value is missing, write `n/a` and move on.\n\n4. **Never count a long list in\
-    \ your head.** Coverage is computed by counting only the short list of missing symbols (Part 6). In-scope\
-    \ totals are fixed numbers written in Part 9.\n\n5. **Copy values exactly as the tool returns them.**\
-    \ Round prices to 2 decimals and percentages to 1 decimal only when displaying.\n\n6. **Do not invent\
-    \ causes.** If news does not explain a move, say \"no news found\".\n\n7. **Data gaps degrade the\
-    \ brief; they never cancel it.** Only the abort conditions in Part 8 stop a run.\n\n---\n\n## Part\
-    \ 2. Dates and the session\n\nThe harness clock is UTC. Convert it to New York time before anything\
-    \ else:\n- From the second Sunday of March to the first Sunday of November: ET = UTC minus 4 hours.\n\
-    - Otherwise: ET = UTC minus 5 hours.\n\nThen call the market-hours tool for NYSE (and the holidays\
-    \ tool if available) and set the **session**:\n\n| New York time when you run | Session | Mode |\n\
-    |---|---|---|\n| Trading day, after 16:00 | today (ET date) | END-OF-DAY |\n| Trading day, before\
-    \ 09:30 | previous trading day | END-OF-DAY |\n| Weekend or holiday | most recent trading day | END-OF-DAY\
-    \ |\n| Trading day, 09:30 to 16:00 | today | INTRADAY SNAPSHOT |\n\n**INTRADAY SNAPSHOT mode:** quotes\
-    \ are live and there is no completed bar. Produce regime, movers, avoid and holdings sections, but\
-    \ issue **no new setups** and do not advance the tracker. Say so in the header.\n\nName everything\
-    \ by session date, never by the UTC date.\n\n**Lookback dates** (no session counting needed):\n- \"\
-    4 weeks ago\" = the same weekday 28 calendar days earlier. Example: session Wed 2026-09-30, so 4 weeks\
-    \ ago = Wed 2026-09-02.\n- \"2 weeks ago\" = the same weekday 14 calendar days earlier.\n- If that\
-    \ date has no data (holiday), use the closest earlier date that does.\n\n---\n\n## Part 3. Run plan\
-    \ (fits a 10-iteration loop)\n\nPut independent calls in the same iteration whenever the harness allows\
-    \ parallel calls.\n\n**If the harness allows only one call per iteration, this does not fit in 10\
-    \ iterations.** Raise the loop limit to 20.\n\n| Iteration | Calls | Purpose |\n|---|---|---|\n| 1\
-    \ | Read the state note `stock-analyst-state`; NYSE market hours | Session, mode, yesterday's setups\
-    \ |\n| 2 | batch-quote for the regime basket; quote `^VIX`; treasury-rates; SPY SMA50 indicator; stock-price-change\
-    \ for SPY, ^VIX and the 12 sector ETFs | Regime and sectors |\n| 3 | batch-quote for every watchlist\
-    \ line in Part 9 | Stage 1 scan |\n| 4 | No calls, or retries for missing symbols (max 5) | Write\
-    \ the Stage 1 work log |\n| 5 | For each candidate and each tracked setup: RSI14 indicator and recent\
-    \ EOD bars | Stage 2 checks, tracker |\n| 6 | earnings-calendar; stock news for candidates and movers\
-    \ (1 to 2 calls) | Events and context |\n| 7 | Save the report note and update the state note | Persist\
-    \ |\n| 8 | Final answer: the full report | Deliver |\n| 9 to 10 | Spare | Retries only |\n\n**Budget\
-    \ guard:** if you reach iteration 7 without a report, write it immediately with whatever you have.\
-    \ Mark missing parts \"not checked\". A brief with partial context beats no brief.\n\n**FMP calls\
-    \ used** (stable API; your tool names may differ slightly):\n- `batch-quote?symbols=A,B,C` (up to\
-    \ 25 symbols per call)\n- `quote?symbol=X`\n- `treasury-rates?from=&to=`\n- `technical-indicators/sma?symbol=SPY&periodLength=50&timeframe=1day`\n\
-    - `technical-indicators/rsi?symbol=X&periodLength=14&timeframe=1day`\n- `historical-price-eod/full?symbol=X&from=&to=`\n\
-    - `stock-price-change?symbol=X`\n- `earnings-calendar?from=&to=`\n- `news/stock?symbols=A,B,C&limit=20`\n\
-    - `exchange-market-hours?exchange=NYSE`\n\n---\n\n## Part 4. Regime (iteration 2)\n\n**Regime basket:**\
-    \ one batch-quote call for `SPY,QQQ,IWM,XLK,SMH,XLC,XLY,XLP,XLE,XLF,XLV,XLI,XLB,XLU,XLRE`. If `^VIX`\
-    \ is not accepted in a batch, quote it alone.\n\nRead and record:\n\n1. **SPY versus its averages.**\
-    \ Record SPY `price`, `priceAvg50` and `priceAvg200`. Write whether price is above or below each.\n\
-    \n2. **SPY SMA50 slope.** From the SMA indicator, take the newest value and the value from 2 weeks\
-    \ ago. Rising if newest > older.\n\n3. **VIX.** Record the level from the quote and the 5D change\
-    \ from stock-price-change.\n\n4. **Rates.** Call treasury-rates from (session minus 35 days) to session.\n\
-    \   - Record `year10` and `year2` on the session row.\n   - Record `year10` on the row from 4 weeks\
-    \ ago.\n   - 10Y change = session year10 minus 4-weeks-ago year10, written in basis points. Example:\
-    \ 5.29 - 4.79 = 0.50, so +50 bp.\n   - 2s10s = year10 minus year2, in bp.\n\n5. **Sector participation.**\
-    \ Count how many of the 12 sector ETFs have price > priceAvg50. List them first, then count the list.\n\
-    \n6. **Sector leadership.** From stock-price-change, record 1D, 5D and 1M for each sector ETF and\
-    \ SPY. Rank the 12 sectors by 1M return.\n   - Mark the top 4 as LEADING and the bottom 4 as LAGGING.\n\
-    \   - If stock-price-change fails, rank by 1D from the quote and say \"1M unavailable\".\n\n**Regime\
-    \ label:**\n\n| Label | Rule | New-long size |\n|---|---|---|\n| RISK_OFF | SPY price < SPY priceAvg200,\
-    \ or VIX >= 30 | 0% (setups become WATCH) |\n| RISK_ON | SPY price > priceAvg200, SMA50 rising, VIX\
-    \ < 22, and sector participation at least 6 of 12 | 100% |\n| CAUTION | anything else | 50% |\n\n\
-    **Flags** (each caps size at 50%):\n- RATES_SHOCK: 10Y up 25 bp or more over 4 weeks.\n- VIX_SPIKE:\
-    \ VIX 5D change of +25% or more.\n\n**How to explain the regime:**\n- **RATES_SHOCK** hits long-duration\
-    \ assets: Treasuries (TLT, IEF), covered-call and income ETFs, dividend ETFs, MLPs, REITs, utilities,\
-    \ and high-multiple growth.\n  - If the 2s10s spread widened with the 10Y leading, call it a bear\
-    \ steepener (term premium).\n  - If the 2Y is leading, point to Fed expectations.\n  - Rate-sensitive\
-    \ names cannot be setups during a rates shock.\n- **RISK_OFF or VIX_SPIKE:** breakouts fail more often.\
-    \ Favor cash, tighter stops and smaller size.\n- **Narrow market:** if participation is 5 of 12 or\
-    \ fewer while SPY is above its SMA50, say leadership is narrow and prefer setups in LEADING sectors.\n\
-    \n---\n\n## Part 5. Stage 1 scan: every watchlist symbol (iterations 3 to 4)\n\nSend each line of\
-    \ Part 9 as one batch-quote call. Lines may be combined, as long as each call has 25 symbols or fewer.\n\
-    \nFor every returned symbol, apply these tests. **Only comparisons, plus the two marked multiplications.**\n\
-    \n| Tag | Test |\n|---|---|\n| UP | price > priceAvg50 **and** priceAvg50 > priceAvg200 |\n| DOWN\
-    \ | price < priceAvg50 **and** priceAvg50 < priceAvg200 |\n| MIXED | neither UP nor DOWN |\n| NEW_HIGH\
-    \ | dayHigh >= yearHigh (made a 52-week high this session) |\n| NEW_LOW | dayLow <= yearLow |\n| LOST_50\
-    \ | previousClose > priceAvg50 **and** price < priceAvg50 |\n| LOST_200 | previousClose > priceAvg200\
-    \ **and** price < priceAvg200 |\n| RECLAIM_50 | previousClose < priceAvg50 **and** price > priceAvg50\
-    \ |\n| MOVER | absolute changePercentage >= 4 (stocks) or >= 2 (ETFs) |\n| EXTENDED | UP names only:\
-    \ price > 1.15 x priceAvg50 (show the calculation) |\n| PULLBACK_ZONE | priceAvg50 > priceAvg200 **and**\
-    \ price > priceAvg200 **and** price <= 1.03 x priceAvg50 (show the calculation) |\n\n**Work log format.**\
-    \ Write one block per line of Part 9. List only the tags that apply; do not write a row for every\
-    \ symbol.\n\n```\nLine SEMIS (22 sent, 22 returned, missing: none)\nUP: NVDA, AVGO, TSM, ...\nDOWN:\
-    \ INTC\nNEW_HIGH: AVGO\nMOVER: AXTI +7.2%, INTC -4.5%\nEXTENDED: AVGO 1.15 x 301.20 = 346.38 < 352.10\n\
-    PULLBACK_ZONE: MU 1.03 x 1012.00 = 1042.36 >= 1031.50\nLOST_50: none\n```\n\n**Missing symbols.**\
-    \ A symbol in the line that is absent from the response is \"missing\".\n- Retry up to 5 missing symbols\
-    \ individually with `quote?symbol=`, and classify each by the error:\n  - \"premium\", \"subscription\"\
-    \ or \"not available under your plan\": **gated**;\n  - empty result: **not found**;\n  - anything\
-    \ else: **failed**.\n\n**Stage 1 ratings for every returned symbol:**\n\n| Rating | Rule | Language\
-    \ |\n|---|---|---|\n| AVOID | DOWN, or NEW_LOW, or LOST_200, or (LOST_50 and changePercentage <= -3)\
-    \ | \"No new longs; review if held\" |\n| EXTENDED | EXTENDED tag | \"Do not chase; trim into strength\
-    \ if overweight\" |\n| TRENDING | UP and not EXTENDED | \"Hold; add only on a setup\" |\n| NEUTRAL\
-    \ | everything else | omit unless relevant |\n\nStage 2 can change TRENDING or NEUTRAL to SETUP or\
-    \ WATCH.\n\n**Candidates for Stage 2.** Role must be `trade`. Maximum 12; take them in this order:\n\
-    1. **BREAKOUT candidates:** UP and NEW_HIGH, with changePercentage > 0 and <= 6.\n2. **PULLBACK candidates:**\
-    \ PULLBACK_ZONE and not AVOID. Take those in LEADING sectors first (sector ETF per Part 9).\n3. **OVERSOLD\
-    \ candidates:** price > priceAvg200, price < priceAvg50, and changePercentage <= -3.\n\nAlso include\
-    \ every PENDING or OPEN setup from the state note. These do not count toward the 12.\n\n---\n\n##\
-    \ Part 6. Coverage (no long counting)\n\n- **In-scope** is the fixed number in Part 9. Do not recount\
-    \ it.\n- **Missing count:** count only the short list of symbols missing after retries.\n- **Fresh**\
-    \ = in-scope minus missing count. Show it: `Fresh = 57 - 2 = 55`.\n- **Coverage** = fresh divided\
-    \ by in-scope, as a percent with 1 decimal.\n\nStatus is **COMPLETE** at 90% or more, **PARTIAL**\
-    \ below that. PARTIAL changes nothing except the footer note. Gated and inactive symbols in Part 9\
-    \ are never fetched and never in the denominator.\n\n---\n\n## Part 7. Stage 2: setups and tracker\
-    \ (iteration 5)\n\n**For each candidate, fetch two things:**\n1. **RSI14:** take the newest value.\n\
-    2. **EOD bars** from (session minus 20 calendar days) to session. Write the 10 most recent lows in\
-    \ one line, then the lowest of them:\n   `KLAC lows: 820.1, 815.4, 811.0, 818.2, 822.7, 825.0, 819.3,\
-    \ 812.4, 830.1, 841.0 -> low10 = 811.0`\n\n**Confirm the setup with RSI:**\n\n| Setup | Confirmed\
-    \ when |\n|---|---|\n| BREAKOUT | RSI14 < 80 |\n| PULLBACK | RSI14 between 38 and 52 |\n| OVERSOLD\
-    \ | RSI14 < 32 |\n\nIf RSI does not confirm, keep the Stage 1 rating.\n\n**Blockers.** A confirmed\
-    \ setup becomes **WATCH** (not SETUP) when any of these is true. Name the blocker.\n- The regime size\
-    \ is 0% (RISK_OFF).\n- RATES_SHOCK is flagged and the symbol is rate-sensitive (Part 9).\n- Earnings\
-    \ fall within the next 5 trading days.\n- News shows a binary event inside the trade window: deal\
-    \ vote, FDA decision, offering, or guidance cut.\n\n**Trade plan for each SETUP.** Write every line\
-    \ of the calculation in the work log.\n\n```\nTrigger  = dayHigh of the session (buy stop)\nStop \
-    \    = low10 x 0.99\n           if Stop < Trigger x 0.90, set Stop = Trigger x 0.90   (cap risk at\
-    \ 10%)\n           if Stop > Trigger x 0.97, set Stop = Trigger x 0.97   (minimum 3% room)\nR    \
-    \    = Trigger - Stop\nT1       = Trigger + 2 x R\nT2       = Trigger + 3 x R\nShares per $1,000 risk\
-    \ = 1000 / R x size, rounded down   (size = 1.0, 0.5 or 0)\n```\n\n**Quality grade** (no score):\n\
-    - **A:** the symbol's sector ETF is LEADING and the setup is a BREAKOUT or PULLBACK.\n- **B:** everything\
-    \ else.\n\nList A setups first.\n\n**Tracker.** For each PENDING or OPEN setup in the state note,\
-    \ walk the EOD bars dated after its `last_checked` date, oldest first. Stop walking once the state\
-    \ is final.\n\n| From | Condition on a bar | New state |\n|---|---|---|\n| PENDING | high >= trigger\
-    \ and low <= stop on the same bar | STOPPED |\n| PENDING | high >= trigger | OPEN |\n| PENDING | low\
-    \ <= stop (before triggering) | INVALIDATED |\n| PENDING | 5 bars passed without triggering | EXPIRED\
-    \ |\n| OPEN | low <= stop | STOPPED |\n| OPEN | high >= T2 | T2_HIT |\n| OPEN | high >= T1 | T1_HIT\
-    \ (keep tracking toward T2 or the stop) |\n| T1_HIT | low <= stop | T1_THEN_STOP |\n| T1_HIT | high\
-    \ >= T2 | T2_HIT |\n\nFinal states: STOPPED, INVALIDATED, EXPIRED, T2_HIT, T1_THEN_STOP. Report them\
-    \ once, add them to the track record, then drop them from the active list.\n\nDo not advance the tracker\
-    \ in INTRADAY SNAPSHOT mode.\n\n---\n\n## Part 8. Abort conditions\n\nStop and tell the user the reason\
-    \ and the fix only when:\n- FMP rejects the API key;\n- the SPY quote is unavailable (no regime anchor);\n\
-    - more than half of the watchlist lines fail entirely.\n\nNever fill an aborted run with remembered\
-    \ or old numbers.\n\n---\n\n## Part 9. Watchlist (single source of truth)\n\nEach line below is one\
-    \ batch-quote call. The bracket gives role, sector ETF, the rate-sensitive flag, and the symbol count.\
-    \ **When you edit a line, update its count and the in-scope total.**\n\n**In-scope total: 57**\n\n\
-    ```\nSEMIS       [trade | SMH | not rate-sensitive | 22]\nNVDA,AMD,CBRS,AVGO,MRVL,INTC,TSM,QCOM,ADI,MCHP,MU,SKHY,LRCX,KLAC,TER,ATEYY,AMKR,ASX,AXTI,SNPS,CDNS,SOXX\n\
-    \nTECH_AI     [trade | XLK | not rate-sensitive | 6]\nMETA,MSFT,SNDK,STX,KEYS,HIVE\n\nCYCLICALS  \
-    \ [trade | see map | not rate-sensitive | 11]\nGEV,TMQ,CRCL,NVA,WLDS,SU,VIST,XLE,DBO,IBIT,GDX\n  sector\
-    \ map: GEV=XLI, TMQ=XLB, CRCL=XLF, SU=XLE, VIST=XLE, XLE=XLE, DBO=XLE, GDX=XLB, NVA/WLDS/IBIT=none\n\
-    \nGOLD_HOLD   [hold | none | not rate-sensitive | 3]\nGLD,IAU,AAAU\n\nCORE_HOLD   [hold | none | not\
-    \ rate-sensitive | 2]\nVOO,BRK-B\n\nINCOME_HOLD [hold | XLU | RATE-SENSITIVE | 13]\nAMLP,T,OMAH,SCHD,VYM,HDV,SPYD,JEPI,QYLD,XYLD,HPF,IEF,TLT\n\
-    ```\n\nNotes on the fixes already applied:\n- KLAC replaces KLA.F; CDNS replaces CDS.SG; HIVE replaces\
-    \ HIVE.TO; TMQ replaces TMQ.TO.\n- TMQ (Trilogy Metals) is copper and zinc, not uranium.\n- SOXX replaces\
-    \ SOX=F.\n- GLD is moved to GOLD_HOLD. Change its role to trade if you trade it.\n\n**Add the remaining\
-    \ tickers from the old Section 10 here.** Use the same format, at most 25 per line.\n\n```\nLINE_NAME\
-    \   [trade | sector ETF | not rate-sensitive | count]\nSYM1,SYM2,...\n```\n\n**Gated: never fetched,\
-    \ not in scope, listed once in Data notes.** These are non-US listings blocked on the FMP Starter\
-    \ plan; move them into a line above after upgrading:\n`000660.KS, 601138.SS, ZGLD.TO, HUG.TO, USCL.TO,\
-    \ HYLD.TO, HHL.TO, CNCC.TO, HPYT.TO, HPYM-U.TO`\n- 000660.KS is SK hynix (Korea).\n- 601138.SS is\
-    \ Foxconn Industrial Internet (Shanghai).\n- ZGLD.TO and HUG.TO are Canadian gold ETFs (US alternative:\
-    \ GLD).\n- The other .TO symbols are Canadian income and covered-call ETFs.\n\n**Inactive: never fetched.**\n\
-    - CYBR: delisted 2026-02-11 after the Palo Alto Networks acquisition; PANW is the successor.\n- IRBT:\
-    \ taken private by Picea through Chapter 11.\n- SOX=F: malformed symbol.\n\n---\n\n## Part 10. State\
-    \ note (iteration 7)\n\nOverwrite the workspace note `stock-analyst-state` with exactly this structure.\
-    \ It is how tomorrow's run knows what changed.\n\n```\nSTATE v1\nsession: YYYY-MM-DD\nregime: LABEL\
-    \ | flags | size\nsetups (active):\nSYMBOL | issued | setup | trigger | stop | T1 | T2 | state | bars_since_issue\
-    \ | last_checked\ntrack_record: T2_HIT n | T1_THEN_STOP n | STOPPED n | INVALIDATED n | EXPIRED n\n\
-    lists:\nSETUP: ...\nAVOID: ...\nEXTENDED: ...\nnot_found_streak: SYMBOL=n, ...\n```\n\n**Changes since\
-    \ the last session** = symbols that newly appear in, or drop out of, the SETUP, AVOID and EXTENDED\
-    \ lists compared with the previous state note.\n\n**Not found 3 sessions in a row:** suggest removing\
-    \ the symbol in Data notes. Never edit Part 9 yourself.\n\nAlso save the report as a note named `stock-brief-YYYY-MM-DD`\
-    \ using the session date.\n\n---\n\n## Part 11. Report template (final answer)\n\nPost the full report\
-    \ as your final message. Use these sections in this order. If a section is empty, write \"None.\"\
-    \ on one line.\n\n```markdown\n# Daily Brief: <session> (<weekday>) <END-OF-DAY or INTRADAY SNAPSHOT>\n\
-    **Regime: <LABEL>** | Flags: <flags or none> | New-long size: <100/50/0>% of normal | Data: <fresh>/<in-scope>\
-    \ (<COMPLETE/PARTIAL>)\n\n## Bottom line\n3 to 5 bullets:\n- Regime and what it means for exposure\
-    \ today.\n- The best 1 to 3 setups: symbol, trigger, stop.\n- The biggest risk on the board (rates,\
-    \ a holding breaking down, earnings).\n- What changed since the last session (tracker outcomes, new\
-    \ AVOIDs).\n\n## 1. Market regime\n| Index | Price | 1D | vs SMA50 | vs SMA200 | Trend |\n(SPY, QQQ,\
-    \ IWM. \"vs SMA\" means \"above\" or \"below\", not a percent.)\n| Macro | Value | Change |\n(VIX\
-    \ with 5D change; 10Y with 4-week change in bp and the reference date; 2Y; 2s10s; sector participation\
-    \ k of 12)\nThen 2 to 4 sentences of interpretation using Part 4.\n\n## 2. Setup tracker\n| Symbol\
-    \ | Issued | Setup | Trigger | Stop | T1 | T2 | Status |\nTrack record: T2 n, T1 then stop n, stopped\
-    \ n, invalidated n, expired n.\n\n## 3. New long setups\n| Grade | Symbol | Setup | Price | Trigger\
-    \ | Stop | T1 | T2 | Risk % | Shares per $1k risk | RSI14 | Why (news) |\nUnder the table, one line\
-    \ per setup: thesis, invalidation, event risk.\nRisk % = R / Trigger x 100, calculation shown in the\
-    \ work log.\n\n## 4. Watch (setups blocked)\n| Symbol | Setup | Blocked by |\n\n## 5. Movers and why\n\
-    | Symbol | 1D | Tags | Rating | Why (news or \"no news found\") |\n\n## 6. Avoid / broken\n| Symbol\
-    \ | Group | Reason (DOWN, NEW_LOW, LOST_50, LOST_200) |\n\n## 7. Extended: do not chase, consider\
-    \ trimming\n| Symbol | Price | 1.15 x SMA50 | 1D |\n\n## 8. Rate-sensitive and core holdings\n| Symbol\
-    \ | Price | 1D | Trend | vs SMA200 |\nOne line on what RATES_SHOCK means for them, if flagged.\n\n\
-    ## 9. Earnings in the next 14 days\n| Symbol | Date | Rating |\n\n## 10. Sector leadership\nLEADING:\
-    \ 4 ETFs with 1M returns. LAGGING: 4 ETFs with 1M returns. One sentence on rotation.\n\n## Data notes\n\
-    - Coverage: fresh = in-scope - missing (show it).\n- Missing, with classification (gated, not found,\
-    \ failed).\n- Gated by plan (not fetched): list.\n- Removal suggestions (not found 3+ sessions).\n\
-    \n_End-of-day data for the session above. Not investment advice; verify levels before trading._\n\
-    ```\n\n---\n\n## Part 12. Glossary (for explaining the brief to the user)\n\n- **Gated:** the data\
-    \ plan blocks this symbol. It is a paywall, not a problem with the stock.\n- **Not found:** the data\
-    \ source has no such symbol (delisted or a bad ticker).\n- **SMA50 / SMA200:** 50- and 200-day average\
-    \ prices, taken from the quote.\n- **RSI14:** 0 to 100 momentum gauge. Below 30 is oversold; above\
-    \ 70 is overbought.\n- **Trigger:** buy-stop price, the session high. The setup is live only if price\
-    \ trades above it.\n- **R:** risk per share (trigger minus stop). T1 = 2R, T2 = 3R.\n- **Shares per\
-    \ $1,000 risk:** how many shares make the stop cost $1,000, already scaled by the regime size. Scale\
-    \ to your own risk per trade."
-  enabled: true
+# StockHarness objects (apiVersion stockharness/v1). Import from Settings -> Configuration or the
+# object list pages. References are by name; secrets and data rows are never included.
+apiVersion: stockharness/v1
+kind: Skill
+metadata:
+  name: stock
   version: 1.0.0
-  files:
-    SKILL.md: "---\nname: \"stock\"\ndescription: \"When someone asks to provide daily stock analysis\
-      \ for the known list\"\nversion: 1.0.0\n---\n\n---\nname: stock-analyst\ndescription: Daily trader\
-      \ brief for the user's stock watchlist, using FMP data tools only (no code execution). Covers market\
-      \ regime and position sizing, new long setups with trigger, stop and targets, a tracker of earlier\
-      \ setups, movers with news, breakdowns, extended names, rate-sensitive holdings, earnings, and sector\
-      \ leadership. Use whenever the user asks for daily stock analysis, the daily, morning or evening\
-      \ brief, a watchlist scan, \"analysis for the known list\", setups, or what to buy, trim or avoid.\n\
-      ---\n\n# Stock Analyst: Daily Trader Brief (text-only edition)\n\nYour job is to hand the user a\
-      \ brief they can act on in five minutes. Lead with decisions, not data audits. This edition runs\
-      \ with FMP tool calls and your own reading only; there is no code execution, so the rules below\
-      \ are built to keep arithmetic to a minimum and make every number traceable.\n\n---\n\n## Part 1.\
-      \ Rules that protect the numbers\n\nEarlier runs failed because the model eyeballed averages, counted\
-      \ long lists in its head, and mixed up dates. These rules prevent that.\n\n1. **Use precomputed\
-      \ values whenever FMP provides them.** The quote already contains `priceAvg50` (SMA50), `priceAvg200`\
-      \ (SMA200), `yearHigh`, `yearLow`, `changePercentage`, `dayHigh`, `dayLow`, `previousClose`. Never\
-      \ compute an average, RSI or return yourself.\n\n2. **Allowed arithmetic is one step on numbers\
-      \ you can see:** a comparison (A > B), a subtraction, or a multiplication by a constant written\
-      \ in this skill (for example 1.03 x SMA50). Whenever you derive a number that appears in the report,\
-      \ write the calculation once in the work log, like `KLAC stop: 812.40 x 0.99 = 804.28`.\n\n3. **Never\
-      \ estimate.** No \"approximately\", \"roughly\", \"based on the trend\", or \"about\". If a value\
-      \ is missing, write `n/a` and move on.\n\n4. **Never count a long list in your head.** Coverage\
-      \ is computed by counting only the short list of missing symbols (Part 6). In-scope totals are fixed\
-      \ numbers written in Part 9.\n\n5. **Copy values exactly as the tool returns them.** Round prices\
-      \ to 2 decimals and percentages to 1 decimal only when displaying.\n\n6. **Do not invent causes.**\
-      \ If news does not explain a move, say \"no news found\".\n\n7. **Data gaps degrade the brief; they\
-      \ never cancel it.** Only the abort conditions in Part 8 stop a run.\n\n---\n\n## Part 2. Dates\
-      \ and the session\n\nThe harness clock is UTC. Convert it to New York time before anything else:\n\
-      - From the second Sunday of March to the first Sunday of November: ET = UTC minus 4 hours.\n- Otherwise:\
-      \ ET = UTC minus 5 hours.\n\nThen call the market-hours tool for NYSE (and the holidays tool if\
-      \ available) and set the **session**:\n\n| New York time when you run | Session | Mode |\n|---|---|---|\n\
-      | Trading day, after 16:00 | today (ET date) | END-OF-DAY |\n| Trading day, before 09:30 | previous\
-      \ trading day | END-OF-DAY |\n| Weekend or holiday | most recent trading day | END-OF-DAY |\n| Trading\
-      \ day, 09:30 to 16:00 | today | INTRADAY SNAPSHOT |\n\n**INTRADAY SNAPSHOT mode:** quotes are live\
-      \ and there is no completed bar. Produce regime, movers, avoid and holdings sections, but issue\
-      \ **no new setups** and do not advance the tracker. Say so in the header.\n\nName everything by\
-      \ session date, never by the UTC date.\n\n**Lookback dates** (no session counting needed):\n- \"\
-      4 weeks ago\" = the same weekday 28 calendar days earlier. Example: session Wed 2026-09-30, so 4\
-      \ weeks ago = Wed 2026-09-02.\n- \"2 weeks ago\" = the same weekday 14 calendar days earlier.\n\
-      - If that date has no data (holiday), use the closest earlier date that does.\n\n---\n\n## Part\
-      \ 3. Run plan (fits a 10-iteration loop)\n\nPut independent calls in the same iteration whenever\
-      \ the harness allows parallel calls.\n\n**If the harness allows only one call per iteration, this\
-      \ does not fit in 10 iterations.** Raise the loop limit to 20.\n\n| Iteration | Calls | Purpose\
-      \ |\n|---|---|---|\n| 1 | Read the state note `stock-analyst-state`; NYSE market hours | Session,\
-      \ mode, yesterday's setups |\n| 2 | batch-quote for the regime basket; quote `^VIX`; treasury-rates;\
-      \ SPY SMA50 indicator; stock-price-change for SPY, ^VIX and the 12 sector ETFs | Regime and sectors\
-      \ |\n| 3 | batch-quote for every watchlist line in Part 9 | Stage 1 scan |\n| 4 | No calls, or retries\
-      \ for missing symbols (max 5) | Write the Stage 1 work log |\n| 5 | For each candidate and each\
-      \ tracked setup: RSI14 indicator and recent EOD bars | Stage 2 checks, tracker |\n| 6 | earnings-calendar;\
-      \ stock news for candidates and movers (1 to 2 calls) | Events and context |\n| 7 | Save the report\
-      \ note and update the state note | Persist |\n| 8 | Final answer: the full report | Deliver |\n\
-      | 9 to 10 | Spare | Retries only |\n\n**Budget guard:** if you reach iteration 7 without a report,\
-      \ write it immediately with whatever you have. Mark missing parts \"not checked\". A brief with\
-      \ partial context beats no brief.\n\n**FMP calls used** (stable API; your tool names may differ\
-      \ slightly):\n- `batch-quote?symbols=A,B,C` (up to 25 symbols per call)\n- `quote?symbol=X`\n- `treasury-rates?from=&to=`\n\
-      - `technical-indicators/sma?symbol=SPY&periodLength=50&timeframe=1day`\n- `technical-indicators/rsi?symbol=X&periodLength=14&timeframe=1day`\n\
-      - `historical-price-eod/full?symbol=X&from=&to=`\n- `stock-price-change?symbol=X`\n- `earnings-calendar?from=&to=`\n\
-      - `news/stock?symbols=A,B,C&limit=20`\n- `exchange-market-hours?exchange=NYSE`\n\n---\n\n## Part\
-      \ 4. Regime (iteration 2)\n\n**Regime basket:** one batch-quote call for `SPY,QQQ,IWM,XLK,SMH,XLC,XLY,XLP,XLE,XLF,XLV,XLI,XLB,XLU,XLRE`.\
-      \ If `^VIX` is not accepted in a batch, quote it alone.\n\nRead and record:\n\n1. **SPY versus its\
-      \ averages.** Record SPY `price`, `priceAvg50` and `priceAvg200`. Write whether price is above or\
-      \ below each.\n\n2. **SPY SMA50 slope.** From the SMA indicator, take the newest value and the value\
-      \ from 2 weeks ago. Rising if newest > older.\n\n3. **VIX.** Record the level from the quote and\
-      \ the 5D change from stock-price-change.\n\n4. **Rates.** Call treasury-rates from (session minus\
-      \ 35 days) to session.\n   - Record `year10` and `year2` on the session row.\n   - Record `year10`\
-      \ on the row from 4 weeks ago.\n   - 10Y change = session year10 minus 4-weeks-ago year10, written\
-      \ in basis points. Example: 5.29 - 4.79 = 0.50, so +50 bp.\n   - 2s10s = year10 minus year2, in\
-      \ bp.\n\n5. **Sector participation.** Count how many of the 12 sector ETFs have price > priceAvg50.\
-      \ List them first, then count the list.\n\n6. **Sector leadership.** From stock-price-change, record\
-      \ 1D, 5D and 1M for each sector ETF and SPY. Rank the 12 sectors by 1M return.\n   - Mark the top\
-      \ 4 as LEADING and the bottom 4 as LAGGING.\n   - If stock-price-change fails, rank by 1D from the\
-      \ quote and say \"1M unavailable\".\n\n**Regime label:**\n\n| Label | Rule | New-long size |\n|---|---|---|\n\
-      | RISK_OFF | SPY price < SPY priceAvg200, or VIX >= 30 | 0% (setups become WATCH) |\n| RISK_ON |\
-      \ SPY price > priceAvg200, SMA50 rising, VIX < 22, and sector participation at least 6 of 12 | 100%\
-      \ |\n| CAUTION | anything else | 50% |\n\n**Flags** (each caps size at 50%):\n- RATES_SHOCK: 10Y\
-      \ up 25 bp or more over 4 weeks.\n- VIX_SPIKE: VIX 5D change of +25% or more.\n\n**How to explain\
-      \ the regime:**\n- **RATES_SHOCK** hits long-duration assets: Treasuries (TLT, IEF), covered-call\
-      \ and income ETFs, dividend ETFs, MLPs, REITs, utilities, and high-multiple growth.\n  - If the\
-      \ 2s10s spread widened with the 10Y leading, call it a bear steepener (term premium).\n  - If the\
-      \ 2Y is leading, point to Fed expectations.\n  - Rate-sensitive names cannot be setups during a\
-      \ rates shock.\n- **RISK_OFF or VIX_SPIKE:** breakouts fail more often. Favor cash, tighter stops\
-      \ and smaller size.\n- **Narrow market:** if participation is 5 of 12 or fewer while SPY is above\
-      \ its SMA50, say leadership is narrow and prefer setups in LEADING sectors.\n\n---\n\n## Part 5.\
-      \ Stage 1 scan: every watchlist symbol (iterations 3 to 4)\n\nSend each line of Part 9 as one batch-quote\
-      \ call. Lines may be combined, as long as each call has 25 symbols or fewer.\n\nFor every returned\
-      \ symbol, apply these tests. **Only comparisons, plus the two marked multiplications.**\n\n| Tag\
-      \ | Test |\n|---|---|\n| UP | price > priceAvg50 **and** priceAvg50 > priceAvg200 |\n| DOWN | price\
-      \ < priceAvg50 **and** priceAvg50 < priceAvg200 |\n| MIXED | neither UP nor DOWN |\n| NEW_HIGH |\
-      \ dayHigh >= yearHigh (made a 52-week high this session) |\n| NEW_LOW | dayLow <= yearLow |\n| LOST_50\
-      \ | previousClose > priceAvg50 **and** price < priceAvg50 |\n| LOST_200 | previousClose > priceAvg200\
-      \ **and** price < priceAvg200 |\n| RECLAIM_50 | previousClose < priceAvg50 **and** price > priceAvg50\
-      \ |\n| MOVER | absolute changePercentage >= 4 (stocks) or >= 2 (ETFs) |\n| EXTENDED | UP names only:\
-      \ price > 1.15 x priceAvg50 (show the calculation) |\n| PULLBACK_ZONE | priceAvg50 > priceAvg200\
-      \ **and** price > priceAvg200 **and** price <= 1.03 x priceAvg50 (show the calculation) |\n\n**Work\
-      \ log format.** Write one block per line of Part 9. List only the tags that apply; do not write\
-      \ a row for every symbol.\n\n```\nLine SEMIS (22 sent, 22 returned, missing: none)\nUP: NVDA, AVGO,\
-      \ TSM, ...\nDOWN: INTC\nNEW_HIGH: AVGO\nMOVER: AXTI +7.2%, INTC -4.5%\nEXTENDED: AVGO 1.15 x 301.20\
-      \ = 346.38 < 352.10\nPULLBACK_ZONE: MU 1.03 x 1012.00 = 1042.36 >= 1031.50\nLOST_50: none\n```\n\
-      \n**Missing symbols.** A symbol in the line that is absent from the response is \"missing\".\n-\
-      \ Retry up to 5 missing symbols individually with `quote?symbol=`, and classify each by the error:\n\
-      \  - \"premium\", \"subscription\" or \"not available under your plan\": **gated**;\n  - empty result:\
-      \ **not found**;\n  - anything else: **failed**.\n\n**Stage 1 ratings for every returned symbol:**\n\
-      \n| Rating | Rule | Language |\n|---|---|---|\n| AVOID | DOWN, or NEW_LOW, or LOST_200, or (LOST_50\
-      \ and changePercentage <= -3) | \"No new longs; review if held\" |\n| EXTENDED | EXTENDED tag |\
-      \ \"Do not chase; trim into strength if overweight\" |\n| TRENDING | UP and not EXTENDED | \"Hold;\
-      \ add only on a setup\" |\n| NEUTRAL | everything else | omit unless relevant |\n\nStage 2 can change\
-      \ TRENDING or NEUTRAL to SETUP or WATCH.\n\n**Candidates for Stage 2.** Role must be `trade`. Maximum\
-      \ 12; take them in this order:\n1. **BREAKOUT candidates:** UP and NEW_HIGH, with changePercentage\
-      \ > 0 and <= 6.\n2. **PULLBACK candidates:** PULLBACK_ZONE and not AVOID. Take those in LEADING\
-      \ sectors first (sector ETF per Part 9).\n3. **OVERSOLD candidates:** price > priceAvg200, price\
-      \ < priceAvg50, and changePercentage <= -3.\n\nAlso include every PENDING or OPEN setup from the\
-      \ state note. These do not count toward the 12.\n\n---\n\n## Part 6. Coverage (no long counting)\n\
-      \n- **In-scope** is the fixed number in Part 9. Do not recount it.\n- **Missing count:** count only\
-      \ the short list of symbols missing after retries.\n- **Fresh** = in-scope minus missing count.\
-      \ Show it: `Fresh = 57 - 2 = 55`.\n- **Coverage** = fresh divided by in-scope, as a percent with\
-      \ 1 decimal.\n\nStatus is **COMPLETE** at 90% or more, **PARTIAL** below that. PARTIAL changes nothing\
-      \ except the footer note. Gated and inactive symbols in Part 9 are never fetched and never in the\
-      \ denominator.\n\n---\n\n## Part 7. Stage 2: setups and tracker (iteration 5)\n\n**For each candidate,\
-      \ fetch two things:**\n1. **RSI14:** take the newest value.\n2. **EOD bars** from (session minus\
-      \ 20 calendar days) to session. Write the 10 most recent lows in one line, then the lowest of them:\n\
-      \   `KLAC lows: 820.1, 815.4, 811.0, 818.2, 822.7, 825.0, 819.3, 812.4, 830.1, 841.0 -> low10 =\
-      \ 811.0`\n\n**Confirm the setup with RSI:**\n\n| Setup | Confirmed when |\n|---|---|\n| BREAKOUT\
-      \ | RSI14 < 80 |\n| PULLBACK | RSI14 between 38 and 52 |\n| OVERSOLD | RSI14 < 32 |\n\nIf RSI does\
-      \ not confirm, keep the Stage 1 rating.\n\n**Blockers.** A confirmed setup becomes **WATCH** (not\
-      \ SETUP) when any of these is true. Name the blocker.\n- The regime size is 0% (RISK_OFF).\n- RATES_SHOCK\
-      \ is flagged and the symbol is rate-sensitive (Part 9).\n- Earnings fall within the next 5 trading\
-      \ days.\n- News shows a binary event inside the trade window: deal vote, FDA decision, offering,\
-      \ or guidance cut.\n\n**Trade plan for each SETUP.** Write every line of the calculation in the\
-      \ work log.\n\n```\nTrigger  = dayHigh of the session (buy stop)\nStop     = low10 x 0.99\n    \
-      \       if Stop < Trigger x 0.90, set Stop = Trigger x 0.90   (cap risk at 10%)\n           if Stop\
-      \ > Trigger x 0.97, set Stop = Trigger x 0.97   (minimum 3% room)\nR        = Trigger - Stop\nT1\
-      \       = Trigger + 2 x R\nT2       = Trigger + 3 x R\nShares per $1,000 risk = 1000 / R x size,\
-      \ rounded down   (size = 1.0, 0.5 or 0)\n```\n\n**Quality grade** (no score):\n- **A:** the symbol's\
-      \ sector ETF is LEADING and the setup is a BREAKOUT or PULLBACK.\n- **B:** everything else.\n\n\
-      List A setups first.\n\n**Tracker.** For each PENDING or OPEN setup in the state note, walk the\
-      \ EOD bars dated after its `last_checked` date, oldest first. Stop walking once the state is final.\n\
-      \n| From | Condition on a bar | New state |\n|---|---|---|\n| PENDING | high >= trigger and low\
-      \ <= stop on the same bar | STOPPED |\n| PENDING | high >= trigger | OPEN |\n| PENDING | low <=\
-      \ stop (before triggering) | INVALIDATED |\n| PENDING | 5 bars passed without triggering | EXPIRED\
-      \ |\n| OPEN | low <= stop | STOPPED |\n| OPEN | high >= T2 | T2_HIT |\n| OPEN | high >= T1 | T1_HIT\
-      \ (keep tracking toward T2 or the stop) |\n| T1_HIT | low <= stop | T1_THEN_STOP |\n| T1_HIT | high\
-      \ >= T2 | T2_HIT |\n\nFinal states: STOPPED, INVALIDATED, EXPIRED, T2_HIT, T1_THEN_STOP. Report\
-      \ them once, add them to the track record, then drop them from the active list.\n\nDo not advance\
-      \ the tracker in INTRADAY SNAPSHOT mode.\n\n---\n\n## Part 8. Abort conditions\n\nStop and tell\
-      \ the user the reason and the fix only when:\n- FMP rejects the API key;\n- the SPY quote is unavailable\
-      \ (no regime anchor);\n- more than half of the watchlist lines fail entirely.\n\nNever fill an aborted\
-      \ run with remembered or old numbers.\n\n---\n\n## Part 9. Watchlist (single source of truth)\n\n\
-      Each line below is one batch-quote call. The bracket gives role, sector ETF, the rate-sensitive\
-      \ flag, and the symbol count. **When you edit a line, update its count and the in-scope total.**\n\
-      \n**In-scope total: 57**\n\n```\nSEMIS       [trade | SMH | not rate-sensitive | 22]\nNVDA,AMD,CBRS,AVGO,MRVL,INTC,TSM,QCOM,ADI,MCHP,MU,SKHY,LRCX,KLAC,TER,ATEYY,AMKR,ASX,AXTI,SNPS,CDNS,SOXX\n\
-      \nTECH_AI     [trade | XLK | not rate-sensitive | 6]\nMETA,MSFT,SNDK,STX,KEYS,HIVE\n\nCYCLICALS\
-      \   [trade | see map | not rate-sensitive | 11]\nGEV,TMQ,CRCL,NVA,WLDS,SU,VIST,XLE,DBO,IBIT,GDX\n\
-      \  sector map: GEV=XLI, TMQ=XLB, CRCL=XLF, SU=XLE, VIST=XLE, XLE=XLE, DBO=XLE, GDX=XLB, NVA/WLDS/IBIT=none\n\
-      \nGOLD_HOLD   [hold | none | not rate-sensitive | 3]\nGLD,IAU,AAAU\n\nCORE_HOLD   [hold | none |\
-      \ not rate-sensitive | 2]\nVOO,BRK-B\n\nINCOME_HOLD [hold | XLU | RATE-SENSITIVE | 13]\nAMLP,T,OMAH,SCHD,VYM,HDV,SPYD,JEPI,QYLD,XYLD,HPF,IEF,TLT\n\
-      ```\n\nNotes on the fixes already applied:\n- KLAC replaces KLA.F; CDNS replaces CDS.SG; HIVE replaces\
-      \ HIVE.TO; TMQ replaces TMQ.TO.\n- TMQ (Trilogy Metals) is copper and zinc, not uranium.\n- SOXX\
-      \ replaces SOX=F.\n- GLD is moved to GOLD_HOLD. Change its role to trade if you trade it.\n\n**Add\
-      \ the remaining tickers from the old Section 10 here.** Use the same format, at most 25 per line.\n\
-      \n```\nLINE_NAME   [trade | sector ETF | not rate-sensitive | count]\nSYM1,SYM2,...\n```\n\n**Gated:\
-      \ never fetched, not in scope, listed once in Data notes.** These are non-US listings blocked on\
-      \ the FMP Starter plan; move them into a line above after upgrading:\n`000660.KS, 601138.SS, ZGLD.TO,\
-      \ HUG.TO, USCL.TO, HYLD.TO, HHL.TO, CNCC.TO, HPYT.TO, HPYM-U.TO`\n- 000660.KS is SK hynix (Korea).\n\
-      - 601138.SS is Foxconn Industrial Internet (Shanghai).\n- ZGLD.TO and HUG.TO are Canadian gold ETFs\
-      \ (US alternative: GLD).\n- The other .TO symbols are Canadian income and covered-call ETFs.\n\n\
-      **Inactive: never fetched.**\n- CYBR: delisted 2026-02-11 after the Palo Alto Networks acquisition;\
-      \ PANW is the successor.\n- IRBT: taken private by Picea through Chapter 11.\n- SOX=F: malformed\
-      \ symbol.\n\n---\n\n## Part 10. State note (iteration 7)\n\nOverwrite the workspace note `stock-analyst-state`\
-      \ with exactly this structure. It is how tomorrow's run knows what changed.\n\n```\nSTATE v1\nsession:\
-      \ YYYY-MM-DD\nregime: LABEL | flags | size\nsetups (active):\nSYMBOL | issued | setup | trigger\
-      \ | stop | T1 | T2 | state | bars_since_issue | last_checked\ntrack_record: T2_HIT n | T1_THEN_STOP\
-      \ n | STOPPED n | INVALIDATED n | EXPIRED n\nlists:\nSETUP: ...\nAVOID: ...\nEXTENDED: ...\nnot_found_streak:\
-      \ SYMBOL=n, ...\n```\n\n**Changes since the last session** = symbols that newly appear in, or drop\
-      \ out of, the SETUP, AVOID and EXTENDED lists compared with the previous state note.\n\n**Not found\
-      \ 3 sessions in a row:** suggest removing the symbol in Data notes. Never edit Part 9 yourself.\n\
-      \nAlso save the report as a note named `stock-brief-YYYY-MM-DD` using the session date.\n\n---\n\
-      \n## Part 11. Report template (final answer)\n\nPost the full report as your final message. Use\
-      \ these sections in this order. If a section is empty, write \"None.\" on one line.\n\n```markdown\n\
-      # Daily Brief: <session> (<weekday>) <END-OF-DAY or INTRADAY SNAPSHOT>\n**Regime: <LABEL>** | Flags:\
-      \ <flags or none> | New-long size: <100/50/0>% of normal | Data: <fresh>/<in-scope> (<COMPLETE/PARTIAL>)\n\
-      \n## Bottom line\n3 to 5 bullets:\n- Regime and what it means for exposure today.\n- The best 1\
-      \ to 3 setups: symbol, trigger, stop.\n- The biggest risk on the board (rates, a holding breaking\
-      \ down, earnings).\n- What changed since the last session (tracker outcomes, new AVOIDs).\n\n##\
-      \ 1. Market regime\n| Index | Price | 1D | vs SMA50 | vs SMA200 | Trend |\n(SPY, QQQ, IWM. \"vs\
-      \ SMA\" means \"above\" or \"below\", not a percent.)\n| Macro | Value | Change |\n(VIX with 5D\
-      \ change; 10Y with 4-week change in bp and the reference date; 2Y; 2s10s; sector participation k\
-      \ of 12)\nThen 2 to 4 sentences of interpretation using Part 4.\n\n## 2. Setup tracker\n| Symbol\
-      \ | Issued | Setup | Trigger | Stop | T1 | T2 | Status |\nTrack record: T2 n, T1 then stop n, stopped\
-      \ n, invalidated n, expired n.\n\n## 3. New long setups\n| Grade | Symbol | Setup | Price | Trigger\
-      \ | Stop | T1 | T2 | Risk % | Shares per $1k risk | RSI14 | Why (news) |\nUnder the table, one line\
-      \ per setup: thesis, invalidation, event risk.\nRisk % = R / Trigger x 100, calculation shown in\
-      \ the work log.\n\n## 4. Watch (setups blocked)\n| Symbol | Setup | Blocked by |\n\n## 5. Movers\
-      \ and why\n| Symbol | 1D | Tags | Rating | Why (news or \"no news found\") |\n\n## 6. Avoid / broken\n\
-      | Symbol | Group | Reason (DOWN, NEW_LOW, LOST_50, LOST_200) |\n\n## 7. Extended: do not chase,\
-      \ consider trimming\n| Symbol | Price | 1.15 x SMA50 | 1D |\n\n## 8. Rate-sensitive and core holdings\n\
-      | Symbol | Price | 1D | Trend | vs SMA200 |\nOne line on what RATES_SHOCK means for them, if flagged.\n\
-      \n## 9. Earnings in the next 14 days\n| Symbol | Date | Rating |\n\n## 10. Sector leadership\nLEADING:\
-      \ 4 ETFs with 1M returns. LAGGING: 4 ETFs with 1M returns. One sentence on rotation.\n\n## Data\
-      \ notes\n- Coverage: fresh = in-scope - missing (show it).\n- Missing, with classification (gated,\
-      \ not found, failed).\n- Gated by plan (not fetched): list.\n- Removal suggestions (not found 3+\
-      \ sessions).\n\n_End-of-day data for the session above. Not investment advice; verify levels before\
-      \ trading._\n```\n\n---\n\n## Part 12. Glossary (for explaining the brief to the user)\n\n- **Gated:**\
-      \ the data plan blocks this symbol. It is a paywall, not a problem with the stock.\n- **Not found:**\
-      \ the data source has no such symbol (delisted or a bad ticker).\n- **SMA50 / SMA200:** 50- and\
-      \ 200-day average prices, taken from the quote.\n- **RSI14:** 0 to 100 momentum gauge. Below 30\
-      \ is oversold; above 70 is overbought.\n- **Trigger:** buy-stop price, the session high. The setup\
-      \ is live only if price trades above it.\n- **R:** risk per share (trigger minus stop). T1 = 2R,\
-      \ T2 = 3R.\n- **Shares per $1,000 risk:** how many shares make the stop cost $1,000, already scaled\
-      \ by the regime size. Scale to your own risk per trade.\n"
-  hasApiKey: false
-  hasToken: false
-  hasClientSecret: false
-  authorized: false
-- name: strategy-library
-  description: The StockHarness strategy library. 42 strategy cards, each with how it works, the exact
-    signal, the real collections and fields it uses, default parameters, what to explore,
-    point-in-time traps and whether it can be backtested today. Use when proposing a theory
-    (Theorist), turning a theory into a plugin (Coder), or checking a theory for testability and
-    novelty (Judge).
-  instructions: >
+spec:
+  description: When someone asks to provide daily stock analysis for the known list
+  instructions: |-
+    ---
+    name: stock-analyst
+    description: Daily trader brief for the user's stock watchlist, using FMP data tools only (no code execution). Covers market regime and position sizing, new long setups with trigger, stop and targets, a tracker of earlier setups, movers with news, breakdowns, extended names, rate-sensitive holdings, earnings, and sector leadership. Use whenever the user asks for daily stock analysis, the daily, morning or evening brief, a watchlist scan, "analysis for the known list", setups, or what to buy, trim or avoid.
     ---
 
-    name: strategy-library
+    # Stock Analyst: Daily Trader Brief (text-only edition)
 
-    description: The StockHarness strategy library. 42 strategy cards, each with how it works, the
-    exact signal, the real collections and fields it uses, default parameters, what to explore,
-    point-in-time traps and whether it can be backtested today. Use when proposing a theory
-    (Theorist), turning a theory into a plugin (Coder), or checking a theory for testability and
-    novelty (Judge).
+    Your job is to hand the user a brief they can act on in five minutes. Lead with decisions, not data audits. This edition runs with FMP tool calls and your own reading only; there is no code execution, so the rules below are built to keep arithmetic to a minimum and make every number traceable.
 
     ---
 
+    ## Part 1. Rules that protect the numbers
 
-    # StockHarness Strategy Library
+    Earlier runs failed because the model eyeballed averages, counted long lists in its head, and mixed up dates. These rules prevent that.
 
+    1. **Use precomputed values whenever FMP provides them.** The quote already contains `priceAvg50` (SMA50), `priceAvg200` (SMA200), `yearHigh`, `yearLow`, `changePercentage`, `dayHigh`, `dayLow`, `previousClose`. Never compute an average, RSI or return yourself.
 
-    This skill is the shared map of strategy ideas for the StockHarness research agents.
+    2. **Allowed arithmetic is one step on numbers you can see:** a comparison (A > B), a subtraction, or a multiplication by a constant written in this skill (for example 1.03 x SMA50). Whenever you derive a number that appears in the report, write the calculation once in the work log, like `KLAC stop: 812.40 x 0.99 = 804.28`.
 
+    3. **Never estimate.** No "approximately", "roughly", "based on the trend", or "about". If a value is missing, write `n/a` and move on.
 
-    - **Theorist:** pick a card, then combine, condition or refine it into a _new, testable_ theory.
-    Never resubmit a card unchanged. Check `search_theories` first.
+    4. **Never count a long list in your head.** Coverage is computed by counting only the short list of missing symbols (Part 6). In-scope totals are fixed numbers written in Part 9.
 
-    - **Coder:** use the card's **Signal** and **Data** sections to write the plugin, using the
-    field names exactly as listed.
+    5. **Copy values exactly as the tool returns them.** Round prices to 2 decimals and percentages to 1 decimal only when displaying.
 
-    - **Judge:** use **Status** and **Point-in-time traps** to decide testability and lookahead
-    risk.
+    6. **Do not invent causes.** If news does not explain a move, say "no news found".
 
-
-    Every field name below is real. It exists in the StockHarness workspace today, or it is marked
-    _(Layer 2, planned)_ with the collection that will provide it. **Reading Layer 1 collections
-    directly is normal.** The as_of reader applies each dataset's known-at rule (Part 1, rule 3);
-    use a Layer 2 collection only when one exists and adds something (e.g. `security_id` joins,
-    adjusted prices, restatement versions).
-
+    7. **Data gaps degrade the brief; they never cancel it.** Only the abort conditions in Part 8 stop a run.
 
     ---
 
+    ## Part 2. Dates and the session
 
-    ## Part 1. Rules that apply to every strategy
+    The harness clock is UTC. Convert it to New York time before anything else:
+    - From the second Sunday of March to the first Sunday of November: ET = UTC minus 4 hours.
+    - Otherwise: ET = UTC minus 5 hours.
 
+    Then call the market-hours tool for NYSE (and the holidays tool if available) and set the **session**:
 
-    1. **Read only through `ctx.read_df` (plugins) or `query_collection` (exploration).** Both
-    filter by `as_of` on the server. Never try to work around them.
+    | New York time when you run | Session | Mode |
+    |---|---|---|
+    | Trading day, after 16:00 | today (ET date) | END-OF-DAY |
+    | Trading day, before 09:30 | previous trading day | END-OF-DAY |
+    | Weekend or holiday | most recent trading day | END-OF-DAY |
+    | Trading day, 09:30 to 16:00 | today | INTRADAY SNAPSHOT |
 
-    2. **Join on `security_id`, never on the ticker.** Layer 1 rows carry `symbol`. Map them with
-    `securities.identifiers` (type `ticker`, using `valid_from`/`valid_to`), or use Layer 2
-    collections that already have `security_id`.
+    **INTRADAY SNAPSHOT mode:** quotes are live and there is no completed bar. Produce regime, movers, avoid and holdings sections, but issue **no new setups** and do not advance the tracker. Say so in the header.
 
-    3. **Use the moment the information became known, not the date of the event.**
+    Name everything by session date, never by the UTC date.
 
-       | Data                                                                                                             | Known at                                                                                                                                                          |
-       | ---------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-       | Daily prices (`prices_daily`)                                                                                    | close of `date` (16:00 ET); trade at the **next** close                                                                                                           |
-       | Statements (`income_statement`, `balance_sheet`, `cash_flow`)                                                    | `acceptedDate`. If `acceptedDate[:10] == date` (period end), the value is a placeholder (about 4% of rows): use period end + 45 days (Q1–Q3) or + 90 days (Q4/FY) |
-       | Annual metrics without `acceptedDate` (`key_metrics`, `ratios`, `enterprise_values`, `owner_earnings`, segments) | join to the matching `income_statement` row on (`symbol`, `date`) for its `acceptedDate`; otherwise period end + 90 days                                          |
-       | Earnings (`earnings_calendar`, legacy `earnings_surprises`)                                                      | report `date`; BMO/AMC timing is unknown, so react at the **next session close**                                                                                  |
-       | Dividends (`dividends_history`)                                                                                  | `declarationDate` (empty in about 11% of rows: then use the ex-date `date`, which is conservative)                                                                |
-       | Splits (`splits_history`, `corporate_actions`)                                                                   | the day before the ex-date (no announcement date)                                                                                                                 |
-       | Insider trades (`insider_trades`)                                                                                | `filingDate` (never `transactionDate`)                                                                                                                            |
-       | Congress (`congress_senate`, `congress_house`)                                                                   | `disclosureDate` (never `transactionDate`; the lag is often 30–45 days)                                                                                           |
-       | Analyst grades and price targets                                                                                 | `publishedDate`                                                                                                                                                   |
-       | Weekly snapshots (`analyst_estimates`, `grades_consensus`, `price_target_consensus`, `financial_scores`)         | `snapshot_date`                                                                                                                                                   |
-
-    4. **Never use "current-only" fields historically.** These hold today's value only and would
-    leak the future into a backtest:
-       - `company_profiles.*` (sector, industry, beta, marketCap, isActivelyTrading),
-       - `shares_float.*`, `price_target_summary.*`, `stock_peers.*`, `key_executives.*`, `market_cap.*`,
-       - `universe.*` (its `marketCap`),
-       - and `financial_scores`, except from its `snapshot_date` onward.
-    5. **Market cap history:** `historical_market_cap` only starts in July 2026. For backtests
-    compute `mcap = adj_close × weightedAverageShsOutDil`, using the latest `income_statement` known
-    at D.
-
-    6. **Recompute valuation with the price on D.** FMP's `ratios` and `key_metrics` valuation
-    fields (`priceToEarningsRatio`, `earningsYield`, `evToEBITDA`, …) use the price at period end.
-    Use their accounting inputs, but rebuild the ratios with `adj_close` on D.
-
-    7. **Universe:** use `universe_daily` _(Layer 2, planned)_ once it exists. Until then, include a
-    name on D if:
-       - it has a `prices_daily` row on D,
-       - `adj_close ≥ 5`,
-       - its 20-day mean `dollar_volume ≥ $5M`,
-       - and its computed `mcap ≥ $2B` (or whatever the theory states).
-
-       Delisted names are included up to their last bar. Delisted coverage is limited to about 100 names, so state the survivorship caveat.
-
-    8. **Sectors:** `securities.sector_history` currently holds a _backfilled current_ sector (see
-    H5). Sector-relative results are an approximation; say so.
-
-    9. **Units:** `prices_daily.ret_1d` and `tr_1d` are decimals. Layer 1 fields such as
-    `changePercent`, `changesPercentage`, `sector_performance.averageChange` and `dividends_*.yield`
-    are in **percent points**. Treasury yields (`ust_10y`, `year10`) are in percent.
-
-    10. **Costs are applied by the evaluator.** Never net them out yourself. Avoid signals that need
-    a turnover above about 20× a year unless the theory is about short-term effects.
-
-
-    ### Status labels
-
-
-    - **Backtestable now:** at least 5 years of point-in-time history exists today.
-
-    - **After M1 backfill:** the logic is ready, but history is too short until the Layer 1 backfill
-    (10y prices, 40q statements, earnings history) completes.
-
-    - **Forward-only:** FMP keeps no history (snapshot or feed data that started in Oct 2026). It
-    skips backtesting and is paper-tracked live (Layer 5). The Judge must tag it `forward_only`.
-
-    - **Blocked:** it needs data the current plan doesn't provide.
-
-
-    ### What history exists today (Nov 2026)
-
-
-    | Data                                                                                    |
-    History                                      |
-
-    | --------------------------------------------------------------------------------------- |
-    -------------------------------------------- |
-
-    | `prices_daily`, `eod_prices`, `eod_index`, `macro_daily`                                |
-    2021-10-25 onward (target: 2016+)            |
-
-    | `income_statement`, `balance_sheet`, `cash_flow` (quarterly)                            |
-    about 8 quarters per symbol (target: 40)     |
-
-    | `key_metrics`, `ratios`, `enterprise_values` (annual, FY)                               |
-    about 10 fiscal years                        |
-
-    | `dividends_history`                                                                     | back
-    to 1977                                 |
-
-    | `splits_history`, `corporate_actions`                                                   | full
-    history                                 |
-
-    | `earnings_surprises` (legacy)                                                           | long
-    history of `epsActual` / `epsEstimated` |
-
-    | `earnings_calendar`                                                                     |
-    rolling window only (backfill pending)       |
-
-    | `analyst_estimates`, `grades_consensus`, `price_target_consensus`, `financial_scores`   |
-    weekly since 2026-10-23                      |
-
-    | `insider_trades`, `congress_*`, `analyst_grades`, `price_target_changes`, `news_stocks` |
-    since 2026-10-22                             |
-
+    **Lookback dates** (no session counting needed):
+    - "4 weeks ago" = the same weekday 28 calendar days earlier. Example: session Wed 2026-09-30, so 4 weeks ago = Wed 2026-09-02.
+    - "2 weeks ago" = the same weekday 14 calendar days earlier.
+    - If that date has no data (holiday), use the closest earlier date that does.
 
     ---
 
+    ## Part 3. Run plan (fits a 10-iteration loop)
 
-    ## Part 2. Plugin template
+    Put independent calls in the same iteration whenever the harness allows parallel calls.
 
+    **If the harness allows only one call per iteration, this does not fit in 10 iterations.** Raise the loop limit to 20.
 
-    ```python
+    | Iteration | Calls | Purpose |
+    |---|---|---|
+    | 1 | Read the state note `stock-analyst-state`; NYSE market hours | Session, mode, yesterday's setups |
+    | 2 | batch-quote for the regime basket; quote `^VIX`; treasury-rates; SPY SMA50 indicator; stock-price-change for SPY, ^VIX and the 12 sector ETFs | Regime and sectors |
+    | 3 | batch-quote for every watchlist line in Part 9 | Stage 1 scan |
+    | 4 | No calls, or retries for missing symbols (max 5) | Write the Stage 1 work log |
+    | 5 | For each candidate and each tracked setup: RSI14 indicator and recent EOD bars | Stage 2 checks, tracker |
+    | 6 | earnings-calendar; stock news for candidates and movers (1 to 2 calls) | Events and context |
+    | 7 | Save the report note and update the state note | Persist |
+    | 8 | Final answer: the full report | Deliver |
+    | 9 to 10 | Spare | Retries only |
 
-    META = {"side": "long", "horizon_days": 40, "rebalance": "weekly", "top_n": 30}
+    **Budget guard:** if you reach iteration 7 without a report, write it immediately with whatever you have. Mark missing parts "not checked". A brief with partial context beats no brief.
 
+    **FMP calls used** (stable API; your tool names may differ slightly):
+    - `batch-quote?symbols=A,B,C` (up to 25 symbols per call)
+    - `quote?symbol=X`
+    - `treasury-rates?from=&to=`
+    - `technical-indicators/sma?symbol=SPY&periodLength=50&timeframe=1day`
+    - `technical-indicators/rsi?symbol=X&periodLength=14&timeframe=1day`
+    - `historical-price-eod/full?symbol=X&from=&to=`
+    - `stock-price-change?symbol=X`
+    - `earnings-calendar?from=&to=`
+    - `news/stock?symbols=A,B,C&limit=20`
+    - `exchange-market-hours?exchange=NYSE`
 
-    def universe(ctx):
-        # Preferred once it exists: ctx.read_df("universe_daily", {"date": ctx.date, "in_universe": True})
-        px = ctx.read_df("prices_daily", {"date": {"$gte": ctx.days_ago(30)}},
-                         columns=["security_id", "date", "adj_close", "dollar_volume"])
-        last = px[px.date == px.date.max()]
-        adv = px.groupby("security_id").dollar_volume.mean()
-        ok = last[(last.adj_close >= 5) & last.security_id.map(adv).ge(5e6)]
-        return ok.security_id.tolist()
+    ---
 
-    def signal(ctx):
-        # Return {security_id: score}; higher = more bullish. Only names to hold need a score.
-        ...
+    ## Part 4. Regime (iteration 2)
+
+    **Regime basket:** one batch-quote call for `SPY,QQQ,IWM,XLK,SMH,XLC,XLY,XLP,XLE,XLF,XLV,XLI,XLB,XLU,XLRE`. If `^VIX` is not accepted in a batch, quote it alone.
+
+    Read and record:
+
+    1. **SPY versus its averages.** Record SPY `price`, `priceAvg50` and `priceAvg200`. Write whether price is above or below each.
+
+    2. **SPY SMA50 slope.** From the SMA indicator, take the newest value and the value from 2 weeks ago. Rising if newest > older.
+
+    3. **VIX.** Record the level from the quote and the 5D change from stock-price-change.
+
+    4. **Rates.** Call treasury-rates from (session minus 35 days) to session.
+       - Record `year10` and `year2` on the session row.
+       - Record `year10` on the row from 4 weeks ago.
+       - 10Y change = session year10 minus 4-weeks-ago year10, written in basis points. Example: 5.29 - 4.79 = 0.50, so +50 bp.
+       - 2s10s = year10 minus year2, in bp.
+
+    5. **Sector participation.** Count how many of the 12 sector ETFs have price > priceAvg50. List them first, then count the list.
+
+    6. **Sector leadership.** From stock-price-change, record 1D, 5D and 1M for each sector ETF and SPY. Rank the 12 sectors by 1M return.
+       - Mark the top 4 as LEADING and the bottom 4 as LAGGING.
+       - If stock-price-change fails, rank by 1D from the quote and say "1M unavailable".
+
+    **Regime label:**
+
+    | Label | Rule | New-long size |
+    |---|---|---|
+    | RISK_OFF | SPY price < SPY priceAvg200, or VIX >= 30 | 0% (setups become WATCH) |
+    | RISK_ON | SPY price > priceAvg200, SMA50 rising, VIX < 22, and sector participation at least 6 of 12 | 100% |
+    | CAUTION | anything else | 50% |
+
+    **Flags** (each caps size at 50%):
+    - RATES_SHOCK: 10Y up 25 bp or more over 4 weeks.
+    - VIX_SPIKE: VIX 5D change of +25% or more.
+
+    **How to explain the regime:**
+    - **RATES_SHOCK** hits long-duration assets: Treasuries (TLT, IEF), covered-call and income ETFs, dividend ETFs, MLPs, REITs, utilities, and high-multiple growth.
+      - If the 2s10s spread widened with the 10Y leading, call it a bear steepener (term premium).
+      - If the 2Y is leading, point to Fed expectations.
+      - Rate-sensitive names cannot be setups during a rates shock.
+    - **RISK_OFF or VIX_SPIKE:** breakouts fail more often. Favor cash, tighter stops and smaller size.
+    - **Narrow market:** if participation is 5 of 12 or fewer while SPY is above its SMA50, say leadership is narrow and prefer setups in LEADING sectors.
+
+    ---
+
+    ## Part 5. Stage 1 scan: every watchlist symbol (iterations 3 to 4)
+
+    Send each line of Part 9 as one batch-quote call. Lines may be combined, as long as each call has 25 symbols or fewer.
+
+    For every returned symbol, apply these tests. **Only comparisons, plus the two marked multiplications.**
+
+    | Tag | Test |
+    |---|---|
+    | UP | price > priceAvg50 **and** priceAvg50 > priceAvg200 |
+    | DOWN | price < priceAvg50 **and** priceAvg50 < priceAvg200 |
+    | MIXED | neither UP nor DOWN |
+    | NEW_HIGH | dayHigh >= yearHigh (made a 52-week high this session) |
+    | NEW_LOW | dayLow <= yearLow |
+    | LOST_50 | previousClose > priceAvg50 **and** price < priceAvg50 |
+    | LOST_200 | previousClose > priceAvg200 **and** price < priceAvg200 |
+    | RECLAIM_50 | previousClose < priceAvg50 **and** price > priceAvg50 |
+    | MOVER | absolute changePercentage >= 4 (stocks) or >= 2 (ETFs) |
+    | EXTENDED | UP names only: price > 1.15 x priceAvg50 (show the calculation) |
+    | PULLBACK_ZONE | priceAvg50 > priceAvg200 **and** price > priceAvg200 **and** price <= 1.03 x priceAvg50 (show the calculation) |
+
+    **Work log format.** Write one block per line of Part 9. List only the tags that apply; do not write a row for every symbol.
+
+    ```
+    Line SEMIS (22 sent, 22 returned, missing: none)
+    UP: NVDA, AVGO, TSM, ...
+    DOWN: INTC
+    NEW_HIGH: AVGO
+    MOVER: AXTI +7.2%, INTC -4.5%
+    EXTENDED: AVGO 1.15 x 301.20 = 346.38 < 352.10
+    PULLBACK_ZONE: MU 1.03 x 1012.00 = 1042.36 >= 1031.50
+    LOST_50: none
     ```
 
+    **Missing symbols.** A symbol in the line that is absent from the response is "missing".
+    - Retry up to 5 missing symbols individually with `quote?symbol=`, and classify each by the error:
+      - "premium", "subscription" or "not available under your plan": **gated**;
+      - empty result: **not found**;
+      - anything else: **failed**.
 
-    - `ctx.date` is the rebalance date. `ctx.days_ago(n)` gives calendar days back, and
-    `ctx.trading_days_ago(n)` trading days back.
+    **Stage 1 ratings for every returned symbol:**
 
-    - Return scores, not weights. The evaluator builds the portfolio from `META` (`top_n`, `side`).
+    | Rating | Rule | Language |
+    |---|---|---|
+    | AVOID | DOWN, or NEW_LOW, or LOST_200, or (LOST_50 and changePercentage <= -3) | "No new longs; review if held" |
+    | EXTENDED | EXTENDED tag | "Do not chase; trim into strength if overweight" |
+    | TRENDING | UP and not EXTENDED | "Hold; add only on a setup" |
+    | NEUTRAL | everything else | omit unless relevant |
 
-    - For long/short, return positive and negative scores, and set `side: "long_short"`.
+    Stage 2 can change TRENDING or NEUTRAL to SETUP or WATCH.
 
-    - Keep `signal` deterministic. No randomness, no network, no file IO.
+    **Candidates for Stage 2.** Role must be `trade`. Maximum 12; take them in this order:
+    1. **BREAKOUT candidates:** UP and NEW_HIGH, with changePercentage > 0 and <= 6.
+    2. **PULLBACK candidates:** PULLBACK_ZONE and not AVOID. Take those in LEADING sectors first (sector ETF per Part 9).
+    3. **OVERSOLD candidates:** price > priceAvg200, price < priceAvg50, and changePercentage <= -3.
 
+    Also include every PENDING or OPEN setup from the state note. These do not count toward the 12.
 
     ---
 
+    ## Part 6. Coverage (no long counting)
 
-    ## Part 3. Strategy cards
+    - **In-scope** is the fixed number in Part 9. Do not recount it.
+    - **Missing count:** count only the short list of symbols missing after retries.
+    - **Fresh** = in-scope minus missing count. Show it: `Fresh = 57 - 2 = 55`.
+    - **Coverage** = fresh divided by in-scope, as a percent with 1 decimal.
 
-
-    Card IDs S01–S42 match the strategy-ideas table in `PRODUCT.md` §7.
-
-
-    ### Momentum and trend
-
-
-    #### S01 · 12-1 momentum
-
-
-    - **How it works:** investors under-react to news, so prices trend over 3–12 months. Skipping
-    the most recent month avoids the short-term reversal.
-
-    - **Signal:** `mom_12_1 = adj_close[t−21] / adj_close[t−252] − 1`. Long the top decile;
-    long/short top versus bottom.
-
-    - **Data:** `prices_daily.adj_close` (or `tr_1d` compounded) · _(Layer 2, planned)_
-    `features_daily.mom_12_1`.
-
-    - **Defaults:** monthly rebalance, horizon 21–63 days, `top_n` 30–50, equal weight.
-
-    - **Explore:** a 6-1 lookback, industry-neutral ranking, volatility scaling, excluding names
-    within 5 days of earnings.
-
-    - **Traps:** momentum crashes after sharp market rebounds (2009, Nov 2020, 2022). Report the
-    drawdown, don't hide it. Needs 252 bars before the first signal.
-
-    - **Status:** backtestable now (from 2022); 10y after M1.
-
-
-    #### S02 · 52-week-high proximity
-
-
-    - **How it works:** investors anchor on the 52-week high and under-react to good news near it.
-
-    - **Signal:** `pct_from_52w_high = adj_close[t] / max(adj_high[t−251..t]) − 1`. Long the names
-    closest to 0 (e.g. above −5%).
-
-    - **Data:** `prices_daily.adj_close`, `adj_high` · _(planned)_
-    `features_daily.pct_from_52w_high`.
-
-    - **Defaults:** weekly rebalance, horizon 63–126 days, `top_n` 30.
-
-    - **Explore:** combine with S13 quality, require volume confirmation (`dollar_volume` above its
-    50-day mean), exclude 52-week-high breakouts on earnings day.
-
-    - **Traps:** use adjusted highs, because raw highs break across splits.
-
-    - **Status:** backtestable now.
-
-
-    #### S03 · Industry momentum
-
-
-    - **How it works:** industry-wide news diffuses slowly, so the strongest industries keep
-    leading.
-
-    - **Signal:** the equal-weighted 6-month return per industry; long the stocks of the top 3
-    industries and short the bottom 3.
-
-    - **Data:** `prices_daily.tr_1d` and `securities.industry_history` (backfilled current industry,
-    H5 caveat) · _(planned)_ `features_daily.industry_mom_6m`.
-
-    - **Defaults:** monthly rebalance, horizon 21–63 days, at least 5 names per industry.
-
-    - **Explore:** sector rather than industry level (`sector_history`), 3-month and 12-month
-    lookbacks, value-weighting.
-
-    - **Traps:** industry labels are current, not point-in-time. A name that changed industry is
-    misplaced historically. Note it as a caveat.
-
-    - **Status:** backtestable now (with the caveat).
-
-
-    #### S04 · Residual momentum
-
-
-    - **How it works:** momentum measured after removing market and sector moves is more persistent
-    and crashes less.
-
-    - **Signal:** regress 36 months of monthly returns on SPX (`macro_daily.spx_ret_1d` compounded)
-    plus the sector average. The score is the sum of residuals over months t−12..t−2, divided by the
-    residual standard deviation.
-
-    - **Data:** `prices_daily.tr_1d`, `macro_daily.spx_ret_1d`, `securities.sector_history`.
-
-    - **Defaults:** monthly rebalance, horizon 21–63 days, long/short deciles.
-
-    - **Explore:** a 24-month regression window, daily residuals, combining with S01.
-
-    - **Traps:** needs at least 36 months of history before the first signal, so it's short until
-    the M1 backfill.
-
-    - **Status:** after M1 backfill (needs ≥ 3y of warm-up).
-
-
-    #### S05 · Trend filter
-
-
-    - **How it works:** absolute trend following. Hold only names in an uptrend, and reduce exposure
-    when the market is below trend.
-
-    - **Signal:** long if `adj_close > SMA200(adj_close)`. Gross exposure is 100% when
-    `macro_daily.spx_close > SMA200(spx_close)`, else 50%. The score is `adj_close / SMA200 − 1`.
-
-    - **Data:** `prices_daily.adj_close`, `macro_daily.spx_close` · _(planned)_
-    `features_daily.above_sma200`, `regime_daily.trend_regime`.
-
-    - **Defaults:** weekly rebalance, horizon 5 days (rolling), `top_n` 30–50.
-
-    - **Explore:** a 100-day or 150-day average, a market filter on breadth (% of names above their
-    50-day) instead of SPX.
-
-    - **Traps:** whipsaws in flat markets. Report turnover.
-
-    - **Status:** backtestable now.
-
-
-    ### Reversal
-
-
-    #### S06 · Short-term reversal
-
-
-    - **How it works:** liquidity-driven overreactions in liquid large caps partly reverse within
-    1–2 weeks.
-
-    - **Signal:** `ret_1w = adj_close[t]/adj_close[t−5] − 1`. Long the worst decile among names with
-    `mcap ≥ $10B`. Exclude names with an earnings report or `news_stocks` item in the window,
-    because news-driven moves don't revert.
-
-    - **Data:** `prices_daily.adj_close`, `dollar_volume`; `earnings_calendar.date` (or legacy
-    `earnings_surprises.date`) for the exclusion.
-
-    - **Defaults:** weekly rebalance, horizon 5–10 days, `top_n` 20–30.
-
-    - **Explore:** a 1-month reversal, scaling by volatility, excluding the bottom 1% (likely
-    distress).
-
-    - **Traps:** this is a high-turnover strategy, so costs dominate. The evaluator's cost model
-    decides whether it survives. The news exclusion is forward-only before Oct 2026.
-
-    - **Status:** backtestable now (without the news filter).
-
-
-    #### S07 · Long-term reversal
-
-
-    - **How it works:** 3–5 year losers are oversold relative to fundamentals and partly
-    mean-revert.
-
-    - **Signal:** `ret_36_12 = adj_close[t−252]/adj_close[t−1008] − 1`. Long the bottom decile,
-    excluding names with `altman_z < 1.8` (see S16).
-
-    - **Data:** `prices_daily.adj_close`; statements for the distress screen.
-
-    - **Defaults:** annual rebalance, horizon 252 days.
-
-    - **Explore:** combine with S10 value, use a 5-year lookback.
-
-    - **Traps:** needs at least 4 years of warm-up plus the test window, so 10 years of prices are
-    required.
-
-    - **Status:** after M1 backfill.
-
-
-    ### Low risk
-
-
-    #### S08 · Low volatility
-
-
-    - **How it works:** investors overpay for "lottery" stocks, so low-volatility names deliver
-    similar returns with less risk.
-
-    - **Signal:** `vol_60d = std(tr_1d over 60 days) × √252`. Long the lowest-volatility quintile.
-
-    - **Data:** `prices_daily.tr_1d` · _(planned)_ `features_daily.vol_60d`.
-
-    - **Defaults:** monthly rebalance, horizon 21–63 days, `top_n` 50.
-
-    - **Explore:** 252-day volatility, sector-neutral ranking, combining with quality.
-
-    - **Traps:** a big tilt toward utilities and staples, and sensitivity to rates. The Judge should
-    check sector concentration and correlation with `ust_10y`.
-
-    - **Status:** backtestable now.
-
-
-    #### S09 · Betting against beta
-
-
-    - **How it works:** leverage-constrained investors bid up high-beta names, so low beta wins on a
-    risk-adjusted basis.
-
-    - **Signal:** `beta_252d = cov(tr_1d, spx_ret_1d) / var(spx_ret_1d)` over 252 days. Long the
-    low-beta quintile and short the high-beta quintile, each scaled to beta 1.
-
-    - **Data:** `prices_daily.tr_1d`, `macro_daily.spx_ret_1d` · _(planned)_
-    `features_daily.beta_252d`.
-
-    - **Defaults:** monthly rebalance, horizon 21 days.
-
-    - **Explore:** shrink beta toward 1 (Vasicek), use weekly returns.
-
-    - **Traps:** never use `company_profiles.beta`, which is current-only. The short leg needs
-    borrow data (M8.05); until then test it long-only.
-
-    - **Status:** backtestable now (long-only, or long/short with the caveat).
-
-
-    ### Value
-
-
-    #### S10 · Earnings yield
-
-
-    - **How it works:** cheap stocks relative to earnings outperform over time, as compensation for
-    risk or because of mispricing.
-
-    - **Signal:** `earnings_yield = TTM netIncome / mcap`, where TTM is the sum of the last 4
-    quarterly `income_statement.netIncome` values known at D, and `mcap = adj_close ×
-    weightedAverageShsOutDil`. Rank within sector; long the top quintile, excluding negative
-    earnings.
-
-    - **Data:** `income_statement.netIncome`, `weightedAverageShsOutDil`, `acceptedDate`;
-    `prices_daily.adj_close` · _(planned)_ `fundamentals_pit`, `features_daily.earnings_yield_ttm`.
-
-    - **Defaults:** monthly rebalance, horizon 126–252 days.
-
-    - **Explore:** use annual `key_metrics` for a longer history today (its `netIncomePerShare` and
-    similar, lagged), normalized earnings (a 3-year average), excluding financials.
-
-    - **Traps:** use `acceptedDate` and the lag rule. Convert to USD when `reportedCurrency ≠ USD`.
-    Only 8 quarters today means TTM history is about 1 year; use the annual path or wait for M1.
-
-    - **Status:** after M1 backfill (quarterly); backtestable now on annual data with a 90-day lag.
-
-
-    #### S11 · Free-cash-flow yield
-
-
-    - **How it works:** cash earnings are harder to manipulate than accounting earnings, and high
-    FCF yield predicts returns.
-
-    - **Signal:** `fcf_yield = TTM cash_flow.freeCashFlow / EV`, where `EV = mcap +
-    balance_sheet.totalDebt − balance_sheet.cashAndCashEquivalents`. Long the top quintile with FCF
-    above 0 for 4 of 4 quarters.
-
-    - **Data:** `cash_flow.freeCashFlow` (or `operatingCashFlow + capitalExpenditure`, since capex
-    is negative), `balance_sheet.totalDebt`, `cashAndCashEquivalents`, `acceptedDate`;
-    `prices_daily.adj_close`; `income_statement.weightedAverageShsOutDil`.
-
-    - **Defaults:** monthly rebalance, horizon 126–252 days.
-
-    - **Explore:** subtract `stockBasedCompensation` from FCF (a stricter version), check FCF
-    stability with the standard deviation over 8 quarters.
-
-    - **Traps:** don't use `enterprise_values.enterpriseValue`, which is annual and priced at period
-    end. Recompute EV on D.
-
-    - **Status:** after M1 backfill.
-
-
-    #### S12 · Sector-relative EV/EBITDA
-
-
-    - **How it works:** a value measure that ignores capital structure. The cheapest names within
-    each sector beat the most expensive.
-
-    - **Signal:** `ev_ebitda = EV / TTM income_statement.ebitda` (positive EBITDA only). Rank within
-    sector (`securities.sector_history`); long the cheapest third and short the most expensive
-    third.
-
-    - **Data:** `income_statement.ebitda`, `balance_sheet.totalDebt`, `cashAndCashEquivalents`,
-    `prices_daily.adj_close`.
-
-    - **Defaults:** monthly rebalance, horizon 126 days, at least 8 names per sector.
-
-    - **Explore:** EV/sales for unprofitable sectors, a combination with S13 to avoid value traps.
-
-    - **Traps:** exclude Financial Services, where EBITDA isn't meaningful. The sector caveat (H5)
-    applies.
-
-    - **Status:** after M1 backfill.
-
-
-    ### Quality and investment
-
-
-    #### S13 · Gross profitability
-
-
-    - **How it works:** gross profit relative to assets is a clean measure of economic productivity
-    and predicts returns as strongly as value does.
-
-    - **Signal:** `gp_assets = TTM income_statement.grossProfit / balance_sheet.totalAssets` (latest
-    known). Long the top quintile.
-
-    - **Data:** `income_statement.grossProfit`, `balance_sheet.totalAssets`, `acceptedDate` ·
-    _(planned)_ `features_daily.gross_profitability`.
-
-    - **Defaults:** monthly rebalance, horizon 252 days.
-
-    - **Explore:** combine with S10 (quality at a reasonable price), use operating profitability
-    (`operatingIncome / totalAssets`).
-
-    - **Traps:** banks and insurers report `grossProfit = 0` or something not comparable, so exclude
-    them.
-
-    - **Status:** after M1 backfill; backtestable now on annual `ratios.grossProfitMargin` ×
-    `ratios.assetTurnover` with a lag.
-
-
-    #### S14 · Piotroski F-score
-
-
-    - **How it works:** nine accounting signals separate improving cheap firms from deteriorating
-    ones.
-
-    - **Signal:** **recompute** the F-score at D from statements. Don't use
-    `financial_scores.piotroskiScore` historically, because it's snapshot-only. The nine points:
-      - ROA > 0
-      - CFO > 0
-      - ΔROA > 0
-      - CFO > net income
-      - Δleverage < 0
-      - Δcurrent ratio > 0
-      - no new shares issued
-      - Δgross margin > 0
-      - Δasset turnover > 0
-
-      Long F ≥ 8 within the cheapest 30% (S10); short F ≤ 2.
-
-    - **Data:**
-      - `income_statement`: `netIncome`, `revenue`, `grossProfit`, `weightedAverageShsOut`,
-      - `balance_sheet`: `totalAssets`, `longTermDebt`, `totalCurrentAssets`, `totalCurrentLiabilities`,
-      - `cash_flow`: `operatingCashFlow`,
-      - all compared year over year, known at D.
-    - **Defaults:** quarterly rebalance, horizon 252 days.
-
-    - **Explore:** apply it to S07 losers, or use it as a filter on S21.
-
-    - **Traps:** the year-over-year comparisons need 8 quarters per point, so they're short today.
-    `financial_scores` is usable only from 2026-10-23 onward (forward).
-
-    - **Status:** after M1 backfill (forward-only if using `financial_scores`).
-
-
-    #### S15 · Low accruals
-
-
-    - **How it works:** earnings made of accruals (not cash) mean-revert, so low-accrual firms
-    outperform.
-
-    - **Signal:** `accruals = (TTM netIncome − TTM operatingCashFlow) / average totalAssets`. Long
-    the lowest quintile.
-
-    - **Data:** `income_statement.netIncome`, `cash_flow.operatingCashFlow`,
-    `balance_sheet.totalAssets`.
-
-    - **Defaults:** quarterly rebalance, horizon 252 days.
-
-    - **Explore:** add `stockBasedCompensation` back, use a sector-neutral version.
-
-    - **Status:** after M1 backfill.
-
-
-    #### S16 · Distress avoidance (Altman Z)
-
-
-    - **How it works:** distressed firms earn low returns (the "distress anomaly"). Avoiding or
-    shorting them adds return.
-
-    - **Signal:** recompute Altman Z at D as `1.2·WC/TA + 1.4·RE/TA + 3.3·EBIT/TA + 0.6·mcap/TL +
-    1.0·Sales/TA`, with:
-      - WC from `totalCurrentAssets − totalCurrentLiabilities`,
-      - RE from `retainedEarnings`,
-      - EBIT from TTM `ebit`,
-      - TL from `totalLiabilities`,
-      - Sales from TTM `revenue`.
-
-      Short (or exclude) Z < 1.8.
-
-    - **Data:** `balance_sheet` and `income_statement` fields as listed; `prices_daily.adj_close`
-    for mcap.
-
-    - **Defaults:** monthly rebalance, horizon 126 days; works best as a **filter** for other
-    strategies.
-
-    - **Traps:** shorting needs borrow data (M8.05), and distressed names are often hard to borrow.
-    Delisting returns matter here, and survivorship is limited (about 100 delisted names), which
-    understates the effect.
-
-    - **Status:** after M1 backfill (best used as a filter).
-
-
-    #### S17 · Asset growth
-
-
-    - **How it works:** firms that expand assets fastest (empire building, acquisitions)
-    subsequently underperform.
-
-    - **Signal:** `asset_growth = totalAssets[t] / totalAssets[t−4q] − 1`. Long the lowest quintile,
-    short the highest.
-
-    - **Data:** `balance_sheet.totalAssets` (quarterly), or annual `financial_growth.assetGrowth`,
-    joined for `acceptedDate`.
-
-    - **Defaults:** annual rebalance (July), horizon 252 days.
-
-    - **Status:** after M1 backfill; backtestable now on annual data with a lag.
-
-
-    ### Capital actions
-
-
-    #### S18 · Net share buybacks
-
-
-    - **How it works:** managers buy back undervalued shares and issue overvalued ones, so a
-    shrinking share count predicts outperformance.
-
-    - **Signal:** `net_issuance = weightedAverageShsOutDil[t] / weightedAverageShsOutDil[t−4q] − 1`.
-    Long the most negative quintile (buybacks), short the most positive.
-
-    - **Data:** `income_statement.weightedAverageShsOutDil`; for confirmation,
-    `cash_flow.commonStockRepurchased`, `commonStockIssuance`.
-
-    - **Defaults:** quarterly rebalance, horizon 252 days.
-
-    - **Explore:** buybacks combined with S11 FCF yield (funded buybacks only).
-
-    - **Traps:** splits change share counts. Adjust with `corporate_actions` (`split_ratio`) before
-    comparing.
-
-    - **Status:** after M1 backfill.
-
-
-    #### S19 · Dividend initiation or increase
-
-
-    - **How it works:** a dividend initiation or raise signals management's confidence. Prices drift
-    upward afterwards.
-
-    - **Signal:** the event is a `dividends_history` row whose `dividend` is above 1.1 × the prior
-    regular dividend of the same `frequency`, or is the first dividend. Enter at the close after the
-    known date (`declarationDate`, or the ex-date `date` if empty).
-
-    - **Data:** `dividends_history`: `date`, `declarationDate`, `dividend`, `adjDividend`,
-    `frequency`; `corporate_actions` (`cash_dividend`, `special_dividend`); `prices_daily`.
-
-    - **Defaults:** event-driven daily rebalance, horizon 63–126 days, holding every event.
-
-    - **Explore:** larger increases, initiations only, a combination with S13 quality, excluding
-    `special_dividend`.
-
-    - **Traps:** compare using `adjDividend` (split-adjusted). Treat `frequency = "Irregular"`
-    separately.
-
-    - **Status:** backtestable now (dividend history back to 1977; price history is the binding
-    constraint).
-
-
-    #### S20 · Post-split drift
-
-
-    - **How it works:** forward splits follow strong performance and signal confidence, and prices
-    drift up after the ex-date.
-
-    - **Signal:** the event is `corporate_actions.action_type == "split"` with `split_ratio > 1`.
-    Enter the close after `ex_date`.
-
-    - **Data:** `corporate_actions`: `ex_date`, `split_ratio`, `known_at`; `prices_daily`.
-
-    - **Defaults:** event-driven, horizon 63–252 days.
-
-    - **Traps:** there's no announcement date, so the effect at announcement can't be captured, only
-    the drift after the ex-date. Exclude reverse splits (`split_ratio < 1`), which are often
-    distress.
-
-    - **Status:** backtestable now.
-
-
-    ### Growth
-
-
-    #### S21 · Revenue acceleration
-
-
-    - **How it works:** the market extrapolates past growth, so _accelerating_ growth surprises it.
-
-    - **Signal:** `rev_growth_yoy = revenue[q] / revenue[q−4] − 1`; `rev_accel = rev_growth_yoy[q] −
-    rev_growth_yoy[q−1]`. Long the top quintile of `rev_accel` with `rev_growth_yoy > 0` and a gross
-    margin that isn't falling.
-
-    - **Data:** `income_statement.revenue`, `grossProfit`, `acceptedDate` · _(planned)_
-    `features_daily.rev_growth_yoy`, `rev_accel`.
-
-    - **Defaults:** monthly rebalance, horizon 63–252 days.
-
-    - **Explore:** require two consecutive accelerating quarters, combine with S24 (a positive
-    surprise on the same report).
-
-    - **Traps:** needs 6 quarters to compute two growth rates, so it's short today.
-
-    - **Status:** after M1 backfill.
-
-
-    #### S22 · Margin expansion
-
-
-    - **How it works:** a rising gross or operating margin signals pricing power or operating
-    leverage that analysts under-estimate.
-
-    - **Signal:** `gm = grossProfit / revenue`; the score is `gm[q] − gm[q−4]`. Long the top
-    quintile with `rev_growth_yoy > 0`.
-
-    - **Data:** `income_statement.grossProfit`, `revenue`, `operatingIncome`.
-
-    - **Defaults:** monthly rebalance, horizon 126 days.
-
-    - **Status:** after M1 backfill.
-
-
-    #### S23 · Segment concentration shift
-
-
-    - **How it works:** when a fast-growing segment becomes a larger share of revenue, the company's
-    growth profile and multiple re-rate.
-
-    - **Signal:** from `revenue_product_segmentation.data` (a map of segment to revenue): find the
-    segment with the highest YoY growth. The score is the change in its share of total revenue.
-
-    - **Data:** `revenue_product_segmentation`: `symbol`, `date`, `fiscalYear`, `period`, `data{}`;
-    known at the matching `income_statement.acceptedDate`, or period end + 90 days · _(planned)_
-    `revenue_segments_pit`.
-
-    - **Defaults:** quarterly rebalance, horizon 252 days.
-
-    - **Traps:** segment names change between filings, so match them fuzzily and only count segments
-    present in both periods. Coverage is partial.
-
-    - **Status:** backtestable now on annual (FY) rows with a lag; coverage-limited.
-
-
-    ### Earnings
-
-
-    #### S24 · Post-earnings drift (PEAD)
-
-
-    - **How it works:** prices under-react to earnings surprises and keep drifting in the surprise's
-    direction for about 60 days.
-
-    - **Signal:** `SUE = (epsActual − epsEstimated) / std(epsActual − epsEstimated over the prior 8
-    reports)`. Long SUE > 2, short SUE < −2. Enter at the **next session close** after the report
-    `date`.
-
-    - **Data:** for backtests, legacy `earnings_surprises` (`symbol`, `date`, `epsActual`,
-    `epsEstimated`; long history) until `earnings_calendar` is backfilled; live, `earnings_calendar`
-    (the same fields plus `revenueActual`, `revenueEstimated`) · _(planned)_ `earnings_events.sue`,
-    `reaction_date`, `announce_timing`.
-
-    - **Defaults:** daily event-driven rebalance, horizon 40–60 trading days.
-
-    - **Explore:** a revenue surprise as confirmation, profitability or mid-cap filters, excluding
-    the first 2 days.
-
-    - **Traps:**
-      - Skip rows with a null `epsEstimated`.
-      - Timing is unknown (BMO/AMC), so entering at the next close is conservative and required.
-      - Don't use `date` itself as the entry day.
-      - Exact timing arrives in M8.01.
-    - **Status:** backtestable now (via `earnings_surprises` plus 5y of prices).
-
-
-    #### S25 · Surprise streaks
-
-
-    - **How it works:** firms that beat repeatedly tend to keep beating, partly by managing
-    guidance, and drift after each beat.
-
-    - **Signal:** `sue_streak` = the number of consecutive reports with `epsActual > epsEstimated`.
-    Long names with a streak ≥ 3 after a new beat.
-
-    - **Data:** `earnings_surprises` / `earnings_calendar`: `epsActual`, `epsEstimated`, `date`.
-
-    - **Defaults:** event-driven, horizon 40 days.
-
-    - **Status:** backtestable now.
-
-
-    #### S26 · Pre-earnings run-up
-
-
-    - **How it works:** attention and positioning lift high-attention names into their report dates.
-
-    - **Signal:** names with a report date 5–10 trading days ahead whose `dollar_volume` is rising.
-    Exit the day before the report.
-
-    - **Data:** `earnings_calendar.date` (scheduled; history needs a backfill or
-    `earnings_surprises.date` as the realized schedule), `prices_daily.dollar_volume`.
-
-    - **Defaults:** daily rebalance, horizon 5–10 days.
-
-    - **Traps:** a report date is only known in advance if it was scheduled. Using realized dates
-    from `earnings_surprises` assumes the schedule was known about 2 weeks ahead, which is true for
-    most large caps. State this caveat.
-
-    - **Status:** backtestable now (with the caveat).
-
-
-    ### Estimates and analysts (mostly forward-only)
-
-
-    #### S27 · EPS revision momentum
-
-
-    - **How it works:** analysts revise slowly. Upward consensus revisions predict further revisions
-    and returns.
-
-    - **Signal:** `eps_rev_4w = epsAvg[snapshot_date = t] / epsAvg[snapshot_date ≈ t−4w] − 1` for
-    the next fiscal year (the earliest `date` > D). Long the top quintile with `numAnalystsEps ≥ 3`.
-
-    - **Data:** `analyst_estimates`: `symbol`, `date` (fiscal year end), `snapshot_date`, `epsAvg`,
-    `revenueAvg`, `numAnalystsEps` · _(planned)_ `estimates_snapshots.eps_rev_4w`.
-
-    - **Defaults:** weekly rebalance, horizon 21–63 days.
-
-    - **Traps:** snapshots exist only since 2026-10-23, so it's **forward-only**. A proxy can be
-    backtested: the count of net upgrades from history (S30), once grade history exists.
-
-    - **Status:** forward-only.
-
-
-    #### S28 · Estimate dispersion
-
-
-    - **How it works:** high analyst disagreement combined with short-sale constraints leads to
-    overpricing and later underperformance.
-
-    - **Signal:** `dispersion = (epsHigh − epsLow) / |epsAvg|`. Avoid or short the top quintile.
-
-    - **Data:** `analyst_estimates.epsHigh`, `epsLow`, `epsAvg`, `snapshot_date`.
-
-    - **Status:** forward-only (best used as a filter).
-
-
-    #### S29 · Price-target upside
-
-
-    - **How it works:** large and _rising_ consensus price-target upside reflects analysts' private
-    information, especially in quality names.
-
-    - **Signal:** `pt_upside = targetConsensus / adj_close − 1`; `pt_change_4w` = the change in
-    `targetConsensus` across snapshots. Long a high upside **and** a rising target, filtered by S13.
-
-    - **Data:** `price_target_consensus`: `targetConsensus`, `targetHigh`, `targetLow`,
-    `targetMedian`, `snapshot_date`; `prices_daily.adj_close`.
-
-    - **Traps:** a high upside alone is a value trap. Require the change to be rising. Don't use
-    `price_target_summary` historically (current-only).
-
-    - **Status:** forward-only.
-
-
-    #### S30 · Upgrade drift
-
-
-    - **How it works:** upgrades by influential firms move prices, followed by a drift.
-
-    - **Signal:** an `analyst_grades` row with `action == "upgrade"`, or `"initialise"` with a
-    buy-type `newGrade`. Normalize grades to −2…+2 (Strong Sell … Strong Buy), score by the change
-    from `previousGrade` to `newGrade`, and enter at the close after `publishedDate`.
-
-    - **Data:** `analyst_grades`: `symbol`, `publishedDate`, `gradingCompany`, `previousGrade`,
-    `newGrade`, `action`, `priceWhenPosted`; also `price_target_changes` (`priceTarget`,
-    `priceWhenPosted`, `analystCompany`) · _(planned)_ `analyst_events`.
-
-    - **Defaults:** event-driven, horizon 21–42 days.
-
-    - **Traps:** these are feeds holding only the latest items, so history starts 2026-10-22.
-    Backtesting needs a per-symbol historical grades dataset (not yet in the catalog).
-
-    - **Status:** forward-only.
-
-
-    ### Insiders and Congress (forward-only until feed history builds)
-
-
-    #### S31 · Insider cluster buys
-
-
-    - **How it works:** insiders know their company. Several of them buying on the open market at
-    once is one of the strongest insider signals, especially after a drawdown.
-
-    - **Signal:** within 30 days, at least 3 distinct `reportingCik` with `transactionType ==
-    "P-Purchase"` and `acquisitionOrDisposition == "A"`. The score is the total
-    `securitiesTransacted × price`. Optionally require `adj_close` to be 20% or more below the
-    52-week high. Enter at the close after the last `filingDate`.
-
-    - **Data:** `insider_trades`: `symbol`, `filingDate`, `transactionDate`, `transactionType`,
-    `acquisitionOrDisposition`, `securitiesTransacted`, `price`, `reportingCik`, `typeOfOwner`,
-    `directOrIndirect`, `securitiesOwned` · _(planned)_ `insider_trades_pit`.
-
-    - **Defaults:** event-driven, horizon 63–126 days.
-
-    - **Traps:**
-      - Only `P-Purchase` is an open-market buy. `A-Award`, `M-Exempt`, `F-InKind`, `G-Gift`, `X-InTheMoney` and `C-Conversion` are not signals.
-      - Use `filingDate`, never `transactionDate`.
-      - The feed history starts 2026-10-22.
-    - **Status:** forward-only.
-
-
-    #### S32 · CEO/CFO purchases
-
-
-    - **How it works:** purchases by top executives are the most informative insider trades.
-
-    - **Signal:** `P-Purchase` where `typeOfOwner` contains "Chief Executive" or "Chief Financial"
-    (or CEO/CFO), with a value of $100k or more and a holdings increase (`securitiesTransacted /
-    securitiesOwned`) of 10% or more.
-
-    - **Data:** `insider_trades` fields as in S31.
-
-    - **Defaults:** event-driven, horizon 126 days.
-
-    - **Status:** forward-only.
-
-
-    #### S33 · Congressional buys
-
-
-    - **How it works:** members of Congress may trade on policy information. Net purchases have been
-    followed by outperformance, although the disclosure lag reduces it.
-
-    - **Signal:** within 60 days of `disclosureDate`, net buys = the count of `type == "Purchase"`
-    minus `type` starting with "Sale". Weight by the midpoint of the `amount` range, e.g. "$15,001 -
-    $50,000" → 32,500.
-
-    - **Data:** `congress_senate` and `congress_house`: `symbol`, `disclosureDate`,
-    `transactionDate`, `type`, `amount`, `owner`, `office`, `assetType` (Stock only) · _(planned)_
-    `congress_trades`.
-
-    - **Defaults:** weekly rebalance, horizon 63–126 days.
-
-    - **Traps:** use `disclosureDate` only. `symbol` can be an ADR or bond, so check `assetType`.
-    Feed history starts 2026-10-22.
-
-    - **Status:** forward-only.
-
-
-    ### Ownership and index (blocked)
-
-
-    #### S34 · 13F crowding / new positions
-
-
-    - **How it works:** high-conviction new positions by skilled institutions, and rising
-    institutional ownership, predict returns.
-
-    - **Signal:** the change in the number of 13F holders and in shares held, quarter over quarter.
-    Long the top decile of new money from top-performing filers.
-
-    - **Data:** _(planned, M8.02)_ `holdings_13f`, `filers_13f`. `known_at` = the 13F filing date
-    (up to 45 days after quarter end).
-
-    - **Status:** blocked until M8.02.
-
-
-    #### S35 · Index addition
-
-
-    - **How it works:** names added to the S&P 500 see forced buying, and predicting additions
-    captures part of that.
-
-    - **Signal:** rank eligible non-members by market cap, profitability (4 positive quarters of
-    GAAP earnings) and liquidity.
-
-    - **Data:** _(planned, M8.04)_ `index_membership`. Constituents return 402 on the current plan.
-
-    - **Status:** blocked.
-
-
-    ### Size, liquidity, macro and seasonality
-
-
-    #### S36 · Illiquidity premium
-
-
-    - **How it works:** less-liquid stocks pay a premium to compensate holders, and it survives
-    costs only for quality names with moderate turnover.
-
-    - **Signal:** `amihud = mean(|tr_1d| / dollar_volume)` over 60 days. Long the high-illiquidity
-    quintile within `mcap ≥ $2B`, filtered by S13.
-
-    - **Data:** `prices_daily.tr_1d`, `dollar_volume`.
-
-    - **Defaults:** quarterly rebalance, horizon 126–252 days.
-
-    - **Traps:** very cost-sensitive, so check the evaluator's cost breakdown. Survivorship is worst
-    in small, illiquid names.
-
-    - **Status:** backtestable now.
-
-
-    #### S37 · VIX regime overlay
-
-
-    - **How it works:** high-volatility regimes have worse risk-adjusted equity returns and more
-    crashes, so scaling exposure down improves Sharpe.
-
-    - **Signal:** an overlay on another strategy. Gross is 50% when `macro_daily.vix` is above its
-    1-year 80th percentile, 100% otherwise.
-
-    - **Data:** `macro_daily.vix` (from `eod_index` `^VIX`) · _(planned)_ `regime_daily.vol_regime`.
-
-    - **Defaults:** daily rebalance (overlay).
-
-    - **Traps:** use the VIX close on D and act at the next close. Evaluate it as a modifier:
-    compare the base strategy with and without it.
-
-    - **Status:** backtestable now.
-
-
-    #### S38 · Yield-curve regime
-
-
-    - **How it works:** an inverted curve precedes slowdowns, when quality and low-volatility names
-    outperform.
-
-    - **Signal:** when `macro_daily.curve_10y_2y < 0` for 20 or more days, tilt toward S13 and S08
-    names; otherwise use the base mix.
-
-    - **Data:** `macro_daily.curve_10y_2y`, `curve_10y_3m`, `ust_10y` (from `treasury_rates.year10`,
-    `year2`, `month3`).
-
-    - **Defaults:** monthly rebalance (overlay).
-
-    - **Status:** backtestable now (few regime changes in 5 years, so the evidence is thin; say so).
-
-
-    #### S39 · Rate-sensitive sector rotation
-
-
-    - **How it works:** sectors respond differently to rate moves. Rising yields favor financials
-    and energy; falling yields favor utilities, real estate and tech.
-
-    - **Signal:** `Δust_10y` over 63 days. Rank sectors by their historical beta to rate changes
-    (estimated over the previous 2 years) and overweight the sectors that benefit.
-
-    - **Data:** `macro_daily.ust_10y`, `sector_returns` (percent points); `prices_daily` with
-    `securities.sector_history`.
-
-    - **Defaults:** monthly rebalance, horizon 21–63 days.
-
-    - **Traps:** `sector_returns` values are in percent points, so divide by 100.
-
-    - **Status:** backtestable now (short history).
-
-
-    #### S40 · Turn-of-month / January effect
-
-
-    - **How it works:** flows (pay cycles, fund rebalancing) concentrate returns around month turns.
-    Small caps rebound in January after tax-loss selling.
-
-    - **Signal:** be long from the last trading day of the month to the 3rd trading day of the next
-    (`trading_calendar`). In January, overweight the small-cap prior-year losers.
-
-    - **Data:** `trading_calendar`: `date`, `is_trading_day`, `prev_trading_day`,
-    `next_trading_day`; `prices_daily`.
-
-    - **Defaults:** calendar-driven.
-
-    - **Traps:** few events, so be wary of overfitting. The Judge should demand stability across
-    years.
-
-    - **Status:** backtestable now.
-
-
-    ### Combinations and news
-
-
-    #### S41 · Quality + value + momentum composite
-
-
-    - **How it works:** the factors have low correlation with each other. A composite gives steadier
-    excess returns than any one alone.
-
-    - **Signal:** the average of cross-sectional percentile ranks of `value_score` (S10/S11),
-    `quality_score` (S13/S15) and `momentum_score` (S01). Long the top quintile.
-
-    - **Data:** _(planned)_ `features_ranked.value_score`, `quality_score`, `momentum_score`. Today,
-    build each component from its card.
-
-    - **Defaults:** monthly rebalance, horizon 63 days.
-
-    - **Explore:** the component weights (from walk-forward folds only, never from the full sample),
-    sector neutrality.
-
-    - **Traps:** each weighting variant counts as a trial for deflated Sharpe. Keep variants few.
-
-    - **Status:** after M1 backfill (fundamental components).
-
-
-    #### S42 · Abnormal news volume
-
-
-    - **How it works:** a spike in news without a matching price move signals information the market
-    hasn't priced yet.
-
-    - **Signal:** `news_count_1d` per `symbol` from `news_stocks` (by `publishedDate`), compared
-    with its 20-day mean. Long or short in the direction of the subsequent first-day move, or use it
-    as an attention filter.
-
-    - **Data:** `news_stocks`: `symbol`, `publishedDate`, `title`, `publisher`, `site`.
-
-    - **Traps:** the feed only has history since 2026-10-23. Crypto and other non-equity `symbol`
-    values appear in the feed (e.g. "XRP"), so keep only symbols in `securities`.
-
-    - **Status:** forward-only.
-
+    Status is **COMPLETE** at 90% or more, **PARTIAL** below that. PARTIAL changes nothing except the footer note. Gated and inactive symbols in Part 9 are never fetched and never in the denominator.
 
     ---
 
+    ## Part 7. Stage 2: setups and tracker (iteration 5)
 
-    ## Part 4. How to make a new theory from a card
+    **For each candidate, fetch two things:**
+    1. **RSI14:** take the newest value.
+    2. **EOD bars** from (session minus 20 calendar days) to session. Write the 10 most recent lows in one line, then the lowest of them:
+       `KLAC lows: 820.1, 815.4, 811.0, 818.2, 822.7, 825.0, 819.3, 812.4, 830.1, 841.0 -> low10 = 811.0`
 
+    **Confirm the setup with RSI:**
 
-    A good theory changes **one or two** things relative to a card, and says why:
+    | Setup | Confirmed when |
+    |---|---|
+    | BREAKOUT | RSI14 < 80 |
+    | PULLBACK | RSI14 between 38 and 52 |
+    | OVERSOLD | RSI14 < 32 |
 
+    If RSI does not confirm, keep the Stage 1 rating.
 
-    - **Condition** it on another card: "S31 insider cluster buys _after_ a 20% drawdown" (S31 × S02
-    inverted).
+    **Blockers.** A confirmed setup becomes **WATCH** (not SETUP) when any of these is true. Name the blocker.
+    - The regime size is 0% (RISK_OFF).
+    - RATES_SHOCK is flagged and the symbol is rate-sensitive (Part 9).
+    - Earnings fall within the next 5 trading days.
+    - News shows a binary event inside the trade window: deal vote, FDA decision, offering, or guidance cut.
 
-    - **Restrict the universe** with a reason: "S24 PEAD in mid caps ($2B–$20B), where analyst
-    coverage is thinner".
+    **Trade plan for each SETUP.** Write every line of the calculation in the work log.
 
-    - **Combine** with a filter that removes a known failure mode: "S10 earnings yield excluding
-    F-score ≤ 3 (value traps)".
+    ```
+    Trigger  = dayHigh of the session (buy stop)
+    Stop     = low10 x 0.99
+               if Stop < Trigger x 0.90, set Stop = Trigger x 0.90   (cap risk at 10%)
+               if Stop > Trigger x 0.97, set Stop = Trigger x 0.97   (minimum 3% room)
+    R        = Trigger - Stop
+    T1       = Trigger + 2 x R
+    T2       = Trigger + 3 x R
+    Shares per $1,000 risk = 1000 / R x size, rounded down   (size = 1.0, 0.5 or 0)
+    ```
 
-    - **Change the horizon or entry rule** with a reason: "S19 entering at declaration instead of
-    ex-date".
+    **Quality grade** (no score):
+    - **A:** the symbol's sector ETF is LEADING and the setup is a BREAKOUT or PULLBACK.
+    - **B:** everything else.
 
+    List A setups first.
 
-    Every theory record must state:
+    **Tracker.** For each PENDING or OPEN setup in the state note, walk the EOD bars dated after its `last_checked` date, oldest first. Stop walking once the state is final.
 
+    | From | Condition on a bar | New state |
+    |---|---|---|
+    | PENDING | high >= trigger and low <= stop on the same bar | STOPPED |
+    | PENDING | high >= trigger | OPEN |
+    | PENDING | low <= stop (before triggering) | INVALIDATED |
+    | PENDING | 5 bars passed without triggering | EXPIRED |
+    | OPEN | low <= stop | STOPPED |
+    | OPEN | high >= T2 | T2_HIT |
+    | OPEN | high >= T1 | T1_HIT (keep tracking toward T2 or the stop) |
+    | T1_HIT | low <= stop | T1_THEN_STOP |
+    | T1_HIT | high >= T2 | T2_HIT |
 
-    - its hypothesis and economic rationale,
+    Final states: STOPPED, INVALIDATED, EXPIRED, T2_HIT, T1_THEN_STOP. Report them once, add them to the track record, then drop them from the active list.
 
-    - the card(s) it builds on,
+    Do not advance the tracker in INTRADAY SNAPSHOT mode.
 
-    - the data (collections and fields),
+    ---
 
-    - the universe, horizon, side and rebalance,
+    ## Part 8. Abort conditions
 
-    - what would falsify it,
+    Stop and tell the user the reason and the fix only when:
+    - FMP rejects the API key;
+    - the SPY quote is unavailable (no regime anchor);
+    - more than half of the watchlist lines fail entirely.
 
-    - how it differs from the most similar existing theory, from `search_theories`.
+    Never fill an aborted run with remembered or old numbers.
 
+    ---
 
-    ### Anti-patterns (the Judge rejects these)
+    ## Part 9. Watchlist (single source of truth)
 
+    Each line below is one batch-quote call. The bracket gives role, sector ETF, the rate-sensitive flag, and the symbol count. **When you edit a line, update its count and the in-scope total.**
 
-    - Tuning thresholds on the full sample. Choose them inside walk-forward folds, or state a prior.
+    **In-scope total: 57**
 
-    - Using a current-only field (Part 1, rule 4) or the event date instead of the known date (rule
-    3).
+    ```
+    SEMIS       [trade | SMH | not rate-sensitive | 22]
+    NVDA,AMD,CBRS,AVGO,MRVL,INTC,TSM,QCOM,ADI,MCHP,MU,SKHY,LRCX,KLAC,TER,ATEYY,AMKR,ASX,AXTI,SNPS,CDNS,SOXX
 
-    - Stacking more than 3 filters without a separate rationale for each, which is p-hacking.
+    TECH_AI     [trade | XLK | not rate-sensitive | 6]
+    META,MSFT,SNDK,STX,KEYS,HIVE
 
-    - Submitting a backtest for a **forward-only** card. Tag it `forward_only` instead.
+    CYCLICALS   [trade | see map | not rate-sensitive | 11]
+    GEV,TMQ,CRCL,NVA,WLDS,SU,VIST,XLE,DBO,IBIT,GDX
+      sector map: GEV=XLI, TMQ=XLB, CRCL=XLF, SU=XLE, VIST=XLE, XLE=XLE, DBO=XLE, GDX=XLB, NVA/WLDS/IBIT=none
 
-    - Re-testing a failed theory with cosmetic changes (cosine similarity ≥ 0.9 with no stated
-    difference).
+    GOLD_HOLD   [hold | none | not rate-sensitive | 3]
+    GLD,IAU,AAAU
+
+    CORE_HOLD   [hold | none | not rate-sensitive | 2]
+    VOO,BRK-B
+
+    INCOME_HOLD [hold | XLU | RATE-SENSITIVE | 13]
+    AMLP,T,OMAH,SCHD,VYM,HDV,SPYD,JEPI,QYLD,XYLD,HPF,IEF,TLT
+    ```
+
+    Notes on the fixes already applied:
+    - KLAC replaces KLA.F; CDNS replaces CDS.SG; HIVE replaces HIVE.TO; TMQ replaces TMQ.TO.
+    - TMQ (Trilogy Metals) is copper and zinc, not uranium.
+    - SOXX replaces SOX=F.
+    - GLD is moved to GOLD_HOLD. Change its role to trade if you trade it.
+
+    **Add the remaining tickers from the old Section 10 here.** Use the same format, at most 25 per line.
+
+    ```
+    LINE_NAME   [trade | sector ETF | not rate-sensitive | count]
+    SYM1,SYM2,...
+    ```
+
+    **Gated: never fetched, not in scope, listed once in Data notes.** These are non-US listings blocked on the FMP Starter plan; move them into a line above after upgrading:
+    `000660.KS, 601138.SS, ZGLD.TO, HUG.TO, USCL.TO, HYLD.TO, HHL.TO, CNCC.TO, HPYT.TO, HPYM-U.TO`
+    - 000660.KS is SK hynix (Korea).
+    - 601138.SS is Foxconn Industrial Internet (Shanghai).
+    - ZGLD.TO and HUG.TO are Canadian gold ETFs (US alternative: GLD).
+    - The other .TO symbols are Canadian income and covered-call ETFs.
+
+    **Inactive: never fetched.**
+    - CYBR: delisted 2026-02-11 after the Palo Alto Networks acquisition; PANW is the successor.
+    - IRBT: taken private by Picea through Chapter 11.
+    - SOX=F: malformed symbol.
+
+    ---
+
+    ## Part 10. State note (iteration 7)
+
+    Overwrite the workspace note `stock-analyst-state` with exactly this structure. It is how tomorrow's run knows what changed.
+
+    ```
+    STATE v1
+    session: YYYY-MM-DD
+    regime: LABEL | flags | size
+    setups (active):
+    SYMBOL | issued | setup | trigger | stop | T1 | T2 | state | bars_since_issue | last_checked
+    track_record: T2_HIT n | T1_THEN_STOP n | STOPPED n | INVALIDATED n | EXPIRED n
+    lists:
+    SETUP: ...
+    AVOID: ...
+    EXTENDED: ...
+    not_found_streak: SYMBOL=n, ...
+    ```
+
+    **Changes since the last session** = symbols that newly appear in, or drop out of, the SETUP, AVOID and EXTENDED lists compared with the previous state note.
+
+    **Not found 3 sessions in a row:** suggest removing the symbol in Data notes. Never edit Part 9 yourself.
+
+    Also save the report as a note named `stock-brief-YYYY-MM-DD` using the session date.
+
+    ---
+
+    ## Part 11. Report template (final answer)
+
+    Post the full report as your final message. Use these sections in this order. If a section is empty, write "None." on one line.
+
+    ```markdown
+    # Daily Brief: <session> (<weekday>) <END-OF-DAY or INTRADAY SNAPSHOT>
+    **Regime: <LABEL>** | Flags: <flags or none> | New-long size: <100/50/0>% of normal | Data: <fresh>/<in-scope> (<COMPLETE/PARTIAL>)
+
+    ## Bottom line
+    3 to 5 bullets:
+    - Regime and what it means for exposure today.
+    - The best 1 to 3 setups: symbol, trigger, stop.
+    - The biggest risk on the board (rates, a holding breaking down, earnings).
+    - What changed since the last session (tracker outcomes, new AVOIDs).
+
+    ## 1. Market regime
+    | Index | Price | 1D | vs SMA50 | vs SMA200 | Trend |
+    (SPY, QQQ, IWM. "vs SMA" means "above" or "below", not a percent.)
+    | Macro | Value | Change |
+    (VIX with 5D change; 10Y with 4-week change in bp and the reference date; 2Y; 2s10s; sector participation k of 12)
+    Then 2 to 4 sentences of interpretation using Part 4.
+
+    ## 2. Setup tracker
+    | Symbol | Issued | Setup | Trigger | Stop | T1 | T2 | Status |
+    Track record: T2 n, T1 then stop n, stopped n, invalidated n, expired n.
+
+    ## 3. New long setups
+    | Grade | Symbol | Setup | Price | Trigger | Stop | T1 | T2 | Risk % | Shares per $1k risk | RSI14 | Why (news) |
+    Under the table, one line per setup: thesis, invalidation, event risk.
+    Risk % = R / Trigger x 100, calculation shown in the work log.
+
+    ## 4. Watch (setups blocked)
+    | Symbol | Setup | Blocked by |
+
+    ## 5. Movers and why
+    | Symbol | 1D | Tags | Rating | Why (news or "no news found") |
+
+    ## 6. Avoid / broken
+    | Symbol | Group | Reason (DOWN, NEW_LOW, LOST_50, LOST_200) |
+
+    ## 7. Extended: do not chase, consider trimming
+    | Symbol | Price | 1.15 x SMA50 | 1D |
+
+    ## 8. Rate-sensitive and core holdings
+    | Symbol | Price | 1D | Trend | vs SMA200 |
+    One line on what RATES_SHOCK means for them, if flagged.
+
+    ## 9. Earnings in the next 14 days
+    | Symbol | Date | Rating |
+
+    ## 10. Sector leadership
+    LEADING: 4 ETFs with 1M returns. LAGGING: 4 ETFs with 1M returns. One sentence on rotation.
+
+    ## Data notes
+    - Coverage: fresh = in-scope - missing (show it).
+    - Missing, with classification (gated, not found, failed).
+    - Gated by plan (not fetched): list.
+    - Removal suggestions (not found 3+ sessions).
+
+    _End-of-day data for the session above. Not investment advice; verify levels before trading._
+    ```
+
+    ---
+
+    ## Part 12. Glossary (for explaining the brief to the user)
+
+    - **Gated:** the data plan blocks this symbol. It is a paywall, not a problem with the stock.
+    - **Not found:** the data source has no such symbol (delisted or a bad ticker).
+    - **SMA50 / SMA200:** 50- and 200-day average prices, taken from the quote.
+    - **RSI14:** 0 to 100 momentum gauge. Below 30 is oversold; above 70 is overbought.
+    - **Trigger:** buy-stop price, the session high. The setup is live only if price trades above it.
+    - **R:** risk per share (trigger minus stop). T1 = 2R, T2 = 3R.
+    - **Shares per $1,000 risk:** how many shares make the stop cost $1,000, already scaled by the regime size. Scale to your own risk per trade.
+  enabled: true

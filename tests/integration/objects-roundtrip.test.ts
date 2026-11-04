@@ -234,21 +234,37 @@ test('replace refuses to remove an object that is still in use', { skip: skipRea
   );
 });
 
-test('the repo config-io exports import (legacy formats)', { skip: skipReason }, async () => {
+test('the committed backup files and legacy bare lists import', { skip: skipReason }, async () => {
   const skills = await planObjectImport(
     who(T),
     await readFile('deploy/config-io/exports/skills.yaml', 'utf8'),
     'merge',
-    'Skill',
   );
   assert.deepEqual(skills.errors, []);
-  assert.ok(skills.items.some((i) => i.name === 'strategy-library' && i.action === 'create'));
+  assert.ok(skills.items.length >= 1 && skills.items.every((i) => i.kind === 'Skill'));
   const syncs = await planObjectImport(
     who(T),
-    await readFile('deploy/config-io/exports/dataset-syncs.json', 'utf8'),
+    await readFile('deploy/config-io/exports/dataset-syncs.yaml', 'utf8'),
     'merge',
-    'DatasetSync',
   );
   assert.deepEqual(syncs.errors, []);
   assert.equal(syncs.items.length, 43);
+  const legacy = await planObjectImport(
+    who(T),
+    JSON.stringify([
+      {
+        name: 'Legacy EOD',
+        connectionId: { $ref: { type: 'connections', name: 'FMP' } },
+        dataset: 'eod_prices',
+        schedule: { enabled: true, everyMinutes: 1440, input: 'x' },
+      },
+    ]),
+    'merge',
+    'DatasetSync',
+  );
+  assert.deepEqual(legacy.errors, []);
+  assert.deepEqual(
+    legacy.items.map((i) => `${i.name}:${i.action}`),
+    ['Legacy EOD:create'],
+  );
 });
