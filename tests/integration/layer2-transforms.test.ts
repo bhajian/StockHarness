@@ -26,6 +26,8 @@ async function ok(path: string, body?: unknown, method?: string) {
   assert.ok(r.status < 300, `${path}: ${r.status} ${JSON.stringify(r.data)}`);
   return r.data;
 }
+/** A number from the documents API (large values come back as Extended JSON). */
+const num = (v: any) => Number(v?.$numberLong ?? v?.$numberDouble ?? v?.$numberInt ?? v);
 /** A date from the documents API (BSON dates come back as Extended JSON). */
 const day = (v: any) => String(v?.$date ?? v).slice(0, 10);
 const docs = async (c: string, q = '') => ok(`/mongodb/${mongoId}/collections/${c}/documents?limit=200${q}`);
@@ -404,4 +406,56 @@ test('universe_daily (#101): filters as of each date, delisted names only while 
   assert.deepEqual([counts.members, counts.priced], [1, 1]);
   const cat = await ok('/catalog/universe_counts');
   assert.deepEqual([cat.layer, cat.producedBy[0].name], [2, 'universe_daily']);
+});
+
+test('features_daily + features_ranked (#102): PIT features, ranks per date, documented catalog', async () => {
+  const daily = await runAndWait('features_daily', {
+    range: 'custom',
+    start: '2016-01-04',
+    end: '2020-03-06',
+  });
+  assert.equal(daily.status, 'succeeded', daily.stderr);
+  const f = (await docs('features_daily')).documents;
+  assert.equal(f.length, 19, 'one row per priced security-day');
+  const aaa = f.find((r: any) => r.date === '2016-01-05');
+  assert.equal(num(aaa.market_cap), 5e9, 'the reported cap that day');
+  assert.equal(aaa.days_since_filing, 69, 'Q3-2015 became usable on 2015-10-28');
+  assert.equal(aaa.earnings_yield, null, 'TTM needs four quarters; only three were known');
+  assert.equal(typeof f.find((r: any) => r.date === '2016-01-12').ret_1d, 'number');
+  const ranked = await runAndWait('features_ranked', {
+    range: 'custom',
+    start: '2016-01-04',
+    end: '2020-03-06',
+  });
+  assert.equal(ranked.status, 'succeeded', ranked.stderr);
+  const r = (await docs('features_ranked')).documents;
+  const byDate = new Map<string, number[]>();
+  for (const x of r)
+    if (x.composite_pct !== null) byDate.set(x.date, [...(byDate.get(x.date) ?? []), x.composite_pct]);
+  for (const [d, ps] of byDate)
+    assert.ok(Math.abs(ps.reduce((a, b) => a + b, 0) / ps.length - 0.5) <= 0.02, d);
+  // M2 exit: every Layer 2 output has a complete catalog entry.
+  const outputs = [
+    'trading_calendar',
+    'securities',
+    'corporate_actions',
+    'prices_daily',
+    'macro_daily',
+    'fundamentals_pit',
+    'universe_daily',
+    'universe_counts',
+    'features_daily',
+    'features_ranked',
+  ];
+  const report: string[] = [];
+  for (const c of outputs) {
+    const e = await ok(`/catalog/${c}`);
+    const undocumented = e.fields.filter((x: any) => x.doc === 'none').map((x: any) => x.name);
+    report.push(`${c}: ${e.docCompletenessPct}% ${undocumented.join(',')}`);
+    assert.equal(e.layer, 2, c);
+    assert.ok(e.description && e.grain && e.primaryKey.length, `${c}: description, grain and key`);
+    assert.ok(['pit', 'static'].includes(e.timeSemantics.status), `${c}: time semantics`);
+  }
+  console.log(report.join('\n'));
+  for (const line of report) assert.match(line, /: 100% $/, `complete field docs: ${line}`);
 });

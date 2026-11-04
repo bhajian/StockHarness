@@ -159,9 +159,16 @@ const short = (v: unknown) => {
 };
 
 /** Field stats from a sample of documents (pure; unit-tested). */
-export function inferFields(docs: Record<string, unknown>[], curated?: CatalogCurated): CatalogField[] {
+/** Internal bookkeeping fields that are not part of a collection's schema. */
+const INTERNAL_FIELDS = new Set(['_id', '_hash']);
+export function inferFields(
+  docs: Record<string, unknown>[],
+  curated?: CatalogCurated,
+  /** Field docs declared by the producer (a transform output's `fields`). */
+  declared?: Record<string, { description?: string; unit?: string }>,
+): CatalogField[] {
   const names = new Set<string>();
-  for (const d of docs) for (const k of Object.keys(d)) if (k !== '_id') names.add(k);
+  for (const d of docs) for (const k of Object.keys(d)) if (!INTERNAL_FIELDS.has(k)) names.add(k);
   const fields: CatalogField[] = [];
   for (const name of names) {
     const values = docs.map((d) => d[name]);
@@ -184,7 +191,8 @@ export function inferFields(docs: Record<string, unknown>[], curated?: CatalogCu
       Object.assign(field, { min: strs[0], max: strs[strs.length - 1] });
     }
     if (present.length) field.example = short(present[0]);
-    const c = curated?.fields?.[name];
+    // Precedence: curated (edited, or oh.describe) > declared by the producer > the built-in dictionary.
+    const c = curated?.fields?.[name]?.description ? curated.fields[name] : declared?.[name];
     const dict = FIELD_DOCS[name];
     if (c?.description)
       Object.assign(field, { description: c.description, unit: c.unit ?? dict?.unit, doc: 'curated' });
@@ -231,6 +239,7 @@ export async function refreshCatalogEntry(ownerId: string, name: string, syncs?:
       static?: boolean;
       description?: string;
       grain?: string;
+      fields?: Record<string, { description?: string; unit?: string }>;
     }[];
     trigger?: { schedule?: Parameters<typeof describeSchedule>[0]; after?: string[] };
   }>('transforms').findOne(
@@ -280,7 +289,7 @@ export async function refreshCatalogEntry(ownerId: string, name: string, syncs?:
         [],
       )
     : [];
-  const fields = inferFields(sample, curated);
+  const fields = inferFields(sample, curated, tOut?.fields);
   const names = new Set(fields.map((f) => f.name));
   const symbolField = names.has('security_id') ? 'security_id' : names.has('symbol') ? 'symbol' : undefined;
   const rule: KnownAtRule | undefined =
