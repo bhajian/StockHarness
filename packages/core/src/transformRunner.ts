@@ -230,8 +230,32 @@ export async function recoverTransformRuns() {
   return r.modifiedCount;
 }
 
+/**
+ * Runs queued by another process (a script, a second replica) have no in-memory queue entry: after a minute
+ * the dispatcher adopts them, chunks of one backfill in window order. Exported for tests.
+ */
+export async function adoptQueuedRuns(now = new Date(), execute?: Parameters<typeof executeTransformRun>[1]) {
+  const stale = await transformRuns()
+    .find({ status: 'queued', createdAt: { $lt: new Date(now.getTime() - 60_000) } })
+    .sort({ createdAt: 1 })
+    .limit(200)
+    .toArray();
+  const groups = new Map<string, TransformRun[]>();
+  for (const r of stale) groups.set(r.batchId ?? r._id, [...(groups.get(r.batchId ?? r._id) ?? []), r]);
+  let adopted = 0;
+  for (const [key, runs] of groups) {
+    if (transformQueue.has(key)) continue;
+    adopted += runs.length;
+    transformQueue.enqueue(key, 'P1', async () => {
+      for (const r of runs) if (!(await executeTransformRun(r._id, execute))) break;
+    });
+  }
+  return adopted;
+}
+
 /** Fired every tick: run due scheduled transforms (window = the last day for date_range transforms). */
 export async function dispatchTransforms() {
+  await adoptQueuedRuns().catch((e) => console.warn('Adopting queued transform runs failed:', safeError(e)));
   const due = await transforms()
     .find({
       enabled: true,

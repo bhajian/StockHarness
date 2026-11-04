@@ -65,10 +65,13 @@ module is run by a **Transform** (Datasets → Transforms; YAML in
 few lines: call the module's `compute(...)` and write through `oh.output(...).upsert(...)`, so outputs are
 declared, idempotent (content hash) and catalogued, and DQ issues go through `oh.dq`.
 
-| Transform          | Entry point                                  | Runs                               |
-| ------------------ | -------------------------------------------- | ---------------------------------- |
-| `trading_calendar` | `layer2.trading_calendar.compute()`          | monthly (reaches end of next year) |
-| `securities`       | `layer2.securities.compute(read, aggregate)` | after `dataset:company_profiles`   |
+| Transform           | Entry point                                                   | Runs                                                          |
+| ------------------- | ------------------------------------------------------------- | ------------------------------------------------------------- |
+| `trading_calendar`  | `layer2.trading_calendar.compute()`                           | monthly (reaches end of next year)                            |
+| `securities`        | `layer2.securities.compute(read, aggregate)`                  | after `dataset:company_profiles`                              |
+| `corporate_actions` | `layer2.corporate_actions.compute(read)`                      | after `dataset:dividends_calendar`, `dataset:splits_calendar` |
+| `prices_daily`      | `layer2.prices_daily.compute(read, window)` (10-day lookback) | after `dataset:eod_prices`, `transform:corporate_actions`     |
+| `macro_daily`       | `layer2.macro_daily.compute(read)`                            | after `dataset:treasury_rates`, `dataset:eod_index`           |
 
 The pure parts (`*_logic.py`) are stdlib-only and unit-tested: `python3 -m unittest discover -s pipeline/tests -t .`.
-The `@transform` `build(ctx)` functions remain for the "Pipeline — Layer 2" harness until #99 removes it.
+The "Pipeline — Layer 2" harness that used to call these modules was removed in #99.

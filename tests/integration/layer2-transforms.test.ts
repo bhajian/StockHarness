@@ -83,15 +83,24 @@ before(async () => {
   mongoId = (await ok('/connections', { name: 'MongoDB', kind: 'mongodb', builtIn: true, url: '' })).id;
   // A disabled company_profiles sync, so the securities trigger (after dataset:company_profiles) validates.
   const fmp = await ok('/connections', { name: 'FMP', url: 'http://fixtures:9090/mcp' });
-  await ok('/dataset-syncs', {
-    name: 'L1 — Company profiles',
-    connectionId: fmp.id,
-    dataset: 'company_profiles',
-    symbolsMode: 'list',
-    symbols: ['AAA'],
-    enabled: false,
-    schedule: { enabled: false, everyMinutes: 1440, input: 'Run the scheduled task.' },
-  });
+  // Disabled syncs, so the transforms' dataset triggers validate (each names the collection a sync writes).
+  for (const dataset of [
+    'company_profiles',
+    'dividends_calendar',
+    'splits_calendar',
+    'eod_prices',
+    'treasury_rates',
+    'eod_index',
+  ])
+    await ok('/dataset-syncs', {
+      name: `L1 — ${dataset}`,
+      connectionId: fmp.id,
+      dataset,
+      symbolsMode: 'list',
+      symbols: ['AAA'],
+      enabled: false,
+      schedule: { enabled: false, everyMinutes: 1440, input: 'Run the scheduled task.' },
+    });
   await insert('company_profiles', [
     {
       symbol: 'AAA',
@@ -122,9 +131,39 @@ before(async () => {
   await insert('delisted_companies', [
     { symbol: 'DDD', companyName: 'Delta Ltd', delistedDate: '2020-05-01', ipoDate: '2010-01-04' },
   ]);
+  await insert('dividends_calendar', [
+    { symbol: 'AAA', date: '2016-01-11', dividend: 0.1, declarationDate: '2016-01-04' },
+  ]);
+  await insert('dividends_history', [{ symbol: 'AAA', date: '2016-01-11', dividend: 0.1 }]);
+  await insert('splits_calendar', []).catch(() => undefined);
+  await insert('splits_history', [{ symbol: 'CCC', date: '2020-03-04', numerator: 2, denominator: 1 }]);
+  await insert('treasury_rates', [{ date: '2016-01-04', year10: 2.2, year2: 1.0, month3: 0.2, year30: 3.0 }]);
+  await insert('eod_index', [
+    { symbol: '^GSPC', date: '2016-01-04', close: 2000 },
+    { symbol: '^GSPC', date: '2016-01-05', close: 2020 },
+    { symbol: '^VIX', date: '2016-01-04', close: 20 },
+  ]);
+  await insert('sector_performance', [{ date: '2016-01-04', sector: 'Technology', averageChange: 0.5 }]);
   await insert('eod_prices', [
-    ...weekdays('2016-01-04', '2016-01-15').map((date) => ({ symbol: 'AAA', date, close: 10 })),
-    ...weekdays('2020-03-02', '2020-03-06').map((date) => ({ symbol: 'CCC', date, close: 20 })),
+    // AAA has one zero close (a DQ error) on 2016-01-07.
+    ...weekdays('2016-01-04', '2016-01-15').map((date, i) => ({
+      symbol: 'AAA',
+      date,
+      open: 10,
+      high: 11 + i,
+      low: 9,
+      close: date === '2016-01-07' ? 0 : 10 + i,
+      volume: 100,
+    })),
+    ...weekdays('2020-03-02', '2020-03-06').map((date, i) => ({
+      symbol: 'CCC',
+      date,
+      open: 20,
+      high: 50,
+      low: 5,
+      close: i < 2 ? 40 : 20,
+      volume: 50,
+    })),
     ...weekdays('2018-01-02', '2018-01-05').map((date) => ({ symbol: 'DDD', date, close: 5 })),
   ]);
 });
@@ -183,4 +222,56 @@ test('securities (H4, H5, H6): ISO interval bounds, backfilled sector flag, tick
     [cat.layer, cat.producedBy[0].type, cat.producedBy[0].name],
     [2, 'transform', 'securities'],
   );
+});
+
+test('corporate_actions, prices_daily (H1, H2, H3) and macro_daily', async () => {
+  const ca = await runAndWait('corporate_actions');
+  assert.equal(ca.status, 'succeeded', ca.stderr);
+  const actions = (await docs('corporate_actions')).documents;
+  assert.deepEqual(actions.map((a: any) => `${a.action_type}:${a.ex_date}`).sort(), [
+    'cash_dividend:2016-01-11',
+    'split:2020-03-04',
+  ]);
+
+  // A full build over the seeded range, then a daily incremental run of a day already built.
+  const full = await runAndWait('prices_daily', { range: 'custom', start: '2016-01-04', end: '2020-03-06' });
+  assert.equal(full.status, 'succeeded', full.stderr);
+  const n = (await docs('prices_daily')).total;
+  assert.equal(n, 19, 'every seeded bar: 10 AAA + 5 CCC + 4 for the delisted DDD');
+  const dqAfterFull = (
+    await docs('dq_issues', `&filter=${encodeURIComponent('{"collection":"prices_daily"}')}`)
+  ).total;
+  assert.ok(dqAfterFull >= 1, 'the zero close is a DQ issue (H3: the run still succeeded)');
+  const daily = await runAndWait('prices_daily', { range: 'custom', start: '2016-01-12', end: '2016-01-12' });
+  assert.equal(daily.status, 'succeeded', daily.stderr);
+  assert.deepEqual(
+    [daily.outputs.prices_daily.written, daily.outputs.prices_daily.unchanged],
+    [0, 1],
+    'H1: the daily run (with its lookback) computes exactly what the full build wrote',
+  );
+  assert.ok(daily.reads.eod_prices > 1, 'the lookback was loaded');
+  const row = (await docs('prices_daily', `&filter=${encodeURIComponent('{"date":"2016-01-12"}')}`))
+    .documents[0];
+  assert.equal(typeof row.ret_1d, 'number');
+  // H2: re-running does not add DQ issues.
+  await runAndWait('prices_daily', { range: 'custom', start: '2016-01-04', end: '2020-03-06' });
+  assert.equal(
+    (await docs('dq_issues', `&filter=${encodeURIComponent('{"collection":"prices_daily"}')}`)).total,
+    dqAfterFull,
+  );
+  // The CCC split (2-for-1 on 2020-03-04) adjusts the earlier bars.
+  const ccc = (await docs('prices_daily', `&filter=${encodeURIComponent('{"date":"2020-03-02"}')}`))
+    .documents[0];
+  assert.equal(ccc.adj_factor, 0.5);
+
+  const macro = await runAndWait('macro_daily');
+  assert.equal(macro.status, 'succeeded', macro.stderr);
+  const m = (await docs('macro_daily', `&sort=${encodeURIComponent('{"date":1}')}`)).documents;
+  assert.deepEqual(
+    m.map((r: any) => r.date),
+    ['2016-01-04', '2016-01-05'],
+  );
+  assert.ok(Math.abs(m[1].spx_ret_1d - 0.01) < 1e-9);
+  for (const c of ['corporate_actions', 'prices_daily', 'macro_daily'])
+    assert.equal((await ok(`/catalog/${c}`)).producedBy[0].name, c);
 });

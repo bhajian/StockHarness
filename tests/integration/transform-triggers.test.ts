@@ -18,7 +18,8 @@ const { workspaceDatabase } = await import('../../packages/core/src/mongoMcp.js'
 const { datasetSyncs, runDatasetSync } = await import('../../packages/core/src/datasetSync.js');
 const { consumeEvents } = await import('../../packages/core/src/eventSubscriptions.js');
 const T = await import('../../packages/core/src/transforms.js');
-const { transformRuns, executeTransformRun } = await import('../../packages/core/src/transformRunner.js');
+const { transformRuns, executeTransformRun, adoptQueuedRuns, requestTransformRun, transformQueue } =
+  await import('../../packages/core/src/transformRunner.js');
 const { recordUpstream, fireReadyTriggers, UPSTREAM_EVENTS } =
   await import('../../packages/core/src/transformTriggers.js');
 
@@ -172,5 +173,32 @@ test(
     await runDatasetSync((await datasetSyncs().findOne({ _id: `${owner}-eod` }))!, { trigger: 'manual' });
     assert.deepEqual(await tick(), []);
     assert.equal((await runsOf('tg_a')).length, 1);
+  },
+);
+
+test(
+  'runs queued by another process are adopted by the dispatcher after a minute',
+  { skip: skipReason },
+  async () => {
+    const b = (await T.transforms().findOne({ ownerId: owner, name: 'tg_b' }))!;
+    const [run] = await requestTransformRun(owner, b._id, {
+      range: 'custom',
+      start: '2026-01-05',
+      end: '2026-01-05',
+      autostart: false,
+    });
+    const stub = async () => ({
+      id: randomUUID(),
+      status: 'succeeded' as const,
+      stdout: '',
+      stderr: '',
+      durationMs: 1,
+      meta: { stats: {} },
+    });
+    assert.equal(await adoptQueuedRuns(new Date(), stub), 0, 'too fresh: its own process may still start it');
+    assert.equal(await adoptQueuedRuns(new Date(Date.now() + 61_000), stub), 1);
+    assert.equal(await adoptQueuedRuns(new Date(Date.now() + 61_000), stub), 0, 'not adopted twice');
+    await transformQueue.idle();
+    assert.equal((await transformRuns().findOne({ _id: run._id }))!.status, 'succeeded');
   },
 );

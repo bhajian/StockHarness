@@ -3,6 +3,161 @@
 apiVersion: stockharness/v1
 kind: Transform
 metadata:
+  name: corporate_actions
+  version: "1"
+spec:
+  description: "Splits and dividends keyed to security_id: the rolling calendars merged with the full per-symbol histories; dividends classified cash or special."
+  code: |
+    import oh
+    from pipeline.layer2.corporate_actions import compute
+
+    oh.output("corporate_actions").upsert(compute(lambda c, f=None, cols=None: oh.read(c, f, columns=cols)))
+  inputs:
+    - securities
+    - dividends_calendar
+    - dividends_history
+    - splits_calendar
+    - splits_history
+  outputs:
+    - collection: corporate_actions
+      key:
+        - security_id
+        - action_type
+        - ex_date
+      write_mode: upsert
+      known_at_field: known_at
+      static: false
+      description: "One row per split or dividend: action_type (split, cash_dividend, special_dividend), ex_date, split_ratio or dividend_amount."
+      grain: security × action × ex-date
+      fields:
+        split_ratio:
+          description: New shares per old share (4-for-1 = 4.0; 1-for-10 reverse = 0.1)
+          unit: ratio
+        dividend_amount:
+          description: Cash dividend per share
+          unit: USD
+        known_at:
+          description: Declaration date, else the day before the ex-date
+  trigger:
+    after:
+      - dataset:dividends_calendar
+      - dataset:splits_calendar
+  incremental:
+    mode: full
+    lookback_days: 0
+  params: {}
+  secrets: []
+  enabled: true
+---
+apiVersion: stockharness/v1
+kind: Transform
+metadata:
+  name: macro_daily
+  version: "1"
+spec:
+  description: "One row per date: the treasury curve (3m, 2y, 10y, 30y and spreads), VIX, S&P 500 and Nasdaq levels with the S&P daily return, and sector returns."
+  code: |
+    import oh
+    from pipeline.layer2.macro_daily import compute
+
+    oh.output("macro_daily").upsert(compute(lambda c, f=None, cols=None: oh.read(c, f, columns=cols)))
+  inputs:
+    - treasury_rates
+    - eod_index
+    - sector_performance
+  outputs:
+    - collection: macro_daily
+      key:
+        - date
+      write_mode: upsert
+      known_at_field: known_at
+      as_of_field: as_of_date
+      static: false
+      description: Market-wide daily context for features and regimes.
+      grain: trading day
+      fields:
+        curve_10y_2y:
+          description: 10-year minus 2-year treasury yield
+          unit: percentage points
+        vix:
+          description: CBOE VIX close
+        spx_ret_1d:
+          description: S&P 500 1-day return
+          unit: ratio
+  trigger:
+    after:
+      - dataset:treasury_rates
+      - dataset:eod_index
+  incremental:
+    mode: full
+    lookback_days: 0
+  params: {}
+  secrets: []
+  enabled: true
+---
+apiVersion: stockharness/v1
+kind: Transform
+metadata:
+  name: prices_daily
+  version: "1"
+spec:
+  description: Split- and dividend-adjusted point-in-time daily prices per security, with 1-day price and total returns and DQ flags. Daily runs load a 10-trading-day lookback and write only the window; a security with a new split gets its history rewritten.
+  code: |
+    import oh
+    from pipeline.layer2.prices_daily import compute
+
+    # H1: a 10-day lookback is loaded, only [start, end] is written. H2: DQ through oh.dq (idempotent).
+    # H3: DQ never fails the run; gates on the DQ rate decide.
+    out = oh.output("prices_daily")
+    read = lambda c, f=None, cols=None, sort=None: oh.read(c, f, columns=cols, sort=sort)
+    for rows, issues in compute(read, oh.window):
+        out.upsert(rows)
+        for i in issues:
+            oh.dq(i["issue_type"], i["severity"], security_id=i["security_id"], date=i["date"])
+  inputs:
+    - securities
+    - corporate_actions
+    - eod_prices
+  outputs:
+    - collection: prices_daily
+      key:
+        - security_id
+        - date
+      write_mode: upsert
+      known_at_field: known_at
+      as_of_field: as_of_date
+      static: false
+      description: "One row per security and trading day: OHLCV, adj_* on the current share basis, ret_1d, tr_1d, dollar_volume, dq_flags."
+      grain: security × trading day
+      fields:
+        adj_factor:
+          description: "Backward split factor: adj_close = close × adj_factor"
+          unit: ratio
+        ret_1d:
+          description: Price return versus the previous bar, split-adjusted
+          unit: ratio
+        tr_1d:
+          description: Total return (price + dividend) versus the previous bar
+          unit: ratio
+        dollar_volume:
+          description: close × volume
+          unit: USD
+        dq_flags:
+          description: zero_or_negative_price, high_lt_low, close_outside_range, zero_volume, jump_no_action, stale_price
+  trigger:
+    after:
+      - dataset:eod_prices
+      - transform:corporate_actions
+  incremental:
+    mode: date_range
+    lookback_days: 10
+  params: {}
+  secrets: []
+  enabled: true
+---
+apiVersion: stockharness/v1
+kind: Transform
+metadata:
   name: securities
   version: "1"
 spec:

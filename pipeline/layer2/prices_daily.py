@@ -1,110 +1,80 @@
-"""build_prices_daily (spec §3.3): split/div-adjusted PIT daily prices, per security.
+"""prices_daily (spec §3.3): split/dividend-adjusted point-in-time daily prices, per security.
 
-Processed per security to bound memory. known_at = 16:00 ET close; as_of_date = same date (EOD).
-Idempotent upsert on (security_id, date). Supports ctx.security_ids for smoke/partial runs.
+Run by the `prices_daily` Transform (#99) in date_range mode with a 10-trading-day lookback (H1):
+`compute(read, window)` loads [lookback_start, end] but returns only rows in [start, end], so ret_1d, tr_1d and
+the stale check are right on daily runs. A security with a split in the window gets its whole history
+rewritten (split factors adjust every earlier bar). DQ flags are returned as issues for `oh.dq` (H2: idempotent);
+nothing raises on them (H3: gates decide).
 """
 from __future__ import annotations
 
 from datetime import datetime, timezone
 
 from ..core import pit
-from ..core.runner import transform
 from .prices_logic import compute_symbol_rows
-from ._resolve import security_symbols, as_date
+from ._resolve import as_date, security_symbols
 
 UTC = timezone.utc
-TV = "1"
+TV = "2"
+ERROR_FLAGS = ("zero_or_negative_price", "high_lt_low")
+BAR_FIELDS = ["_id", "symbol", "date", "open", "high", "low", "close", "volume", "vwap"]
 
 
-@transform("build_prices_daily")
-def build(ctx):
-    from pymongo import ReplaceOne
-
-    from ..core.db import coll
-
-    securities = list(coll("securities").find({}, {"security_id": 1, "identifiers": 1}))
+def compute(read, window=None, *, security_ids=None):
+    """Yield (rows, issues) per security. `read(collection, filter=None, columns=None, sort=None)`;
+    `window` has start, end and lookback_start (ISO dates) or is None for a full rebuild."""
+    securities = read("securities", None, ["security_id", "identifiers"])
     sec_syms = security_symbols(securities)
-    if ctx.security_ids:
-        wanted = set(ctx.security_ids)
-        sec_syms = {k: v for k, v in sec_syms.items() if k in wanted}
-
-    prices, ca = coll("eod_prices"), coll("corporate_actions")
-    out = coll("prices_daily")
-    out.create_index([("security_id", 1), ("date", 1)], unique=True)
-    out.create_index("date")
-    out.create_index("as_of_date")
-    dq = coll("dq_issues")
-
-    date_range = {}
-    if ctx.start:
-        date_range["$gte"] = str(ctx.start)
-    if ctx.end:
-        date_range["$lte"] = str(ctx.end)
-
-    total = 0
-    for sid, syms in sec_syms.items():
-        q = {"symbol": {"$in": list(syms)}}
-        if date_range:
-            q["date"] = date_range
-        bars_raw = list(prices.find(q).sort("date", 1))
-        if not bars_raw:
-            continue
-        ctx.rows_read += len(bars_raw)
-        by_date = {b["date"]: b for b in bars_raw}  # collapse ticker reuse to one bar/date
-        bars = [by_date[d] for d in sorted(by_date)]
-
-        actions = list(ca.find({"security_id": sid}))
+    if security_ids:
+        sec_syms = {k: v for k, v in sec_syms.items() if k in set(security_ids)}
+    actions = {}
+    for a in read("corporate_actions", None, ["security_id", "action_type", "ex_date", "dividend_amount", "split_ratio"]):
+        actions.setdefault(a["security_id"], []).append(a)
+    start = window.start if window else None
+    end = window.end if window else None
+    lookback = window.lookback_start if window else None
+    for sid in sorted(sec_syms):
+        acts = actions.get(sid, [])
+        splits = {a["ex_date"]: a.get("split_ratio") for a in acts if a["action_type"] == "split" and a.get("split_ratio")}
         divs = {
             a["ex_date"]: a.get("dividend_amount")
-            for a in actions
+            for a in acts
             if a["action_type"] in ("cash_dividend", "special_dividend") and a.get("dividend_amount")
         }
-        spl = {a["ex_date"]: a.get("split_ratio") for a in actions if a["action_type"] == "split" and a.get("split_ratio")}
-
-        rows = compute_symbol_rows(
-            [
-                {k: b.get(k) for k in ("date", "open", "high", "low", "close", "volume", "vwap")}
-                for b in bars
-            ],
-            divs,
-            spl,
-        )
-        ops = []
-        issues = []
+        # A split inside the window changes the factor of every earlier bar: rewrite this security's history.
+        full = window is None or any(ex >= lookback for ex in splits)
+        q = {"symbol": {"$in": sorted(sec_syms[sid])}}
+        if full:
+            if end:
+                q["date"] = {"$lte": end}
+        else:
+            q["date"] = {"$gte": lookback, "$lte": end}
+        bars_raw = read("eod_prices", q, BAR_FIELDS, [("date", 1)])
+        if not bars_raw:
+            continue
+        by_date = {b["date"]: b for b in bars_raw}  # collapse ticker reuse to one bar per date
+        bars = [by_date[d] for d in sorted(by_date)]
+        rows = compute_symbol_rows([{k: b.get(k) for k in BAR_FIELDS[2:]} for b in bars], divs, splits)
+        docs, issues = [], []
         for r in rows:
             d = r["date"]
-            doc = {
-                **r,
-                "security_id": sid,
-                "ticker": by_date[d].get("symbol"),
-                "known_at": pit.eod_known_at(as_date(d)).isoformat(),
-                "as_of_date": d,
-                "source_collection": "eod_prices",
-                "source_ids": [str(by_date[d].get("_id"))],
-                "transform_name": "build_prices_daily",
-                "transform_version": TV,
-                "processed_at": datetime.now(UTC).isoformat(),
-            }
-            ops.append(ReplaceOne({"security_id": sid, "date": d}, doc, upsert=True))
+            if not full and d < start:
+                continue  # lookback context only (H1)
+            docs.append(
+                {
+                    **r,
+                    "security_id": sid,
+                    "ticker": by_date[d].get("symbol"),
+                    "known_at": pit.eod_known_at(as_date(d)).isoformat(),
+                    "as_of_date": d,
+                    "source_collection": "eod_prices",
+                    "source_ids": [str(by_date[d].get("_id"))],
+                    "transform_name": "prices_daily",
+                    "transform_version": TV,
+                }
+            )
             for flag in r["dq_flags"]:
-                sev = "error" if flag in ("zero_or_negative_price", "high_lt_low") else "warn"
                 issues.append(
-                    {
-                        "collection": "prices_daily",
-                        "transform_name": "build_prices_daily",
-                        "severity": sev,
-                        "issue_type": flag,
-                        "security_id": sid,
-                        "date": d,
-                        "detected_at": datetime.now(UTC),
-                        "resolved": False,
-                    }
+                    {"issue_type": flag, "severity": "error" if flag in ERROR_FLAGS else "warn", "security_id": sid, "date": d}
                 )
-        if ops:
-            res = out.bulk_write(ops, ordered=False)
-            total += (res.upserted_count or 0) + (res.modified_count or 0)
-        if issues:
-            dq.insert_many(issues)
-            ctx.note_dq("error", sum(1 for i in issues if i["severity"] == "error"))
-            ctx.note_dq("warn", sum(1 for i in issues if i["severity"] == "warn"))
-    ctx.rows_written = total
+        yield docs, issues
