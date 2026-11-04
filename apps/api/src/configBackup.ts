@@ -18,6 +18,7 @@ export const BACKUP_FILES: Record<ObjectKind, string> = {
   DatasetSync: 'dataset-syncs.yaml',
   Transform: 'transforms.yaml',
   CatalogEntry: 'catalog.yaml',
+  Pipeline: 'pipelines.yaml',
 };
 /** Older export files, removed from the repo once the new files are written. */
 export const LEGACY_FILES = ['workflows.yaml', 'dataset-syncs.json'];

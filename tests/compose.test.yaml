@@ -24,6 +24,8 @@ services:
       LOGIN_RATE_LIMIT: 500
       # Dependency triggers (#92) settle for a minute in production; the tests do not wait that long.
       TRANSFORM_TRIGGER_DEBOUNCE_SECONDS: 2
+      # Layer 3 research and Layer 5 live nodes do not exist yet; the pipeline tests use stub executors (#156).
+      PIPELINE_STUB_EXECUTORS: '1'
     depends_on: &test-store-services
       qdrant: { condition: service_healthy }
       opensearch: { condition: service_healthy }

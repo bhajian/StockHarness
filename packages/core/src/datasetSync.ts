@@ -79,9 +79,12 @@ export type DatasetSyncRun = {
   ownerId: string;
   syncId: string;
   scheduleKey?: string;
-  trigger: 'schedule' | 'manual';
+  trigger: 'schedule' | 'manual' | 'pipeline';
   status: 'running' | 'succeeded' | 'failed';
   rows?: number;
+  /** Universe coverage of a per-symbol run (pipeline gates, #156). */
+  symbolsAttempted?: number;
+  symbolsCovered?: number;
   error?: string;
   startedAt: Date;
   finishedAt?: Date;
@@ -462,7 +465,7 @@ async function pull(
 /** Run one sync end to end: records a run, pulls data, updates the sync's cursor/status. */
 export async function runDatasetSync(
   sync: DatasetSync,
-  opts: { trigger: 'schedule' | 'manual'; scheduleKey?: string } = { trigger: 'manual' },
+  opts: { trigger: 'schedule' | 'manual' | 'pipeline'; scheduleKey?: string } = { trigger: 'manual' },
 ) {
   if (opts.scheduleKey) {
     const existing = await datasetSyncRuns().findOne({ scheduleKey: opts.scheduleKey });
@@ -489,7 +492,16 @@ export async function runDatasetSync(
     );
     await datasetSyncRuns().updateOne(
       { _id: run._id },
-      { $set: { status: 'succeeded', rows, finishedAt: new Date() } },
+      {
+        $set: {
+          status: 'succeeded',
+          rows,
+          finishedAt: new Date(),
+          ...(stats.symbolsAttempted !== undefined
+            ? { symbolsAttempted: stats.symbolsAttempted, symbolsCovered: stats.symbolsCovered }
+            : {}),
+        },
+      },
     );
     await datasetSyncs().updateOne(
       { _id: sync._id },
