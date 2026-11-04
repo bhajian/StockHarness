@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { WebhooksPanel } from './WebhooksPanel';
 import { ObjectTransfer } from './ObjectTransfer';
+import { ConfigBackupCard } from './ConfigBackupCard';
 import { PythonSecretsPanel } from './PythonSecrets';
 import {
   api,
@@ -243,6 +244,7 @@ export function SettingsPage({ user, setUser, data, refresh, edit, act }: Settin
           <div className="configuration-actions">
             <ObjectTransfer onImported={refresh} />
           </div>
+          <ConfigBackupCard isAdmin={user.role === 'admin'} />
         </section>
       )}
       {tab === 'profile' && (

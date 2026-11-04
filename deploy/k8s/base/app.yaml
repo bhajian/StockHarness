@@ -82,6 +82,11 @@ spec:
                 name: openharness-config
             - secretRef:
                 name: openharness-secrets
+            # Config backup to git (#149): CONFIG_BACKUP_GITHUB_TOKEN. Optional; without it the backup only
+            # detects changes.
+            - secretRef:
+                name: openharness-config-backup
+                optional: true
           env:
             - name: POD_NAME
               valueFrom:

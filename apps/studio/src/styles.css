@@ -7518,3 +7518,9 @@ details.advanced summary {
 .object-transfer-error { color: var(--danger, #dc2626); font-size: 13px; }
 .configuration-panel { padding: 18px; }
 .configuration-actions { display: flex; gap: 8px; margin-top: 12px; }
+.config-backup-card { margin-top: 18px; padding: 14px 16px; border: 1px solid var(--border, #e5e7eb); border-radius: 10px; display: flex; flex-direction: column; gap: 10px; }
+.config-backup-head { display: flex; align-items: center; gap: 8px; }
+.config-backup-label { font-size: 13px; color: var(--muted, #6b7280); }
+.config-backup-facts { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; margin: 0; font-size: 13px; }
+.config-backup-facts dt { color: var(--muted, #6b7280); }
+.config-backup-facts dd { margin: 0; }

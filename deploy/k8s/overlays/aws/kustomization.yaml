@@ -81,6 +81,7 @@ patches:
         name: openharness-config
       data:
         PUBLIC_URL: https://openharness.faberiq.ai
+        CONFIG_BACKUP_REPO: bhajian/StockHarness
         GATEWAY_PUBLIC_URL: wss://openharness.faberiq.ai
   # Persistent EBS for the shared files claim and every StatefulSet volume.
   - target:

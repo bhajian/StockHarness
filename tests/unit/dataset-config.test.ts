@@ -1,6 +1,5 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
 import { parse } from 'yaml';
 
 process.env.ENCRYPTION_KEY ??= 'ab'.repeat(32);
@@ -33,8 +32,21 @@ syncs:
   assert.equal(entries[1].config.enabled, true, 'schema defaults apply');
 });
 
-test('accepts the deploy/config-io JSON export (43 syncs, $ref connections)', async () => {
-  const text = await readFile('deploy/config-io/exports/dataset-syncs.json', 'utf8');
+test('accepts the legacy config-io JSON export ($ref connections)', async () => {
+  const text = JSON.stringify([
+    {
+      name: 'EOD',
+      connectionId: { $ref: { type: 'connections', name: 'FMP' } },
+      dataset: 'eod_prices',
+      schedule: { enabled: true, everyMinutes: 1440, input: 'x' },
+    },
+    {
+      name: 'Rates',
+      connectionId: { $ref: { type: 'connections', name: 'FMP' } },
+      dataset: 'treasury_rates',
+      schedule: { enabled: false, everyMinutes: 1440, input: 'x' },
+    },
+  ]);
   const { entries, errors } = parseDatasetSyncConfig(text);
   assert.deepEqual(errors, []);
   assert.equal(entries.length, JSON.parse(text).length);

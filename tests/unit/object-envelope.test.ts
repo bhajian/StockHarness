@@ -55,15 +55,21 @@ test('accepts kind: List, the Datasets DatasetSyncs export and config-io bare li
     [syncs.docs[0].kind, syncs.docs[0].metadata.name, syncs.docs[0].spec.dataset],
     ['DatasetSync', 'EOD', 'eod_prices'],
   );
-  const skills = parseObjects(await readFile('deploy/config-io/exports/skills.yaml', 'utf8'), 'Skill');
+  // Legacy config-io files are bare lists; their kind comes from the file name.
+  const legacy = parseObjects('- { name: stock, description: d, instructions: x }\n', 'Skill');
+  assert.deepEqual([legacy.errors, legacy.docs[0]?.metadata.name], [[], 'stock']);
+  // The committed backup (#149) is stockharness/v1 objects.
+  const skills = parseObjects(await readFile('deploy/config-io/exports/skills.yaml', 'utf8'));
   assert.deepEqual(skills.errors, []);
-  assert.ok(skills.docs.some((d) => d.metadata.name === 'strategy-library'));
+  assert.ok(skills.docs.length >= 1 && skills.docs.every((d) => d.kind === 'Skill'));
+  const syncsRepo = parseObjects(await readFile('deploy/config-io/exports/dataset-syncs.yaml', 'utf8'));
+  assert.deepEqual(syncsRepo.errors, []);
+  assert.equal(syncsRepo.docs.length, 43);
   const json = parseObjects(
-    await readFile('deploy/config-io/exports/dataset-syncs.json', 'utf8'),
+    '[{"name":"EOD","dataset":"eod_prices"},{"name":"Rates","dataset":"treasury_rates"}]',
     'DatasetSync',
   );
-  assert.deepEqual(json.errors, []);
-  assert.equal(json.docs.length, 43);
+  assert.deepEqual([json.errors, json.docs.length], [[], 2]);
   assert.match(parseObjects('[{ "name": "x" }]').errors[0].message, /needs its kind/);
 });
 

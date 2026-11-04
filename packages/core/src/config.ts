@@ -82,6 +82,19 @@ const s = z.object({
   GATEWAY_PUBLIC_URL: z.string().default(''),
   GATEWAY_API_TOKEN: z.string().default(''),
   GATEWAY_ADMIN_TOKEN: z.string().default(''),
+  // Config backup to git (#149). Without a token the backup only detects changes (Settings -> Configuration).
+  CONFIG_BACKUP_GITHUB_TOKEN: z.string().default(''),
+  CONFIG_BACKUP_REPO: z
+    .string()
+    .regex(/^[\w.-]+\/[\w.-]+$/, 'CONFIG_BACKUP_REPO must look like owner/repo')
+    .or(z.literal(''))
+    .default(''),
+  CONFIG_BACKUP_BRANCH: z.string().default('config-backup'),
+  CONFIG_BACKUP_BASE: z.string().default('main'),
+  CONFIG_BACKUP_PATH: z.string().default('deploy/config-io/exports'),
+  /** Workspace to back up; defaults to the first administrator's workspace. */
+  CONFIG_BACKUP_OWNER_ID: z.string().default(''),
+  CONFIG_BACKUP_INTERVAL_MINUTES: z.coerce.number().int().min(1).max(1440).default(5),
   // Open Harness API adapter (https://github.com/jeffrschneider/OpenHarness). This install is one harness.
   OPENHARNESS_BASE_PATH: z
     .string()

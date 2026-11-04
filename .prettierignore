@@ -7,3 +7,5 @@ package-lock.json
 data
 LICENSE
 NOTICE
+# Rendered by the app (config backup, #152/#149): must stay byte-identical to the renderer.
+deploy/config-io/exports/
