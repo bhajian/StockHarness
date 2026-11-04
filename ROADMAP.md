@@ -69,6 +69,7 @@ The dataset product (Layers 1 and 2) and the agent product (Layers 3 to 5) are c
 | L1-9  | **Ingest validation.** Bad payloads (empty, schema drift, error JSON) can land silently.                                                                                                                                        | Validate each page against the expected field set; record drift in the catalog; fail the sync item loudly.                                                                                                                        |
 | L1-10 | **Dead code.** `deploy/stock-data-sync/flows/` is replaced by the dataset feature; `fin_*` collections are leftovers.                                                                                                           | Delete the old flows; drop or archive `fin_*`; fix `layer1_mapping.yaml` to the real collection names.                                                                                                                            |
 | L1-11 | **Priority.** Syncs aren't prioritized today.                                                                                                                                                                                   | A priority field per sync: P0 for prices, corporate actions and calendar; P1 for fundamentals and estimates; P2 for news, segments and peers. The scheduler runs P0 first and never lets P2 starve P0 when the rate limit is hit. |
+| L1-12 | **Config backup.** The repo copy of the configuration (`deploy/config-io/exports/`) is JSON for syncs, refreshed by hand, and was stale (14 syncs drifted by 2026-11-04).                                                       | YAML for every config, committed automatically to a `config-backup` branch/PR after each change, a drift indicator, and a tested restore (M1.17).                                                                                 |
 
 ### Exit criteria
 
@@ -271,6 +272,10 @@ The judge can downgrade a mechanically passing idea (with reasons), but cannot u
   - "how to write a strategy plugin",
   - "how to read the catalog",
   - a judge checklist.
+
+### Collection-scoped data access for any harness
+
+The built-in MongoDB tools are pinned to the workspace database but not to collections. M3.08 adds **collection bindings**: a harness or agent is granted specific collections with `read` / `insert` / `update` / `delete` permissions (plus optional row limits, a fixed filter, and as_of enforcement), enforced on the server, with each collection's catalog schema in the agent's context. This enables, for example, a data chatbot that answers from `prices_daily`, `features_daily` and `signals` instead of calling FMP directly.
 
 ### New MCP tools (all server-side, as_of-aware)
 
@@ -838,6 +843,7 @@ Work top to bottom. Each item is one PR-sized issue, and later items depend on e
 | M1.14 | #86   | Datasets > Health tab + data freshness indicator in the top bar                                                |
 | M1.15 | #87   | Datasets > Catalog UI: collection list + collection page                                                       |
 | M1.16 | #88   | Run the full Layer 1 backfill + verify M1 exit criteria                                                        |
+| M1.17 | #149  | Config backup in the repo: YAML exports of every configuration, kept current automatically + tested restore    |
 
 ### M2 · Transforms tab + core transforms
 
@@ -860,15 +866,16 @@ Work top to bottom. Each item is one PR-sized issue, and later items depend on e
 
 ### M3 · Trusted evaluator + data tools
 
-| Order | Issue | Title                                                                                                     |
-| ----- | ----- | --------------------------------------------------------------------------------------------------------- |
-| M3.01 | #103  | Strategy plugin contract + as_of-enforced reader (ctx.read_df)                                            |
-| M3.02 | #104  | Trusted evaluator core: date walk, portfolio construction, next-day execution, costs, delisting, borrow   |
-| M3.03 | #105  | Walk-forward splits + locked holdout (18 months, one shot)                                                |
-| M3.04 | #106  | Evaluator metrics incl. factor exposures and deflated Sharpe                                              |
-| M3.05 | #107  | Evaluator sanity suite: random signal ≈ 0, 12-1 momentum 2022 drawdown, lookahead canary, reproducibility |
-| M3.06 | #108  | MCP data tools: list/describe/sample/query_collection with server-side as_of + fuzz test                  |
-| M3.07 | #109  | evaluate_strategy tool + dev-only evaluation result page                                                  |
+| Order | Issue | Title                                                                                                             |
+| ----- | ----- | ----------------------------------------------------------------------------------------------------------------- |
+| M3.01 | #103  | Strategy plugin contract + as_of-enforced reader (ctx.read_df)                                                    |
+| M3.02 | #104  | Trusted evaluator core: date walk, portfolio construction, next-day execution, costs, delisting, borrow           |
+| M3.03 | #105  | Walk-forward splits + locked holdout (18 months, one shot)                                                        |
+| M3.04 | #106  | Evaluator metrics incl. factor exposures and deflated Sharpe                                                      |
+| M3.05 | #107  | Evaluator sanity suite: random signal ≈ 0, 12-1 momentum 2022 drawdown, lookahead canary, reproducibility         |
+| M3.06 | #108  | MCP data tools: list/describe/sample/query_collection with server-side as_of + fuzz test                          |
+| M3.07 | #109  | evaluate_strategy tool + dev-only evaluation result page                                                          |
+| M3.08 | #148  | Collection-scoped MongoDB tools for harnesses: bind collections with read / write / delete permissions and schema |
 
 ### M4 · Research loop v1
 
