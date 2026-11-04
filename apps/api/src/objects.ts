@@ -46,6 +46,18 @@ import {
   transformHistorySchema,
   type TransformHistoryEntry,
 } from '../../../packages/core/src/transforms.js';
+import { catalogById } from '../../../packages/core/src/datasetCatalog.js';
+import {
+  createPipeline,
+  deletePipeline,
+  pipelineInputSchema,
+  pipelineProblems,
+  pipelineSpec,
+  pipelines,
+  refName,
+  refType,
+  updatePipeline,
+} from '../../../packages/core/src/pipelines.js';
 
 /** Kinds stored through the generic resource routes (the others have dedicated importers). */
 const isResourceKind = (k: ObjectKind): k is 'Skill' | 'Agent' | 'Harness' => k in RESOURCE_KIND;
@@ -170,6 +182,14 @@ export async function exportObjects(
       }
       continue;
     }
+    if (kind === 'Pipeline') {
+      for (const p of await pipelines().find({ ownerId }).toArray()) {
+        if (!wanted(p.name)) continue;
+        const { name, ...spec } = pipelineSpec(p);
+        docs.push({ apiVersion: API_VERSION, kind, metadata: { name, version: String(p.version) }, spec });
+      }
+      continue;
+    }
     if (kind === 'CatalogEntry') {
       for (const e of await catalogEntries()
         .find({ ownerId, curated: { $exists: true } })
@@ -242,11 +262,21 @@ async function plan(
   // Transforms: validated by their schema and workspace rules; matched by name.
   const transformDocs = docs.filter((d) => d.kind === 'Transform');
   const incomingTransformNames = new Set(transformDocs.map((d) => d.metadata.name));
-  const incomingOutputs = new Set(
-    transformDocs.flatMap((d) =>
+  // Collections this same import creates: transform outputs and the targets of incoming dataset syncs.
+  const incomingOutputs = new Set([
+    ...transformDocs.flatMap((d) =>
       ((d.spec.outputs as { collection: string }[]) ?? []).map((o) => o.collection),
     ),
-  );
+    ...docs
+      .filter((d) => d.kind === 'DatasetSync')
+      .map(
+        (d) =>
+          (d.spec.targetCollection as string | undefined) ||
+          catalogById.get(String(d.spec.dataset))?.defaultCollection ||
+          '',
+      )
+      .filter(Boolean),
+  ]);
   for (const doc of transformDocs) {
     const name = doc.metadata.name;
     const parsed = transformInputSchema.safeParse({ ...doc.spec, name });
@@ -285,6 +315,10 @@ async function plan(
         !(
           p.startsWith('Trigger transform:') &&
           [...incomingTransformNames].some((n) => p.startsWith(`Trigger transform:${n}:`))
+        ) &&
+        !(
+          p.startsWith('Trigger dataset:') &&
+          [...incomingOutputs].some((c) => p.startsWith(`Trigger dataset:${c}:`))
         ),
     );
     if (problems.length) {
@@ -311,6 +345,63 @@ async function plan(
         });
         result.items.push({ kind: 'Transform', name: t.name, action: 'remove' });
       }
+
+  // Pipelines (#156): validated like the API does; refs to syncs, transforms and harnesses created by this
+  // same import are fine (they are applied first).
+  const pipelineDocs = docs.filter((d) => d.kind === 'Pipeline');
+  const incomingRefs: Record<string, Set<string>> = {
+    sync: new Set(docs.filter((d) => d.kind === 'DatasetSync').map((d) => d.metadata.name)),
+    transform: new Set(transformDocs.map((d) => d.metadata.name)),
+    harness: new Set(docs.filter((d) => d.kind === 'Harness').map((d) => d.metadata.name)),
+  };
+  for (const doc of pipelineDocs) {
+    const name = doc.metadata.name;
+    const parsed = pipelineInputSchema.safeParse({ ...doc.spec, name });
+    if (!parsed.success) {
+      const issue = parsed.error.issues[0];
+      result.errors.push({
+        kind: 'Pipeline',
+        name,
+        message: `${issue.path.join('.') || 'spec'}: ${issue.message}`,
+      });
+      continue;
+    }
+    const current = await pipelines().findOne({ ownerId, name });
+    const suppliedHere = new Set(
+      parsed.data.nodes.filter((n) => incomingRefs[refType(n.ref)]?.has(refName(n.ref))).map((n) => n.id),
+    );
+    const { errors } = await pipelineProblems(ownerId, parsed.data, current?._id);
+    const real = errors.filter(
+      (e) =>
+        !/^([a-z0-9_]+): no (dataset sync|transform|harness) named/.test(e) ||
+        !suppliedHere.has(e.split(':')[0]),
+    );
+    if (real.length) {
+      result.errors.push({ kind: 'Pipeline', name, message: real.join('; ') });
+      continue;
+    }
+    const action = !current
+      ? 'create'
+      : stableJson(pipelineSpec(current)) === stableJson(parsed.data)
+        ? 'unchanged'
+        : 'update';
+    prepared.push({ doc, existingId: current?._id, action });
+    result.items.push({ kind: 'Pipeline', name, action });
+  }
+  if (mode === 'replace' && pipelineDocs.length) {
+    const names = new Set(pipelineDocs.map((d) => d.metadata.name));
+    for (const p of await pipelines()
+      .find({ ownerId }, { projection: { name: 1 } })
+      .toArray())
+      if (!names.has(p.name)) {
+        prepared.push({
+          doc: { apiVersion: API_VERSION, kind: 'Pipeline', metadata: { name: p.name }, spec: {} },
+          existingId: p._id,
+          action: 'remove',
+        });
+        result.items.push({ kind: 'Pipeline', name: p.name, action: 'remove' });
+      }
+  }
 
   // Catalog docs: curated descriptions only, matched by collection name (merge semantics in both modes).
   for (const doc of docs.filter((d) => d.kind === 'CatalogEntry')) {
@@ -506,6 +597,14 @@ export async function applyObjectImport(
         dismissedCaveats: spec.dismissedCaveats ?? [],
       });
       done.push({ kind: 'CatalogEntry', name: p.doc.metadata.name, action: p.action });
+    }
+    // Pipelines after everything they reference.
+    for (const p of prepared.filter((x) => x.doc.kind === 'Pipeline' && x.action !== 'unchanged')) {
+      const body = { ...p.doc.spec, name: p.doc.metadata.name };
+      if (p.action === 'remove') await deletePipeline(ownerId, p.existingId!);
+      else if (p.existingId) await updatePipeline(ownerId, p.existingId, body, principal.user._id);
+      else await createPipeline(ownerId, body, principal.user._id);
+      done.push({ kind: 'Pipeline', name: p.doc.metadata.name, action: p.action });
     }
     // Removals last and in reverse dependency order, so harnesses go before the skills/agents they use.
     for (const kind of [...OBJECT_KINDS].reverse()) {

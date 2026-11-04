@@ -19,7 +19,7 @@ export type TransformRun = {
   transformId: string;
   transformName: string;
   version: number;
-  trigger: 'manual' | 'schedule' | 'event';
+  trigger: 'manual' | 'schedule' | 'event' | 'pipeline';
   /** Groups the yearly chunks of one backfill request. */
   batchId?: string;
   window?: TransformWindow;

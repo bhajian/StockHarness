@@ -199,7 +199,8 @@ export const probeDatasetDepth = (body: {
 export const fetchDatasetRuns = (id: string) => api<DatasetSyncRun[]>(`/dataset-syncs/${id}/runs`);
 
 // --- Everything is a YAML object (#152) ----------------------------------------------------------
-export type ObjectKind = 'Skill' | 'Agent' | 'Harness' | 'DatasetSync' | 'Transform' | 'CatalogEntry';
+export type ObjectKind =
+  'Skill' | 'Agent' | 'Harness' | 'DatasetSync' | 'Transform' | 'CatalogEntry' | 'Pipeline';
 export type ObjectImportPlan = {
   mode: 'merge' | 'replace';
   items: { kind: ObjectKind; name: string; action: 'create' | 'update' | 'unchanged' | 'remove' }[];

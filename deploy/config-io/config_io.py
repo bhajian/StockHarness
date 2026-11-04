@@ -36,6 +36,7 @@ FILES = [
     ("DatasetSync", "dataset-syncs.yaml", ["dataset-syncs.json"]),
     ("Transform", "transforms.yaml", []),
     ("CatalogEntry", "catalog.yaml", []),
+    ("Pipeline", "pipelines.yaml", []),
 ]
 BASE = os.environ.get("OH_BASE", "https://openharness.faberiq.ai").rstrip("/")
 _opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))

@@ -10,6 +10,7 @@ const KIND_LABEL: Record<ObjectKind, string> = {
   DatasetSync: 'dataset syncs',
   Transform: 'transforms',
   CatalogEntry: 'catalog docs',
+  Pipeline: 'pipelines',
 };
 
 /**
