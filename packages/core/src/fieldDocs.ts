@@ -1,0 +1,140 @@
+// Curated meanings and units for fields that recur across FMP datasets (#84). The catalog shows these as
+// curated docs; anything not listed gets an auto-inferred type only and an "undocumented" flag.
+export type FieldDoc = { description: string; unit?: string };
+
+export const FIELD_DOCS: Record<string, FieldDoc> = {
+  symbol: {
+    description: 'FMP ticker as returned. Tickers change and are reused; Layer 2 joins on security_id.',
+  },
+  date: {
+    description:
+      'Event or period date (meaning depends on the dataset: trading day, period end, ex-date, report date).',
+  },
+  _syncedAt: {
+    description: 'When StockHarness pulled this row (UTC). Not when the information became public.',
+  },
+  snapshot_date: {
+    description: 'The weekly snapshot this row belongs to (part of the key: each sync appends a snapshot).',
+  },
+  open: { description: 'Opening price (unadjusted).', unit: 'USD' },
+  high: { description: 'High price (unadjusted).', unit: 'USD' },
+  low: { description: 'Low price (unadjusted).', unit: 'USD' },
+  close: { description: 'Closing price (unadjusted for splits/dividends).', unit: 'USD' },
+  volume: { description: 'Shares traded.', unit: 'shares' },
+  vwap: { description: 'Volume-weighted average price.', unit: 'USD' },
+  change: { description: 'Price change vs the previous close.', unit: 'USD' },
+  changePercent: { description: 'Price change vs the previous close.', unit: 'percent points' },
+  changesPercentage: { description: 'Price change vs the previous close.', unit: 'percent points' },
+  price: { description: 'Price at the time of the row.', unit: 'USD' },
+  marketCap: { description: 'Market capitalization.', unit: 'USD' },
+  acceptedDate: {
+    description:
+      'SEC acceptance time of the filing (ET). The known-at time for statements; equals the period end when FMP has no real value.',
+  },
+  filingDate: {
+    description: 'Date the filing was made public. The known-at date for insider trades and employee counts.',
+  },
+  fiscalYear: { description: 'Fiscal year of the period.' },
+  period: { description: 'Fiscal period: Q1–Q4 or FY (annual).' },
+  reportedCurrency: {
+    description: 'Currency the company reports in. Convert to USD before comparing companies.',
+  },
+  cik: { description: 'SEC Central Index Key.' },
+  revenue: { description: 'Total revenue for the period.', unit: 'reportedCurrency' },
+  grossProfit: { description: 'Revenue minus cost of revenue.', unit: 'reportedCurrency' },
+  operatingIncome: {
+    description: 'Operating income (EBIT before non-operating items).',
+    unit: 'reportedCurrency',
+  },
+  netIncome: { description: 'Net income attributable to common shareholders.', unit: 'reportedCurrency' },
+  ebitda: {
+    description: 'Earnings before interest, taxes, depreciation and amortization.',
+    unit: 'reportedCurrency',
+  },
+  ebit: { description: 'Earnings before interest and taxes.', unit: 'reportedCurrency' },
+  eps: { description: 'Basic earnings per share.', unit: 'reportedCurrency/share' },
+  epsDiluted: { description: 'Diluted earnings per share.', unit: 'reportedCurrency/share' },
+  weightedAverageShsOut: { description: 'Weighted average basic shares outstanding.', unit: 'shares' },
+  weightedAverageShsOutDil: {
+    description: 'Weighted average diluted shares outstanding. Use for market cap = price × shares.',
+    unit: 'shares',
+  },
+  totalAssets: { description: 'Total assets at period end.', unit: 'reportedCurrency' },
+  totalLiabilities: { description: 'Total liabilities at period end.', unit: 'reportedCurrency' },
+  totalStockholdersEquity: { description: 'Shareholders’ equity at period end.', unit: 'reportedCurrency' },
+  totalDebt: { description: 'Short- plus long-term debt.', unit: 'reportedCurrency' },
+  cashAndCashEquivalents: { description: 'Cash and cash equivalents.', unit: 'reportedCurrency' },
+  netDebt: { description: 'Total debt minus cash.', unit: 'reportedCurrency' },
+  retainedEarnings: {
+    description: 'Retained earnings (accumulated deficit if negative).',
+    unit: 'reportedCurrency',
+  },
+  totalCurrentAssets: { description: 'Current assets.', unit: 'reportedCurrency' },
+  totalCurrentLiabilities: { description: 'Current liabilities.', unit: 'reportedCurrency' },
+  operatingCashFlow: { description: 'Cash from operations.', unit: 'reportedCurrency' },
+  capitalExpenditure: { description: 'Capital expenditure (negative = cash out).', unit: 'reportedCurrency' },
+  freeCashFlow: { description: 'Operating cash flow plus capital expenditure.', unit: 'reportedCurrency' },
+  stockBasedCompensation: { description: 'Stock-based compensation expense.', unit: 'reportedCurrency' },
+  commonStockRepurchased: { description: 'Cash spent on buybacks (negative).', unit: 'reportedCurrency' },
+  epsActual: { description: 'Reported EPS (null before the report).', unit: 'USD/share' },
+  epsEstimated: { description: 'Consensus EPS estimate before the report.', unit: 'USD/share' },
+  revenueActual: { description: 'Reported revenue.', unit: 'USD' },
+  revenueEstimated: { description: 'Consensus revenue estimate.', unit: 'USD' },
+  epsAvg: { description: 'Consensus EPS estimate for the fiscal year in `date`.', unit: 'USD/share' },
+  epsHigh: { description: 'Highest analyst EPS estimate.', unit: 'USD/share' },
+  epsLow: { description: 'Lowest analyst EPS estimate.', unit: 'USD/share' },
+  revenueAvg: { description: 'Consensus revenue estimate.', unit: 'USD' },
+  numAnalystsEps: { description: 'Number of analysts in the EPS consensus.' },
+  targetConsensus: { description: 'Consensus price target.', unit: 'USD' },
+  targetHigh: { description: 'Highest price target.', unit: 'USD' },
+  targetLow: { description: 'Lowest price target.', unit: 'USD' },
+  consensus: { description: 'Consensus rating (Strong Buy … Strong Sell).' },
+  dividend: { description: 'Dividend per share (as paid).', unit: 'USD/share' },
+  adjDividend: {
+    description: 'Split-adjusted dividend per share; use for comparisons over time.',
+    unit: 'USD/share',
+  },
+  declarationDate: {
+    description: 'Date the dividend was announced (empty for about 11% of rows). The known-at date.',
+  },
+  recordDate: { description: 'Dividend record date.' },
+  paymentDate: { description: 'Dividend payment date.' },
+  yield: { description: 'Dividend yield.', unit: 'percent points' },
+  numerator: { description: 'Split ratio numerator (e.g. 4 in a 4-for-1 split).' },
+  denominator: { description: 'Split ratio denominator.' },
+  transactionType: {
+    description:
+      'SEC Form 4 code: P-Purchase (open-market buy), S-Sale, A-Award, M-Exempt, F-InKind, G-Gift, …',
+  },
+  transactionDate: {
+    description: 'Trade date. Not public until the filing/disclosure date; never use as known-at.',
+  },
+  securitiesTransacted: { description: 'Shares bought or sold.', unit: 'shares' },
+  securitiesOwned: { description: 'Shares owned after the transaction.', unit: 'shares' },
+  typeOfOwner: { description: 'Insider role (officer title, director, 10% owner).' },
+  reportingCik: { description: 'CIK of the reporting insider.' },
+  disclosureDate: {
+    description:
+      'Date the congressional trade was disclosed. The known-at date (often 30–45 days after the trade).',
+  },
+  amount: { description: 'Disclosed trade size as a range, e.g. "$15,001 - $50,000".' },
+  publishedDate: { description: 'When the item was published. The known-at time.' },
+  newGrade: { description: 'Analyst rating after the action.' },
+  previousGrade: { description: 'Analyst rating before the action.' },
+  gradingCompany: { description: 'Broker or research firm.' },
+  action: { description: 'Rating action: upgrade, downgrade, hold, initialise.' },
+  sector: { description: 'Sector (current classification; not point-in-time).' },
+  industry: { description: 'Industry (current classification; not point-in-time).' },
+  exchange: { description: 'Listing exchange.' },
+  is_delisted: {
+    description: 'True when the name is from the delisted-companies list (survivorship-aware universe).',
+  },
+  security_id: { description: 'Immutable StockHarness security id. Join on this, never on the ticker.' },
+  known_at: { description: 'When the row became public/usable (UTC).' },
+  as_of_date: { description: 'First trading date a strategy may act on this row. Filter as_of_date <= D.' },
+  adj_close: { description: 'Close adjusted for splits and dividends.', unit: 'USD' },
+  ret_1d: { description: 'One-day price return.', unit: 'ratio' },
+  tr_1d: { description: 'One-day total return including dividends.', unit: 'ratio' },
+  dollar_volume: { description: 'Close × volume.', unit: 'USD' },
+  dq_flags: { description: 'Data-quality flags raised for this row (see dq_issues).' },
+};
