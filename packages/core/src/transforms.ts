@@ -132,11 +132,41 @@ async function syncTargets(ownerId: string) {
 }
 
 /** Workspace rules a transform must satisfy beyond its schema. Returns the problems (empty when valid). */
+/** Trigger cycles (A after transform:B, B after transform:A) would run forever; refuse them when saving. */
+export function triggerCycle(
+  t: { name: string; trigger: { after: string[] } },
+  others: { name: string; trigger?: { after?: string[] } }[],
+): string[] | undefined {
+  const after = new Map(others.map((o) => [o.name, o.trigger?.after ?? []]));
+  after.set(t.name, t.trigger.after);
+  const ups = (n: string) =>
+    (after.get(n) ?? []).filter((a) => a.startsWith('transform:')).map((a) => a.slice('transform:'.length));
+  const path: string[] = [];
+  const seen = new Set<string>();
+  const visit = (n: string): string[] | undefined => {
+    if (path.includes(n)) return [...path.slice(path.indexOf(n)), n];
+    if (seen.has(n)) return undefined;
+    seen.add(n);
+    path.push(n);
+    for (const u of ups(n)) {
+      const c = visit(u);
+      if (c) return c;
+    }
+    path.pop();
+    return undefined;
+  };
+  const cycle = visit(t.name);
+  return cycle && cycle.includes(t.name) ? cycle : undefined;
+}
+
 export async function transformProblems(ownerId: string, t: TransformInput, selfId?: string) {
   const problems: string[] = [];
   const targets = await syncTargets(ownerId);
   const others = await transforms()
-    .find({ ownerId, ...(selfId ? { _id: { $ne: selfId } } : {}) }, { projection: { name: 1, outputs: 1 } })
+    .find(
+      { ownerId, ...(selfId ? { _id: { $ne: selfId } } : {}) },
+      { projection: { name: 1, outputs: 1, trigger: 1 } },
+    )
     .toArray();
   if (others.some((o) => o.name === t.name)) problems.push(`A transform named ${t.name} already exists`);
   const producedBy = new Map<string, string>();
@@ -167,6 +197,8 @@ export async function transformProblems(ownerId: string, t: TransformInput, self
     if (kind === 'transform' && !others.some((o) => o.name === ref))
       problems.push(`Trigger ${a}: no transform named ${ref}`);
   }
+  const cycle = triggerCycle(t, others);
+  if (cycle) problems.push(`Trigger cycle: ${cycle.join(' → ')} (each would keep triggering the next)`);
   return problems;
 }
 

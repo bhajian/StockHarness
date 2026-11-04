@@ -302,6 +302,12 @@ export type Transform = TransformDraft & {
   updatedAt: string;
   nextRunAt?: string;
   lastRun?: TransformRun | null;
+  /** Dependency triggers (#92): upstreams completed since the last triggered run. */
+  triggerState?: {
+    pending?: Record<string, { at: string; date_from?: string; date_to?: string }>;
+    lastEventAt?: string;
+    lastFiredAt?: string;
+  };
 };
 export const fetchTransforms = () => api<Transform[]>('/transforms');
 export const fetchTransform = (id: string) => api<Transform>(`/transforms/${encodeURIComponent(id)}`);

@@ -2160,3 +2160,14 @@ textarea::placeholder {
 .versions-diff .code-editor-toolbar label {
   font-size: 12px;
 }
+
+/* Dependency trigger status (#92) */
+.trigger-status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.trigger-status small {
+  width: 100%;
+  color: var(--faint);
+}

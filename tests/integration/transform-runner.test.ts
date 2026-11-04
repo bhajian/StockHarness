@@ -250,6 +250,40 @@ test('a preview runs a draft on a sample without writing and checks every output
   assert.equal(bad.status, 400);
 });
 
+test('a transform that runs after another is triggered by its completion (#92)', async () => {
+  const follower = await ok('/transforms', {
+    name: 'tr_follow',
+    code: 'import oh\noh.output("tr_follow_out").upsert([{"k": "w", "start": oh.window.start, "end": oh.window.end}])\n',
+    inputs: ['tr_returns'],
+    outputs: [{ collection: 'tr_follow_out', key: ['k'], static: true }],
+    incremental: { mode: 'date_range', lookback_days: 0 },
+    trigger: { after: ['transform:tr_returns'] },
+  });
+  assert.match(
+    (
+      await request(
+        `/transforms/${transformId}`,
+        { ...(await ok(`/transforms/${transformId}`)), trigger: { after: ['transform:tr_follow'] } },
+        'PUT',
+      )
+    ).data.error,
+    /Trigger cycle/,
+  );
+  await ok(`/transforms/${transformId}/run`, { range: 'custom', start: '2026-01-12', end: '2026-01-16' });
+  const [run] = await runsDone(follower.id, 1);
+  assert.equal(run.trigger, 'event');
+  assert.equal(run.status, 'succeeded', JSON.stringify(run));
+  assert.deepEqual(
+    [run.window.start, run.window.end],
+    ['2026-01-12', '2026-01-16'],
+    "the upstream run's window",
+  );
+  const [doc] = (await docs('tr_follow_out')).documents;
+  assert.deepEqual([doc.start, doc.end], ['2026-01-12', '2026-01-16']);
+  await new Promise((r) => setTimeout(r, 8000));
+  assert.equal((await ok(`/transforms/${follower.id}/runs`)).length, 1, 'triggered exactly once');
+});
+
 test('a failing transform records the error and traceback', async () => {
   const bad = await ok('/transforms', {
     name: 'tr_broken',
