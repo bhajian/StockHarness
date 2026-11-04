@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { api, errorMessage, send, timestamp, type Data, type Entity } from '../api';
 import { Button, Empty, ErrorNotice, Field, IconButton, Modal, PageTitle, Status } from './ui';
+import { ObjectTransfer } from './ObjectTransfer';
 import { Markdown, Trace } from './Playground';
 import { describeSchedule } from '../../../../packages/core/src/schedule.js';
 
@@ -38,10 +39,13 @@ export function WorkflowsPage({ data, edit, navigate, act, refresh }: PageProps)
       <PageTitle
         title="Harnesses"
         action={
-          <Button onClick={() => edit('workflows')}>
-            <Plus size={17} />
-            Create harness
-          </Button>
+          <div className="page-title-actions">
+            <ObjectTransfer kinds={['Harness']} onImported={refresh} compact />
+            <Button onClick={() => edit('workflows')}>
+              <Plus size={17} />
+              Create harness
+            </Button>
+          </div>
         }
       />
       <div className="overview-grid">

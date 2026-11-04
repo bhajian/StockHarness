@@ -8,6 +8,7 @@ export GATEWAY_PORT="${TEST_GATEWAY_PORT:-18090}"
 export PUBLIC_URL="http://localhost:$STUDIO_PORT"
 export TEST_BASE_URL="$PUBLIC_URL"
 export TEST_FAULT_INJECTION=true
+export TEST_DIRECT_MONGODB_URI="mongodb://127.0.0.1:${TEST_DIRECT_MONGO_PORT:-27119}"
 export TEST_LINUX_INSTALLER=true
 compose() { docker compose -p "$TEST_COMPOSE_PROJECT" -f compose.yaml -f tests/compose.test.yaml "$@"; }
 cleanup() {

@@ -3,6 +3,7 @@ import { Plus, Sparkles, Trash2 } from 'lucide-react';
 import { MAX_SKILL_INSTRUCTION_CHARS } from '../../../../packages/core/src/skillLimits';
 import { api, send, type Data, type Entity } from '../api';
 import { Button, Empty, Field, IconButton, Modal, PageTitle, SaveForm } from './ui';
+import { ObjectTransfer } from './ObjectTransfer';
 
 type PageProps = {
   data: Data;
@@ -107,10 +108,13 @@ export function SkillsPage({ data, refresh, act }: PageProps) {
       <PageTitle
         title="Skills"
         action={
-          <Button onClick={() => setEditing('new')}>
-            <Plus size={17} />
-            New skill
-          </Button>
+          <div className="page-title-actions">
+            <ObjectTransfer kinds={['Skill']} onImported={refresh} compact />
+            <Button onClick={() => setEditing('new')}>
+              <Plus size={17} />
+              New skill
+            </Button>
+          </div>
         }
       />
       {!data.skills.length ? (

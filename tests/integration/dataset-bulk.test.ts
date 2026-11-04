@@ -4,6 +4,14 @@ import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 
+// Direct-database tests: they need their own throwaway MongoDB (scripts/test-stack.sh starts one as the
+// `mongo-direct` service of the isolated test project). Skipped when it is not provided.
+const DIRECT_MONGO = process.env.TEST_DIRECT_MONGODB_URI;
+const skipReason = DIRECT_MONGO ? undefined : 'set TEST_DIRECT_MONGODB_URI (scripts/test-stack.sh does)';
+if (DIRECT_MONGO) {
+  process.env.MONGODB_URI = DIRECT_MONGO;
+  process.env.MONGODB_DATABASE = 'agentic_direct_test';
+}
 process.env.ENCRYPTION_KEY ??= 'ab'.repeat(32);
 process.env.SETUP_TOKEN ??= 'unit-test-setup-token'.repeat(3);
 const { mongo } = await import('../../packages/core/src/db.js');
@@ -33,6 +41,7 @@ const sync = (id: string, dataset: string, extra: Record<string, unknown> = {}) 
 });
 
 before(async () => {
+  if (!DIRECT_MONGO) return;
   await mongo.connect();
   await datasetSyncs().insertMany([
     sync('prices-a', 'eod_prices'),
@@ -52,63 +61,72 @@ before(async () => {
     .insertMany([{ i: 1 }]);
 });
 after(async () => {
+  if (!DIRECT_MONGO) return;
   await datasetSyncs().deleteMany({ ownerId: { $in: [ownerId, otherOwner] } });
   await datasetSyncRuns().deleteMany({ ownerId: { $in: [ownerId, otherOwner] } });
   await ws().dropDatabase();
   await mongo.close();
 });
 
-test('disable/enable update only the selected syncs of this tenant and re-seed the schedule', async () => {
-  const r = await applyDatasetSyncBulk(ownerId, {
-    ids: ['prices-a', 'rates', 'foreign'],
-    action: 'disable',
-    dropCollections: false,
-  });
-  assert.equal(r.matched, 2, 'another tenant’s sync is never matched');
-  const docs = await datasetSyncs()
-    .find({ _id: { $in: ['prices-a', 'rates', 'prices-b', 'foreign'] } })
-    .toArray();
-  const by = Object.fromEntries(docs.map((d) => [d._id, d]));
-  assert.equal(by['prices-a'].enabled, false);
-  assert.equal(by['rates'].enabled, false);
-  assert.equal(by['prices-a'].nextRunAt, undefined);
-  assert.equal(by['prices-b'].enabled, true);
-  assert.equal(by['foreign'].enabled, true);
-  await applyDatasetSyncBulk(ownerId, {
-    ids: ['prices-a', 'rates'],
-    action: 'enable',
-    dropCollections: false,
-  });
-  assert.equal((await datasetSyncs().findOne({ _id: 'rates' }))!.enabled, true);
-});
+test(
+  'disable/enable update only the selected syncs of this tenant and re-seed the schedule',
+  { skip: skipReason },
+  async () => {
+    const r = await applyDatasetSyncBulk(ownerId, {
+      ids: ['prices-a', 'rates', 'foreign'],
+      action: 'disable',
+      dropCollections: false,
+    });
+    assert.equal(r.matched, 2, 'another tenant’s sync is never matched');
+    const docs = await datasetSyncs()
+      .find({ _id: { $in: ['prices-a', 'rates', 'prices-b', 'foreign'] } })
+      .toArray();
+    const by = Object.fromEntries(docs.map((d) => [d._id, d]));
+    assert.equal(by['prices-a'].enabled, false);
+    assert.equal(by['rates'].enabled, false);
+    assert.equal(by['prices-a'].nextRunAt, undefined);
+    assert.equal(by['prices-b'].enabled, true);
+    assert.equal(by['foreign'].enabled, true);
+    await applyDatasetSyncBulk(ownerId, {
+      ids: ['prices-a', 'rates'],
+      action: 'enable',
+      dropCollections: false,
+    });
+    assert.equal((await datasetSyncs().findOne({ _id: 'rates' }))!.enabled, true);
+  },
+);
 
-test('reset clears the cursor but keeps records', async () => {
+test('reset clears the cursor but keeps records', { skip: skipReason }, async () => {
   await applyDatasetSyncBulk(ownerId, { ids: ['index'], action: 'reset', dropCollections: false });
   assert.equal((await datasetSyncs().findOne({ _id: 'index' }))!.cursor, undefined);
   assert.equal(await ws().collection('eod_index').countDocuments(), 1);
 });
 
-test('purge empties each collection once and resets every sync writing to it', async () => {
-  const r = await applyDatasetSyncBulk(ownerId, {
-    ids: ['prices-a', 'rates'],
-    action: 'purge',
-    dropCollections: false,
-  });
-  assert.deepEqual(
-    r.collections!.sort((a, b) => a.name.localeCompare(b.name)),
-    [
-      { name: 'eod_prices', deleted: 3 },
-      { name: 'my_rates', deleted: 1 },
-    ],
-  );
-  assert.equal(await ws().collection('eod_prices').countDocuments(), 0);
-  assert.equal(await ws().collection('eod_index').countDocuments(), 1, 'unselected collection untouched');
-  const b = (await datasetSyncs().findOne({ _id: 'prices-b' }))!;
-  assert.equal(b.cursor, undefined, 'unselected sync sharing the purged collection is reset too');
-  assert.equal((await datasetSyncs().findOne({ _id: 'foreign' }))!.cursor, '2026-01-01');
-});
+test(
+  'purge empties each collection once and resets every sync writing to it',
+  { skip: skipReason },
+  async () => {
+    const r = await applyDatasetSyncBulk(ownerId, {
+      ids: ['prices-a', 'rates'],
+      action: 'purge',
+      dropCollections: false,
+    });
+    assert.deepEqual(
+      r.collections!.sort((a, b) => a.name.localeCompare(b.name)),
+      [
+        { name: 'eod_prices', deleted: 3 },
+        { name: 'my_rates', deleted: 1 },
+      ],
+    );
+    assert.equal(await ws().collection('eod_prices').countDocuments(), 0);
+    assert.equal(await ws().collection('eod_index').countDocuments(), 1, 'unselected collection untouched');
+    const b = (await datasetSyncs().findOne({ _id: 'prices-b' }))!;
+    assert.equal(b.cursor, undefined, 'unselected sync sharing the purged collection is reset too');
+    assert.equal((await datasetSyncs().findOne({ _id: 'foreign' }))!.cursor, '2026-01-01');
+  },
+);
 
-test('run queues selected syncs and skips ones already running', async () => {
+test('run queues selected syncs and skips ones already running', { skip: skipReason }, async () => {
   await datasetSyncRuns().insertOne({
     _id: randomUUID(),
     ownerId,
@@ -134,24 +152,28 @@ test('run queues selected syncs and skips ones already running', async () => {
   assert.equal(run?.status, 'failed');
 });
 
-test('delete with dropCollections drops only collections no remaining sync writes to', async () => {
-  await ws().collection('eod_prices').insertOne({ s: 9 });
-  const r = await applyDatasetSyncBulk(ownerId, {
-    ids: ['prices-a', 'index'],
-    action: 'delete',
-    dropCollections: true,
-  });
-  assert.equal(r.matched, 2);
-  assert.deepEqual(r.collections, [{ name: 'eod_index', dropped: true }]);
-  assert.deepEqual(r.keptCollections, ['eod_prices']);
-  assert.equal(await ws().collection('eod_prices').countDocuments(), 1);
-  const names = (await ws().listCollections().toArray()).map((c) => c.name);
-  assert.ok(!names.includes('eod_index'));
-  assert.equal(await datasetSyncs().countDocuments({ _id: { $in: ['prices-a', 'index'] } }), 0);
-  assert.equal(await datasetSyncs().countDocuments({ _id: 'foreign' }), 1);
-});
+test(
+  'delete with dropCollections drops only collections no remaining sync writes to',
+  { skip: skipReason },
+  async () => {
+    await ws().collection('eod_prices').insertOne({ s: 9 });
+    const r = await applyDatasetSyncBulk(ownerId, {
+      ids: ['prices-a', 'index'],
+      action: 'delete',
+      dropCollections: true,
+    });
+    assert.equal(r.matched, 2);
+    assert.deepEqual(r.collections, [{ name: 'eod_index', dropped: true }]);
+    assert.deepEqual(r.keptCollections, ['eod_prices']);
+    assert.equal(await ws().collection('eod_prices').countDocuments(), 1);
+    const names = (await ws().listCollections().toArray()).map((c) => c.name);
+    assert.ok(!names.includes('eod_index'));
+    assert.equal(await datasetSyncs().countDocuments({ _id: { $in: ['prices-a', 'index'] } }), 0);
+    assert.equal(await datasetSyncs().countDocuments({ _id: 'foreign' }), 1);
+  },
+);
 
-test('startup recovery fails runs orphaned by a restart', async () => {
+test('startup recovery fails runs orphaned by a restart', { skip: skipReason }, async () => {
   const id = randomUUID();
   await datasetSyncRuns().insertOne({
     _id: id,

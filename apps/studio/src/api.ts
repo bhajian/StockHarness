@@ -175,3 +175,31 @@ export async function exportDatasetSyncsYaml(ids: string[] = []) {
 export const importDatasetSyncsYaml = (yaml: string, mode: 'merge' | 'replace', dryRun: boolean) =>
   send<{ applied: boolean; plan: DatasetImportPlan }>('/dataset-syncs/import', { yaml, mode, dryRun });
 export const fetchDatasetRuns = (id: string) => api<DatasetSyncRun[]>(`/dataset-syncs/${id}/runs`);
+
+// --- Everything is a YAML object (#152) ----------------------------------------------------------
+export type ObjectKind = 'Skill' | 'Agent' | 'Harness' | 'DatasetSync';
+export type ObjectImportPlan = {
+  mode: 'merge' | 'replace';
+  items: { kind: ObjectKind; name: string; action: 'create' | 'update' | 'unchanged' | 'remove' }[];
+  errors: { kind?: ObjectKind; name?: string; message: string }[];
+};
+export type ObjectImportResult = {
+  applied: boolean;
+  plan: ObjectImportPlan;
+  partial?: ObjectImportPlan['items'];
+  error?: string;
+};
+export async function exportObjectsYaml(kinds: ObjectKind[] = []) {
+  const response = await fetch(`/api/objects/export${kinds.length ? `?kinds=${kinds.join(',')}` : ''}`, {
+    credentials: 'same-origin',
+  });
+  if (!response.ok) throw new Error(`Export failed (${response.status})`);
+  return response.text();
+}
+export const importObjectsYaml = (
+  yaml: string,
+  mode: 'merge' | 'replace',
+  dryRun: boolean,
+  legacyKind?: ObjectKind,
+) =>
+  send<ObjectImportResult>('/objects/import', { yaml, mode, dryRun, ...(legacyKind ? { legacyKind } : {}) });

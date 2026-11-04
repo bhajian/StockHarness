@@ -1,6 +1,7 @@
 import { ApiExplorer } from './ApiExplorer';
 import { useEffect, useState } from 'react';
 import {
+  FileCode2,
   Bot,
   Check,
   Code2,
@@ -18,6 +19,7 @@ import {
   X,
 } from 'lucide-react';
 import { WebhooksPanel } from './WebhooksPanel';
+import { ObjectTransfer } from './ObjectTransfer';
 import { PythonSecretsPanel } from './PythonSecrets';
 import {
   api,
@@ -97,6 +99,10 @@ export function SettingsPage({ user, setUser, data, refresh, edit, act }: Settin
         <button className={tab === 'secrets' ? 'active' : ''} onClick={() => setTab('secrets')}>
           <Code2 size={16} />
           Python secrets
+        </button>
+        <button className={tab === 'configuration' ? 'active' : ''} onClick={() => setTab('configuration')}>
+          <FileCode2 size={16} />
+          Configuration (YAML)
         </button>
         {user.role === 'admin' && (
           <button className={tab === 'users' ? 'active' : ''} onClick={() => setTab('users')}>
@@ -220,6 +226,25 @@ export function SettingsPage({ user, setUser, data, refresh, edit, act }: Settin
       )}
       {tab === 'email' && <EmailSettingsPanel isAdmin={user.role === 'admin'} />}
       {tab === 'secrets' && <PythonSecretsPanel data={data} isAdmin={user.role === 'admin'} />}
+      {tab === 'configuration' && (
+        <section className="panel configuration-panel">
+          <div className="section-toolbar">
+            <div>
+              <h2>Configuration as YAML</h2>
+              <p className="field-help">
+                Every object in this workspace (dataset syncs, harnesses with their Python code steps, agents
+                and skills) exports as <code>stockharness/v1</code> YAML and imports back, here or on another
+                install. References are written by name; connections, model providers and secrets are never
+                included, so create those first on a new install. Data rows are backed up with MongoDB, not
+                here.
+              </p>
+            </div>
+          </div>
+          <div className="configuration-actions">
+            <ObjectTransfer onImported={refresh} />
+          </div>
+        </section>
+      )}
       {tab === 'profile' && (
         <div className="settings-card">
           <div className="profile-heading">

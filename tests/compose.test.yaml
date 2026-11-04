@@ -98,3 +98,9 @@ services:
         ]
       interval: 5s
       retries: 10
+  # A throwaway MongoDB for the direct-database integration tests (dataset syncs, YAML objects). Part of the
+  # isolated test project, so `compose down -v` removes it.
+  mongo-direct:
+    image: mongo:7.0
+    ports: ['127.0.0.1:${TEST_DIRECT_MONGO_PORT:-27119}:27017']
+    restart: 'no'
