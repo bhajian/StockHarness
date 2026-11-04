@@ -18,3 +18,13 @@
   integration tests when changing execution, authentication or storage behavior.
 - Use the isolated test Compose project for fault injection. Never stop, modify,
   or reuse unrelated containers or volumes.
+
+- Everything StockHarness manages, in every layer, is a YAML object: configuration,
+  code (e.g. a Layer 2 transform's Python), policies (gates, permissions,
+  collection bindings) and records (theories, evaluations). Any new object kind
+  must ship with YAML export and import through the shared object framework
+  (`apiVersion: stockharness/v1`, `kind`, `metadata`, `spec`). References are by
+  name, there are no secrets (only secret names), and code is kept verbatim. It
+  must come with a round-trip test (export, import into an empty isolated stack,
+  export again, identical YAML). Keep the repo copy under
+  `deploy/config-io/exports/` current (see #149).
