@@ -127,5 +127,48 @@ class ReadsDescribeDuckdbPit(unittest.TestCase):
         self.assertEqual(oh.pit.as_of(oh.pit.eod_known_at("2026-11-03"), same_day=True), date(2026, 11, 3))
 
 
+class Preview(unittest.TestCase):
+    """#95: a preview captures rows and checks per output, writes nothing and reads only the sample symbols."""
+
+    def test_preview_writes_nothing(self):
+        DB["pv_raw"].drop()
+        DB["pv_raw"].insert_many([{"symbol": s, "date": f"2026-01-0{d}", "close": d} for s in "ABC" for d in range(1, 6)])
+        out_path = os.path.join(tempfile.mkdtemp(), "preview.json")
+        code = """
+import oh
+rows = oh.read("pv_raw")
+assert {r["symbol"] for r in rows} == {"A", "B"}, rows
+data = [{"symbol": r["symbol"], "date": r["date"], "close": r["close"], "known_at": r["date"] + "T21:00:00Z",
+         "note": None if r["close"] < 4 else "x"} for r in rows]
+data.append(dict(data[0]))                       # a duplicate key
+data.append({"symbol": "A", "date": "2026-01-09", "close": 1})  # no known_at: counted, not raised
+data[1]["close"] = float("inf")                  # not JSON: shown as a string
+oh.output("pv_out").upsert(data)
+oh.output("pv_static").upsert([{"k": 1}, {"k": 2}])
+oh.dq("odd", "warn", security_id="A", date="2026-01-01")
+"""
+        env = {**os.environ, "OH_PREVIEW": "1", "OH_PREVIEW_PATH": out_path, "OH_SAMPLE_SYMBOLS": json.dumps(["A", "B"]),
+               "OH_OUTPUTS": json.dumps([
+                   {"collection": "pv_out", "key": ["symbol", "date"], "write_mode": "upsert", "known_at_field": "known_at"},
+                   {"collection": "pv_static", "key": ["k"], "write_mode": "replace", "static": True}]),
+               "OH_DQ_COLLECTION": "pv_out"}
+        env.pop("OH_WINDOW", None)
+        subprocess.run([sys.executable, "-c", code], check=True, env=env)
+        self.assertNotIn("pv_out", DB.list_collection_names())
+        self.assertNotIn("pv_static", DB.list_collection_names())
+        self.assertEqual(DB["dq_issues"].count_documents({"collection": "pv_out"}), 0)
+        with open(out_path) as h:
+            p = json.load(h)
+        o = p["pv_out"]
+        self.assertEqual((o["count"], o["dup_keys"], o["missing_known_at"], o["missing_key"]), (12, 1, 1, 0))
+        self.assertEqual(len(o["rows"]), 12)
+        self.assertEqual(o["fields"]["close"], {"type": "int", "null_pct": 0})
+        self.assertEqual(o["rows"][1]["close"], "inf")
+        self.assertGreater(o["fields"]["note"]["null_pct"], 50)
+        self.assertEqual(o["fields"]["known_at"]["null_pct"], round(100 / 12, 1), "a missing field counts as null")
+        self.assertEqual(o["dq"], [{"issue_type": "odd", "severity": "warn", "security_id": "A", "date": "2026-01-01"}])
+        self.assertEqual(p["pv_static"]["count"], 2)
+
+
 if __name__ == "__main__":
     unittest.main()

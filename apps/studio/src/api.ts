@@ -344,3 +344,37 @@ export type CatalogListItem = {
 export type CatalogEntryDetail = Omit<CatalogListItem, 'fieldCount'> & { fields: CatalogField[] };
 export const fetchCatalog = () => api<CatalogListItem[]>('/catalog');
 export const fetchCatalogEntry = (c: string) => api<CatalogEntryDetail>(`/catalog/${encodeURIComponent(c)}`);
+
+// Transform preview (#95): runs the code on a sample without writing.
+export type PreviewCheck = { id: string; status: 'pass' | 'warn' | 'fail'; text: string };
+export type PreviewOutput = {
+  count: number;
+  rows: Record<string, unknown>[];
+  dup_keys: number;
+  missing_key: number;
+  missing_known_at: number;
+  fields: Record<string, { type: string | null; null_pct: number }>;
+  dq?: { issue_type: string; severity: string; security_id?: string; date?: string }[];
+  truncated?: boolean;
+  checks: PreviewCheck[];
+};
+export type TransformPreview = {
+  id: string;
+  transformName: string;
+  status: 'running' | 'succeeded' | 'failed';
+  window?: { start: string; end: string; lookback_start: string };
+  symbols: string[];
+  outputs?: Record<string, PreviewOutput>;
+  reads?: Record<string, number>;
+  stdout?: string;
+  stderr?: string;
+  error?: string;
+  durationMs?: number;
+  createdAt: string;
+};
+export const startTransformPreview = (draft: TransformDraft, id?: string) =>
+  send<TransformPreview>(id ? `/transforms/${encodeURIComponent(id)}/preview` : '/transforms/preview', {
+    transform: draft,
+  });
+export const fetchTransformPreview = (id: string) =>
+  api<TransformPreview>(`/transform-previews/${encodeURIComponent(id)}`);

@@ -55,10 +55,11 @@ def _tail(path: Path, limit: int) -> tuple[str, bool]:
         return handle.read().decode("utf-8", "replace"), False
 
 
-def _meta(stats_path: Path, describe_path: Path) -> dict:
-    """What the SDK recorded: per-collection stats and oh.describe() docs (bounded, best effort)."""
+def _meta(stats_path: Path, describe_path: Path, preview_path: Path | None = None) -> dict:
+    """What the SDK recorded: per-collection stats, oh.describe() docs and preview captures (bounded, best effort)."""
     meta = {}
-    for key, path in (("stats", stats_path), ("describe", describe_path)):
+    files = [("stats", stats_path), ("describe", describe_path)] + ([("preview", preview_path)] if preview_path else [])
+    for key, path in files:
         if path.exists() and path.stat().st_size <= RESULT_LIMIT:
             try:
                 meta[key] = json.loads(path.read_text(encoding="utf-8"))
@@ -78,6 +79,7 @@ def main() -> int:
     shutil.copy(Path(__file__).with_name("oh.py"), work / "oh.py")
     result_path = work / ".oh-result.json"
     describe_path, stats_path = work / ".oh-describe.json", work / ".oh-stats.json"
+    preview_path = work / ".oh-preview.json"
     stdout_path, stderr_path = work / ".stdout", work / ".stderr"
     env = {
         "PATH": os.environ.get("PATH", ""),
@@ -91,10 +93,12 @@ def main() -> int:
         "OH_STATS_PATH": str(stats_path),
     }
     # Transform context (#90): only these OH_* names, set by the API, never by job env.
-    for name in ("OH_WINDOW", "OH_OUTPUTS", "OH_DQ_COLLECTION"):
+    for name in ("OH_WINDOW", "OH_OUTPUTS", "OH_DQ_COLLECTION", "OH_PREVIEW", "OH_SAMPLE_SYMBOLS"):
         value = (job.get("context") or {}).get(name)
         if isinstance(value, str) and value:
             env[name] = value
+    if env.get("OH_PREVIEW") == "1":  # #95: writes are captured here instead of stored
+        env["OH_PREVIEW_PATH"] = str(preview_path)
     if job.get("mongodbUri"):
         env["MONGODB_URI"] = job["mongodbUri"]
     # Secrets the step or agent was given, as environment variables; reserved names are never overridden.
@@ -146,7 +150,7 @@ def main() -> int:
             "truncated": stdout_truncated or stderr_truncated,
             "result": result,
             "durationMs": int((time.time() - started) * 1000),
-            "meta": _meta(stats_path, describe_path),
+            "meta": _meta(stats_path, describe_path, preview_path if env.get("OH_PREVIEW") == "1" else None),
         },
     )
     return 0 if status == "succeeded" else 1

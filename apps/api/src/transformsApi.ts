@@ -11,6 +11,8 @@ import {
 } from '../../../packages/core/src/transforms.js';
 import { z } from 'zod';
 import { requestTransformRun, transformRuns } from '../../../packages/core/src/transformRunner.js';
+import { startPreview, transformPreviews } from '../../../packages/core/src/transformPreview.js';
+import { transformSpec } from '../../../packages/core/src/transforms.js';
 
 export const transformsRouter = Router();
 const adminOnly = (role: string) => {
@@ -144,4 +146,49 @@ transformsRouter.post('/transforms/:id/versions/:version/restore', async (req, r
       ),
     ),
   );
+});
+
+// Preview (#95): run the code on a sample without writing. The body's `transform` is a draft (unsaved edits);
+// for /transforms/:id/preview it defaults to the saved version. Poll GET /transform-previews/:id.
+const previewInput = z.object({
+  transform: z.unknown().optional(),
+  start: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional(),
+  end: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional(),
+  symbols: z.array(z.string().min(1).max(20)).max(200).optional(),
+});
+transformsRouter.post('/transforms/preview', async (req, res) => {
+  adminOnly(req.principal!.user.role);
+  const { transform, ...opts } = previewInput.parse(req.body ?? {});
+  if (!transform) throw new HttpError(400, 'Send the transform to preview');
+  res.status(202).json(pub(await startPreview(req.principal!.tenantId, transform, opts)));
+});
+transformsRouter.post('/transforms/:id/preview', async (req, res) => {
+  adminOnly(req.principal!.user.role);
+  const t = await transforms().findOne({ _id: String(req.params.id), ownerId: req.principal!.tenantId });
+  if (!t) throw new HttpError(404, 'Transform not found');
+  const { transform, ...opts } = previewInput.parse(req.body ?? {});
+  res
+    .status(202)
+    .json(
+      pub(
+        await startPreview(req.principal!.tenantId, transform ?? transformSpec(t), {
+          ...opts,
+          transformId: t._id,
+        }),
+      ),
+    );
+});
+transformsRouter.get('/transform-previews/:id', async (req, res) => {
+  const p = await transformPreviews().findOne({
+    _id: String(req.params.id),
+    ownerId: req.principal!.tenantId,
+  });
+  if (!p) throw new HttpError(404, 'Preview not found (previews expire after a day)');
+  res.json(pub(p));
 });

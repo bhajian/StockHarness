@@ -17,6 +17,8 @@ import {
   Activity,
   AlertTriangle,
   Rows3,
+  Eye,
+  LoaderCircle,
 } from 'lucide-react';
 import {
   type CatalogField,
@@ -24,6 +26,9 @@ import {
   type Transform,
   type TransformDraft,
   type TransformRun,
+  type TransformPreview,
+  startTransformPreview,
+  fetchTransformPreview,
   deleteTransform,
   fetchCatalog,
   fetchCatalogEntry,
@@ -421,13 +426,38 @@ function TransformEditor({
     return () => clearInterval(t);
   }, [activeRun, loadRuns]);
 
-  const markers = useMemo(
-    () =>
-      latest?.status === 'failed' && latest.version === transform?.version && !dirty
-        ? tracebackMarkers(latest.stderr ?? '')
-        : [],
-    [latest, transform?.version, dirty],
-  );
+  // Preview (#95): the current draft on a sample, nothing written. Its traceback matches the editor's code.
+  const [preview, setPreview] = useState<TransformPreview | null>(null);
+  const [previewCode, setPreviewCode] = useState('');
+  const previewing = preview?.status === 'running';
+  useEffect(() => {
+    if (!preview || preview.status !== 'running') return;
+    const t = setInterval(
+      () =>
+        void fetchTransformPreview(preview.id)
+          .then((p) => p.status !== 'running' && setPreview(p))
+          .catch(() => undefined),
+      2000,
+    );
+    return () => clearInterval(t);
+  }, [preview]);
+  async function runPreview() {
+    setError('');
+    try {
+      const body = { ...draft, params: JSON.parse(paramsText || '{}') };
+      setPreviewCode(draft.code);
+      setPreview(await startTransformPreview(body, transform?.id));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }
+  const markers = useMemo(() => {
+    if (preview?.status === 'failed' && previewCode === draft.code)
+      return tracebackMarkers(preview.stderr ?? '');
+    return latest?.status === 'failed' && latest.version === transform?.version && !dirty
+      ? tracebackMarkers(latest.stderr ?? '')
+      : [];
+  }, [preview, previewCode, draft.code, latest, transform?.version, dirty]);
   const problems = draft.outputs
     .map((o) =>
       !o.collection
@@ -499,6 +529,16 @@ function TransformEditor({
           {transform && isAdmin && (
             <ObjectTransfer kinds={['Transform']} names={[transform.name]} onImported={onSaved} compact />
           )}
+          {isAdmin && (
+            <Button
+              variant="secondary"
+              onClick={() => void runPreview()}
+              disabled={previewing || problems.length > 0 || !!paramsError}
+              title="Run the current code on a sample (20 symbols, 1 year) without writing anything"
+            >
+              {previewing ? <LoaderCircle size={16} className="spin" /> : <Eye size={16} />} Preview
+            </Button>
+          )}
           {transform && isAdmin && (
             <Button
               variant="secondary"
@@ -523,11 +563,16 @@ function TransformEditor({
           )}
         </div>
       </div>
-      {(error || message || problems.length > 0 || paramsError) && (
-        <div className={`notice ${error || problems.length || paramsError ? 'error' : ''}`} role="status">
-          {error || [...problems, paramsError].filter(Boolean).join(' · ') || message}
+      {(error || message) && (
+        <div className={`notice ${error ? 'error' : ''}`} role="status">
+          {error || message}
         </div>
       )}
+      <ValidationBar
+        problems={[...problems, paramsError].filter(Boolean)}
+        preview={preview}
+        stale={!!preview && previewCode !== draft.code}
+      />
       <div className="transform-panes">
         <aside className="transform-inputs">
           <h3>Inputs</h3>
@@ -791,6 +836,7 @@ function TransformEditor({
           </ConfigSection>
         </aside>
       </div>
+      {preview && <PreviewPanel preview={preview} onClose={() => setPreview(null)} />}
       {transform && <LatestRun run={latest} runs={runs} reload={loadRuns} />}
       {running && transform && (
         <RunDialog
@@ -1095,5 +1141,213 @@ function RunDialog({
         </div>
       </div>
     </Modal>
+  );
+}
+
+/** Validation bar (#95): blocking problems (red) and the latest preview's checks per output. */
+function ValidationBar({
+  problems,
+  preview,
+  stale,
+}: {
+  problems: string[];
+  preview: TransformPreview | null;
+  stale: boolean;
+}) {
+  if (problems.length)
+    return (
+      <div className="validation-bar" role="status">
+        {problems.map((p) => (
+          <StatusPill key={p} status="blocked" label={p} />
+        ))}
+      </div>
+    );
+  if (!preview)
+    return (
+      <div className="validation-bar muted" role="status">
+        Preview runs the current code on 20 symbols × 1 year and checks every output. Nothing is written.
+      </div>
+    );
+  if (preview.status === 'running')
+    return (
+      <div className="validation-bar" role="status">
+        <StatusPill status="running" label={`Previewing on ${preview.symbols.length || 'all'} symbols…`} />
+      </div>
+    );
+  return (
+    <div className="validation-bar" role="status">
+      {stale && <StatusPill status="stale" label="code changed since this preview" />}
+      {preview.status === 'failed' && (
+        <StatusPill status="failed" label={preview.error ?? 'Preview failed'} />
+      )}
+      {Object.entries(preview.outputs ?? {}).map(([c, o]) => (
+        <span key={c} className="validation-output">
+          <code>{c}</code>
+          {o.checks.map((k) => (
+            <StatusPill
+              key={k.id}
+              status={k.status === 'pass' ? 'ok' : k.status === 'warn' ? 'warn' : 'failed'}
+              label={k.text}
+            />
+          ))}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+/** Bottom panel for a preview: rows (with an output switcher), schema, DQ issues and logs. */
+function PreviewPanel({ preview, onClose }: { preview: TransformPreview; onClose: () => void }) {
+  const names = Object.keys(preview.outputs ?? {});
+  const [output, setOutput] = useState(names[0] ?? '');
+  const [tab, setTab] = useState<'rows' | 'schema' | 'dq' | 'logs'>('rows');
+  const o = preview.outputs?.[output] ?? preview.outputs?.[names[0]];
+  const columns = useMemo(() => {
+    const seen: string[] = [];
+    for (const r of o?.rows ?? []) for (const k of Object.keys(r)) if (!seen.includes(k)) seen.push(k);
+    return seen;
+  }, [o]);
+  return (
+    <section className="transform-run-panel preview-panel">
+      <div className="transform-run-head">
+        <h3>Preview</h3>
+        <StatusPill status={preview.status} />
+        <span className="muted-line">
+          {preview.symbols.length ? `${preview.symbols.length} symbols` : 'all rows'}
+          {preview.window ? ` · ${preview.window.start} → ${preview.window.end}` : ''}
+          {preview.durationMs !== undefined && preview.durationMs !== null
+            ? ` · ${fmtMs(preview.durationMs)}`
+            : ''}{' '}
+          · nothing written
+        </span>
+        {names.length > 1 && (
+          <select aria-label="Preview output" value={output} onChange={(e) => setOutput(e.target.value)}>
+            {names.map((n) => (
+              <option key={n} value={n}>
+                {n} ({preview.outputs![n].count.toLocaleString()})
+              </option>
+            ))}
+          </select>
+        )}
+        <IconButton title="Close preview" onClick={onClose}>
+          <X size={14} />
+        </IconButton>
+      </div>
+      <div className="tabs compact" role="tablist">
+        {(
+          [
+            ['rows', `Rows${o ? ` (${o.rows.length} of ${o.count.toLocaleString()})` : ''}`],
+            ['schema', 'Schema'],
+            ['dq', `DQ issues${o?.dq?.length ? ` (${o.dq.length})` : ''}`],
+            ['logs', 'Logs'],
+          ] as const
+        ).map(([id, label]) => (
+          <button
+            key={id}
+            role="tab"
+            aria-selected={tab === id}
+            className={tab === id ? 'active' : ''}
+            onClick={() => setTab(id)}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      {preview.status === 'running' ? (
+        <Skeleton rows={4} />
+      ) : tab === 'logs' ? (
+        <pre className="run-log">
+          {[preview.error, preview.stdout, preview.stderr].filter(Boolean).join('\n\n') || '(empty)'}
+        </pre>
+      ) : !o ? (
+        <p className="muted-line">No output was captured.</p>
+      ) : tab === 'rows' ? (
+        o.rows.length ? (
+          <div className="table-wrap data-grid-table">
+            <table>
+              <thead>
+                <tr>
+                  {columns.map((c) => (
+                    <th key={c}>{c}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {o.rows.map((r, i) => (
+                  <tr key={i}>
+                    {columns.map((c) => (
+                      <td key={c}>
+                        {r[c] === null || r[c] === undefined ? (
+                          <span className="data-grid-null">—</span>
+                        ) : typeof r[c] === 'object' ? (
+                          JSON.stringify(r[c])
+                        ) : (
+                          String(r[c])
+                        )}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <p className="muted-line">No rows on the sample.</p>
+        )
+      ) : tab === 'schema' ? (
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Field</th>
+                <th>Type</th>
+                <th>Null %</th>
+              </tr>
+            </thead>
+            <tbody>
+              {Object.entries(o.fields).map(([f, v]) => (
+                <tr key={f}>
+                  <td>
+                    <code>{f}</code>
+                  </td>
+                  <td>{v.type ?? '—'}</td>
+                  <td>{v.null_pct}%</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : o.dq?.length ? (
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Issue</th>
+                <th>Severity</th>
+                <th>Symbol</th>
+                <th>Date</th>
+              </tr>
+            </thead>
+            <tbody>
+              {o.dq.map((d, i) => (
+                <tr key={i}>
+                  <td>{d.issue_type}</td>
+                  <td>
+                    <StatusPill
+                      status={d.severity === 'error' ? 'failed' : d.severity === 'warn' ? 'warn' : 'ok'}
+                      label={d.severity}
+                    />
+                  </td>
+                  <td>{d.security_id ?? '—'}</td>
+                  <td>{d.date ?? '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <p className="muted-line">No data-quality issues on the sample.</p>
+      )}
+    </section>
   );
 }

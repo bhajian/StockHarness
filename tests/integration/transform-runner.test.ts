@@ -175,6 +175,75 @@ test('re-running the same window is idempotent; a full backfill runs yearly chun
   );
 });
 
+async function previewDone(id: string, timeoutMs = 300000) {
+  const until = Date.now() + timeoutMs;
+  while (Date.now() < until) {
+    const p = await ok(`/transform-previews/${id}`);
+    if (p.status !== 'running') return p;
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  throw new Error('preview did not finish');
+}
+
+test('a preview runs a draft on a sample without writing and checks every output (#95)', async () => {
+  const saved = await ok(`/transforms/${transformId}`);
+  // A draft (unsaved edits): a renamed output and a summary keyed only by k (not unique per row).
+  const draft = {
+    ...saved,
+    outputs: [{ ...saved.outputs[0], collection: 'tr_preview_out' }, saved.outputs[1]],
+    code: CODE.replaceAll('"tr_returns"', '"tr_preview_out"').replace(
+      'oh.output("tr_summary").upsert([',
+      'oh.output("tr_summary").upsert([{"k": "rows", "value": 0}, ',
+    ),
+  };
+  for (const k of [
+    'id',
+    'version',
+    'createdAt',
+    'updatedAt',
+    'createdBy',
+    'updatedBy',
+    'lastRun',
+    'nextRunAt',
+  ])
+    delete draft[k];
+  const started = await ok('/transforms/preview', {
+    transform: draft,
+    start: '2026-01-05',
+    end: '2026-01-16',
+  });
+  assert.equal(started.status, 'running');
+  assert.deepEqual(
+    started.symbols,
+    ['AAA', 'BBB'],
+    'the sample comes from the input when there is no universe',
+  );
+  const p = await previewDone(started.id);
+  assert.equal(p.status, 'succeeded', JSON.stringify(p));
+  const out = p.outputs.tr_preview_out;
+  assert.equal(out.count, inWindow('2026-01-05', '2026-01-16'));
+  assert.ok(out.rows.length > 0 && out.rows.length <= 100);
+  const check = (o: any, id: string) => o.checks.find((c: any) => c.id === id)?.status;
+  assert.equal(check(out, 'key_unique'), 'pass');
+  assert.equal(check(out, 'known_at'), 'pass');
+  assert.equal(check(p.outputs.tr_summary, 'key_unique'), 'fail');
+  assert.equal(out.dq.length, 1, 'the zero close is reported, not stored');
+  assert.equal((await docs('tr_preview_out')).total, 0, 'nothing was written');
+  assert.equal((await docs('dq_issues', { collection: 'tr_preview_out' })).total, 0);
+  // The saved version: its output exists in the catalog, so the schema is compared with the last run.
+  const savedPreview = await previewDone((await ok(`/transforms/${transformId}/preview`, {})).id);
+  assert.equal(
+    check(savedPreview.outputs.tr_returns, 'schema'),
+    'pass',
+    JSON.stringify(savedPreview.outputs.tr_returns.checks),
+  );
+  // An invalid draft is refused before anything runs.
+  const bad = await request('/transforms/preview', {
+    transform: { ...draft, outputs: [{ collection: 'x', key: ['k'] }] },
+  });
+  assert.equal(bad.status, 400);
+});
+
 test('a failing transform records the error and traceback', async () => {
   const bad = await ok('/transforms', {
     name: 'tr_broken',
