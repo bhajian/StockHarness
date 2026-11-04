@@ -14,7 +14,7 @@ meta:
 # status: ok = present & usable | partial = present but limited coverage | missing = not synced yet
 collections:
   eod_prices:
-    status: partial # only a recent window is synced; 5y backfill required (GAPS G4)
+    status: ok # 2016+ for the universe (M1.16 backfill, GAPS G4)
     collection: eod_prices
     symbol_field: symbol
     date_field: date
@@ -33,9 +33,29 @@ collections:
     stock_list: { collection: stock_list, fields: [symbol, companyName] }
     profiles:
       collection: company_profiles
-      fields: [symbol, cik, cusip, isin, companyName, exchange, exchangeFullName, sector,
-        industry, country, currency, ipoDate, isActivelyTrading, isEtf, isFund, isAdr, marketCap, fullTimeEmployees]
-    delisted: { collection: delisted_companies, fields: [symbol, companyName, exchange, ipoDate, delistedDate] }
+      fields:
+        [
+          symbol,
+          cik,
+          cusip,
+          isin,
+          companyName,
+          exchange,
+          exchangeFullName,
+          sector,
+          industry,
+          country,
+          currency,
+          ipoDate,
+          isActivelyTrading,
+          isEtf,
+          isFund,
+          isAdr,
+          marketCap,
+          fullTimeEmployees,
+        ]
+    delisted:
+      { collection: delisted_companies, fields: [symbol, companyName, exchange, ipoDate, delistedDate] }
     notes: 'CIK + CUSIP present in profiles -> identity matching by CIK then CUSIP then ticker+name works.'
   shares_float:
     status: ok
@@ -43,10 +63,10 @@ collections:
     symbol_field: symbol
     fields: [floatShares, freeFloat, outstandingShares, date]
   fundamentals:
-    status: partial # ~3.2k rows (recent reporters only); universe+history sweep required (GAPS G5)
-    income: { collection: fin_income }
-    balance: { collection: fin_balance }
-    cashflow: { collection: fin_cashflow }
+    status: ok # 40 quarters per universe symbol (M1.16 backfill); append-only on acceptedDate (C2)
+    income: { collection: income_statement }
+    balance: { collection: balance_sheet }
+    cashflow: { collection: cash_flow }
     key_fields:
       symbol: symbol
       period_end: date
@@ -56,8 +76,8 @@ collections:
       filing_date: filingDate
       accepted_date: acceptedDate # -> known_at
     notes: 'acceptedDate present -> correct PIT known_at. Join the three on symbol+date+period.'
-  key_metrics: { status: partial, collection: fin_key_metrics, key: [symbol, date, period] }
-  ratios: { status: partial, collection: fin_ratios, key: [symbol, date, period] }
+  key_metrics: { status: ok, collection: key_metrics, key: [symbol, date, period] }
+  ratios: { status: ok, collection: ratios, key: [symbol, date, period] }
   financial_growth: { status: ok, collection: financial_growth, key: [symbol, date, period] }
   earnings_calendar:
     status: ok
@@ -70,8 +90,19 @@ collections:
     status: ok
     collection: analyst_estimates
     key: [symbol, date, period]
-    fields: [epsAvg, epsLow, epsHigh, revenueAvg, revenueLow, revenueHigh, ebitdaAvg,
-      netIncomeAvg, numAnalystsEps, numAnalystsRevenue]
+    fields:
+      [
+        epsAvg,
+        epsLow,
+        epsHigh,
+        revenueAvg,
+        revenueLow,
+        revenueHigh,
+        ebitdaAvg,
+        netIncomeAvg,
+        numAnalystsEps,
+        numAnalystsRevenue,
+      ]
     notes: 'snapshot (no FMP historical revisions) -> _syncedAt IS the snapshot_date. Never skip weekly sync.'
   price_target_consensus:
     status: ok
@@ -99,16 +130,40 @@ collections:
     status: ok
     collection: insider_trades
     key: [symbol, filingDate, transactionDate, reportingCik, transactionType, price]
-    fields: [reportingName, typeOfOwner, acquisitionOrDisposition, securitiesTransacted,
-      securitiesOwned, directOrIndirect, formType, securityName, companyCik, url]
+    fields:
+      [
+        reportingName,
+        typeOfOwner,
+        acquisitionOrDisposition,
+        securitiesTransacted,
+        securitiesOwned,
+        directOrIndirect,
+        formType,
+        securityName,
+        companyCik,
+        url,
+      ]
     known_at_field: filingDate
     notes: 'Map FMP transactionType/code -> buy(P)/sell(S)/other. acquisitionOrDisposition = A/D.'
   congress_trades:
     status: ok
     senate: { collection: congress_senate }
     house: { collection: congress_house }
-    fields: [symbol, firstName, lastName, office, district, owner, type, amount,
-      transactionDate, disclosureDate, assetType, link]
+    fields:
+      [
+        symbol,
+        firstName,
+        lastName,
+        office,
+        district,
+        owner,
+        type,
+        amount,
+        transactionDate,
+        disclosureDate,
+        assetType,
+        link,
+      ]
     known_at_field: disclosureDate
     notes: 'amount is a range string "$1,001 - $15,000" -> parse to low/high/mid.'
   dividends:
@@ -134,10 +189,12 @@ collections:
 
 # Inputs the pipeline needs that are NOT present yet (see GAPS.md for the plan):
 missing:
-  index_constituents: { status: blocked, reason: 'FMP sp500/nasdaq/dowjones-constituent return 402 on current plan' }
+  index_constituents:
+    { status: blocked, reason: 'FMP sp500/nasdaq/dowjones-constituent return 402 on current plan' }
   historical_constituents: { status: blocked, reason: 'same 402 as above' }
   raw_13f_filings_index: { status: missing, source: 'SEC EDGAR daily index (13F-HR, 13F-HR/A)' }
   raw_13f_info_table: { status: missing, source: 'SEC informationTable.xml per filing' }
   raw_13f_datasets: { status: missing, source: 'SEC Form 13F quarterly data sets (TSV zip)' }
   raw_cusip_map: { status: missing, source: 'OpenFIGI API' }
-  raw_trading_calendar: { status: generated, source: 'pandas_market_calendars NYSE (not from the dataset feature)' }
+  raw_trading_calendar:
+    { status: generated, source: 'pandas_market_calendars NYSE (not from the dataset feature)' }

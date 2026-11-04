@@ -78,7 +78,7 @@ before(async () => {
     { symbol: 'MSFT', date: '2026-10-23', close: 512.1, volume: 2, _syncedAt: new Date() },
   ]);
   await db.collection('company_profiles').insertOne({ symbol: 'AAPL', sector: 'Technology', beta: 1.1 });
-  await db.collection('fin_income').insertOne({ symbol: 'ZZZ', date: '2025-05-31', netIncome: 1 });
+  await db.collection('old_leftover_pull').insertOne({ symbol: 'ZZZ', date: '2025-05-31', netIncome: 1 });
   await db
     .collection('delisted_companies')
     .insertOne({ symbol: 'AEAE', delistedDate: '2026-10-14', companyName: 'AltEnergy' });
@@ -121,8 +121,8 @@ test(
     assert.equal(eod.fields.find((f) => f.name === 'close')!.unit, 'USD');
     assert.equal(by.company_profiles.timeSemantics.status, 'current_only');
     assert.equal(by.insider_trades.freshness.lastStatus, 'failed');
-    assert.equal(by.fin_income.layer, null, 'leftover collection: no producer');
-    assert.equal(by.fin_income.timeSemantics.status, 'unknown');
+    assert.equal(by.old_leftover_pull.layer, null, 'leftover collection: no producer');
+    assert.equal(by.old_leftover_pull.timeSemantics.status, 'unknown');
     assert.equal(by.prices_daily.layer, 2);
     assert.deepEqual(
       [
