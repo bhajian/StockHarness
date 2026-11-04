@@ -35,11 +35,12 @@ StockHarness is a research system for finding, proving and running stock strateg
 | **4 · Ideas & simulations** | People review the proof packs, approve ideas and run full historical simulations                                                        | **Ideas**, **Simulations**             | `sim_orders`, `sim_trades`, `sim_portfolio_daily`                     | ⏳ M5–M6                                                                  |
 | **5 · Live**                | Approved strategies produce daily signals and trade a paper (dry-run) book; live results are tracked against what the backtest expected | **Signals**                            | `signals`, `live_strategies`, `alerts`                                | ⏳ M7                                                                     |
 
-Three rules make the results trustworthy:
+Four rules make the results trustworthy and recoverable:
 
 1. **Point in time.** Every row records when it became known (`known_at`, `as_of_date`). The platform filters every read by agents, backtests and live runs "as of" a date, so nothing can see the future.
 2. **Schema Catalog.** Every collection is described for the agents: what each field means, its unit, time rule, coverage and caveats.
 3. **Trusted evaluator.** Agents write only the strategy logic (a small plugin). A fixed, tested engine runs the backtest and computes every metric, so agents never grade their own work.
+4. **Everything is a YAML object.** Every sync, transform (with its Python code), harness, agent, skill, catalog doc, gate, plugin, simulation config and live strategy, plus records such as theories and evaluations, can be exported and imported as YAML (`apiVersion: stockharness/v1`). The repo keeps an always-current copy for backup and recovery (#152, #149).
 
 ```
 FMP ──► Layer 1 raw collections ──► Layer 2 transforms ──► clean, flat collections ──► Schema Catalog
@@ -1952,7 +1953,7 @@ The Theorist combines and refines these, for example "insider cluster buys **aft
 }
 ```
 
-**3. The Coder writes the plugin** (`submit_code`, version 2 after one fixed error):
+**3. The Coder writes, tests and fixes the plugin.** It runs `test_strategy`, a dry run on a small sample, reads any error (traceback with line numbers, and the real column names when a field is wrong), fixes it, and re-tests up to about 5 times. Only then does it call `evaluate_strategy` (M3.09). Here's the plugin (`submit_code`, version 2 after one fixed error):
 
 ```python
 META = {"side": "long", "horizon_days": 40, "rebalance": "daily", "top_n": 30}

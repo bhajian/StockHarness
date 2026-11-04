@@ -24,6 +24,26 @@ The dataset product (Layers 1 and 2) and the agent product (Layers 3 to 5) are c
 2. **Point-in-time and Data Access contract:** every row says when it became known, and the platform filters every agent and backtest read "as of" a date. The agent doesn't do the filtering.
 3. **Trusted Evaluator contract:** agents write the strategy logic; a fixed, tested engine runs the backtest and produces the metrics. Agents never grade their own homework.
 
+### Design principle: everything is a YAML object
+
+Every object in every layer can be **exported and imported as YAML**, in one envelope (`apiVersion: stockharness/v1`, `kind`, `metadata`, `spec`). That includes:
+
+- **definitions:**
+  - Layer 1: dataset syncs.
+  - Layer 2: **transforms, including their Python code verbatim**.
+  - Layer 3: harnesses with their collection bindings, agents, skills, catalog docs and caveats, research settings, gates, strategy plugins.
+  - Layers 4–5: simulation configs, live strategies, alert rules.
+- **records:** theories with their debate, evaluations, simulation-run summaries, verdicts.
+
+The rules:
+
+- References are by name, never by id.
+- There are no secrets (only secret names), and code is kept verbatim.
+- Import previews first, then applies all-or-nothing, in merge or replace mode.
+- Each kind has a round-trip test.
+
+Definitions round-trip fully. Records can be exported for audit and imported to restore or migrate, without re-running anything. Bulk data rows aren't included; they're covered by MongoDB backups. The repo copy in `deploy/config-io/exports/` is kept current automatically. Framework: **M1.00 (#152)**; backup: **M1.17 (#149)**.
+
 ---
 
 ## 1. What already exists and should be reused
@@ -223,6 +243,16 @@ META = {"side": "long|short|long_short", "horizon_days": 40, "rebalance": "weekl
   - breakdowns by year and by regime, and factor exposures,
   - a **deflated Sharpe using the total number of trials** run by the swarm.
 - Writes a structured `evaluation` record (numbers plus series for charts), never free text.
+
+### Run, test, fix (agent-written code)
+
+The code agents write is short Python running in the existing executor, against schemas the catalog defines, so the loop is simple (**M3.09, #153**):
+
+1. Write the code, then run `test_strategy`: a dry run through the as_of reader on a small non-holdout sample.
+2. On an error, read it (exception, traceback with the plugin's own line numbers, and the real columns when a field is wrong) and fix it. Repeat, with a cap of about 5 attempts.
+3. Then `submit_code`, then `evaluate_strategy`.
+
+`test_strategy` never reports performance, so fixing code can't turn into tuning it to pass the gates. A failing gate goes to the Judge, not back into the fix loop. In Layer 5, a broken live run raises an alert; the Coder may propose a fixed new version, which a human must approve.
 
 ### Theory lifecycle (state machine)
 
@@ -825,25 +855,26 @@ Work top to bottom. Each item is one PR-sized issue, and later items depend on e
 
 ### M1 · Layer 1 complete + Catalog v1
 
-| Order | Issue | Title                                                                                                          |
-| ----- | ----- | -------------------------------------------------------------------------------------------------------------- |
-| M1.01 | #73   | Shared UI components + Datasets nav restructure (Syncs, Transforms, Catalog, Health)                           |
-| M1.02 | #74   | Chart foundation: ECharts TimeSeriesChart wrapper + standard series API format (LTTB downsampling)             |
-| M1.03 | #75   | Remove dead Layer 1 code: old stock-data-sync flows, fin\_\* collections, fix layer1_mapping.yaml              |
-| M1.04 | #76   | Sync detail page + Syncs list columns (Priority, History, Coverage, Next run)                                  |
-| M1.05 | #77   | Per-sync history depth (from, statementQuarters) + plan-depth probe; target 10y prices, 40 quarters            |
-| M1.06 | #78   | Sync priority (P0/P1/P2) + priority-aware scheduler and FMP rate limiter                                       |
-| M1.07 | #79   | Schedule modes: Interval / Daily / Weekly / Event + hourly cadence for news, quotes, price targets             |
-| M1.08 | #80   | Backfill mode per sync: chunked, resumable, pausable, with progress; never blocks the daily schedule           |
-| M1.09 | #81   | Emit dataset.sync.completed events + subscription mechanism                                                    |
-| M1.10 | #82   | Event-driven syncs: "after earnings + N days" and "after another sync completes"                               |
-| M1.11 | #83   | Ingest validation + schema drift detection (fail sync items loudly)                                            |
-| M1.12 | #84   | Schema Catalog v1: dataset_catalog collection, auto-generated after every sync, + API                          |
-| M1.13 | #85   | Record FMP plan limits as catalog caveats (delisted ~100, constituents 402, estimate history, earnings timing) |
-| M1.14 | #86   | Datasets > Health tab + data freshness indicator in the top bar                                                |
-| M1.15 | #87   | Datasets > Catalog UI: collection list + collection page                                                       |
-| M1.16 | #88   | Run the full Layer 1 backfill + verify M1 exit criteria                                                        |
-| M1.17 | #149  | Config backup in the repo: YAML exports of every configuration, kept current automatically + tested restore    |
+| Order | Issue | Title                                                                                                                    |
+| ----- | ----- | ------------------------------------------------------------------------------------------------------------------------ |
+| M1.00 | #152  | Everything is a YAML object: common envelope + export/import framework for every layer (config, code, policies, records) |
+| M1.01 | #73   | Shared UI components + Datasets nav restructure (Syncs, Transforms, Catalog, Health)                                     |
+| M1.02 | #74   | Chart foundation: ECharts TimeSeriesChart wrapper + standard series API format (LTTB downsampling)                       |
+| M1.03 | #75   | Remove dead Layer 1 code: old stock-data-sync flows, fin\_\* collections, fix layer1_mapping.yaml                        |
+| M1.04 | #76   | Sync detail page + Syncs list columns (Priority, History, Coverage, Next run)                                            |
+| M1.05 | #77   | Per-sync history depth (from, statementQuarters) + plan-depth probe; target 10y prices, 40 quarters                      |
+| M1.06 | #78   | Sync priority (P0/P1/P2) + priority-aware scheduler and FMP rate limiter                                                 |
+| M1.07 | #79   | Schedule modes: Interval / Daily / Weekly / Event + hourly cadence for news, quotes, price targets                       |
+| M1.08 | #80   | Backfill mode per sync: chunked, resumable, pausable, with progress; never blocks the daily schedule                     |
+| M1.09 | #81   | Emit dataset.sync.completed events + subscription mechanism                                                              |
+| M1.10 | #82   | Event-driven syncs: "after earnings + N days" and "after another sync completes"                                         |
+| M1.11 | #83   | Ingest validation + schema drift detection (fail sync items loudly)                                                      |
+| M1.12 | #84   | Schema Catalog v1: dataset_catalog collection, auto-generated after every sync, + API                                    |
+| M1.13 | #85   | Record FMP plan limits as catalog caveats (delisted ~100, constituents 402, estimate history, earnings timing)           |
+| M1.14 | #86   | Datasets > Health tab + data freshness indicator in the top bar                                                          |
+| M1.15 | #87   | Datasets > Catalog UI: collection list + collection page                                                                 |
+| M1.16 | #88   | Run the full Layer 1 backfill + verify M1 exit criteria                                                                  |
+| M1.17 | #149  | Config backup in the repo: YAML exports of every configuration, kept current automatically + tested restore              |
 
 ### M2 · Transforms tab + core transforms
 
@@ -876,6 +907,7 @@ Work top to bottom. Each item is one PR-sized issue, and later items depend on e
 | M3.06 | #108  | MCP data tools: list/describe/sample/query_collection with server-side as_of + fuzz test                          |
 | M3.07 | #109  | evaluate_strategy tool + dev-only evaluation result page                                                          |
 | M3.08 | #148  | Collection-scoped MongoDB tools for harnesses: bind collections with read / write / delete permissions and schema |
+| M3.09 | #153  | Run–test–fix loop for agent-written code (simple, reuses run_python + the executor)                               |
 
 ### M4 · Research loop v1
 
