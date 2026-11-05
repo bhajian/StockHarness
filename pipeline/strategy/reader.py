@@ -129,6 +129,29 @@ class PitReader:
         self._cache[key] = (frame, as_ofs, bool(rule))
         return self._cache[key]
 
+    def trading_day_before(self, d: str, n: int) -> str:
+        """The session n trading days before d (static trading_calendar, cached; weekdays as a fallback)."""
+        if not hasattr(self, "_sessions"):
+            rows = self.source.find("trading_calendar", {"is_trading_day": True}, ["date"])
+            days = set()
+            for r in rows:
+                v = r.get("date")
+                iso = v.date().isoformat() if hasattr(v, "date") and not isinstance(v, str) else str(v)[:10]
+                days.add(iso)
+            self._sessions = sorted(days)
+        import bisect
+        from datetime import date as _date, timedelta
+
+        if self._sessions:
+            i = bisect.bisect_left(self._sessions, d)
+            return self._sessions[max(0, i - n)]
+        cur, left = _date.fromisoformat(d), n
+        while left > 0:
+            cur -= timedelta(days=1)
+            if cur.weekday() < 5:
+                left -= 1
+        return cur.isoformat()
+
     def read_df(self, collection: str, filter: dict | None = None, columns: list[str] | None = None, *,
                 as_of: str, lookback_days: int | None = None):
         """Rows of `collection` known by `as_of` (and, with lookback_days, known within that many days)."""

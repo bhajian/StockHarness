@@ -104,3 +104,19 @@ holdout:
   `price_target_consensus`, `grades_consensus`, `financial_scores`) has no history to backtest. It is tagged
   `forward_only`, its backtest evaluation is refused, and it goes to paper tracking (Layer 5). A proxy built
   from `analyst_events` can still be backtested as a separate theory.
+
+## Seed skills (#114)
+
+The research agents' skills are kept as source in `skills/` and generated into `deploy/config-io/seed/skills.yaml`
+(`node --import tsx scripts/seed-skills.ts`), which imports on a fresh install:
+
+| Skill                     | For                                                                                                                                                                                                                                    |
+| ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `strategy-library`        | 42 strategy cards by family (momentum, reversal, low risk, value, quality, capital actions, growth, earnings, analysts, insiders and congress, flows, macro, composites): signal, real fields, parameters, point-in-time traps, status |
+| `write-a-strategy-plugin` | the plugin contract, worked examples (Layer 2 features, prices, Layer 1 read directly, fundamentals) and the submit / test / fix / evaluate loop                                                                                       |
+| `read-the-catalog`        | the research data tools, what as_of means per collection, the caveats that change results                                                                                                                                              |
+| `judge-checklist`         | pre-code review (testable, no lookahead, novel, plausible, backtestable) and post-result review (overfitting, factor in disguise, caveats)                                                                                             |
+
+A unit test fails when the seed file is out of date, and `pipeline/tests/test_skill_examples.py` checks every
+plugin example in the skills against the contract (and runs the ones the synthetic market can feed). With a
+research role, only the Coder may test or evaluate code (every evaluation is a trial).

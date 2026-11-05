@@ -25,6 +25,9 @@ import {
 } from '../../../packages/core/src/lifecycleTools.js';
 
 export const researchMcpRouter = Router();
+/** With a research role, only the Coder tests and evaluates code (every evaluation is a trial, #112). */
+const strategyToolsFor = (role?: string) =>
+  STRATEGY_TOOLS.filter((d) => !role || role === 'coder' || d.name === 'get_evaluation');
 
 async function handle(req: Request, res: Response) {
   const auth = req.headers.authorization ?? '';
@@ -35,7 +38,7 @@ async function handle(req: Request, res: Response) {
     { capabilities: { tools: {} } },
   );
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
-    tools: [...DATA_TOOLS, ...STRATEGY_TOOLS, ...lifecycleToolsFor(conn.role)] as any,
+    tools: [...DATA_TOOLS, ...strategyToolsFor(conn.role), ...lifecycleToolsFor(conn.role)] as any,
   }));
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: args = {} } = request.params;
@@ -47,7 +50,11 @@ async function handle(req: Request, res: Response) {
         : name === 'evaluate_strategy' && args.theory_id
           ? await evaluateForTheory(conn.ownerId, conn.role, args, meta)
           : isStrategyTool(name)
-            ? await callStrategyTool(conn.ownerId, name, args)
+            ? await (strategyToolsFor(conn.role).some((d) => d.name === name)
+                ? callStrategyTool(conn.ownerId, name, args)
+                : Promise.reject(
+                    new HttpError(403, `${name} is for the coder; this connection acts as ${conn.role}`),
+                  ))
             : await callDataTool(await dataSession(conn.ownerId, conn.asOf), name, args);
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     } catch (error) {
