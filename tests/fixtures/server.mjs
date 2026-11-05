@@ -1901,8 +1901,39 @@ app.post('/v1beta/models/:model', (req, res) => {
       : [{ text: `Completed: ${JSON.stringify(last.parts)}` }];
   res.json({ candidates: [{ content: { role: 'model', parts }, finishReason: 'STOP' }] });
 });
-app.post('/v1/embeddings', (_req, res) => {
+// A tiny "semantic" embedding for #111: synonyms share a concept dimension, so paraphrases are close.
+const CONCEPTS = [
+  ['earnings', 'report', 'reports', 'announcement', 'results', 'quarterly'],
+  ['quality', 'profitable', 'profitability', 'roe', 'high-quality'],
+  ['beat', 'beats', 'surprise', 'surprises', 'exceed', 'exceeds', 'top', 'tops'],
+  ['drift', 'drifting', 'keep', 'continue', 'continues', 'rise', 'rising', 'climb', 'momentum'],
+  ['estimates', 'estimate', 'analysts', 'consensus', 'expectations'],
+  ['after', 'following', 'post', 'post-earnings'],
+  ['companies', 'firms', 'names', 'stocks', 'shares'],
+  ['days', 'day', 'months', 'month', 'weeks'],
+  ['volatility', 'volatile', 'vol', 'risk'],
+  ['low', 'lowest', 'calm', 'stable'],
+  ['bear', 'downturn', 'selloff', 'crash', 'recession'],
+  ['outperform', 'outperforms', 'beat-the-market', 'excess', 'alpha'],
+  ['value', 'cheap', 'book-to-market', 'undervalued'],
+  ['insider', 'insiders', 'executives', 'officers'],
+  ['buying', 'buy', 'purchases', 'purchase'],
+];
+function conceptVector(text) {
+  const v = new Array(CONCEPTS.length + 8).fill(0);
+  for (const w of String(text)
+    .toLowerCase()
+    .match(/[a-z0-9-]+/g) ?? []) {
+    const k = CONCEPTS.findIndex((group) => group.includes(w));
+    if (k >= 0) v[k] += 1;
+    else v[CONCEPTS.length + (w.length % 8)] += 0.05; // other words barely matter
+  }
+  return v;
+}
+app.post('/v1/embeddings', (req, res) => {
   stats.embeddings++;
+  if (req.body?.model === 'test-embed-concepts')
+    return res.json({ data: [{ embedding: conceptVector(req.body.input) }] });
   res.json({ data: [{ embedding: [1, 0.5, 0.2, 0.1] }] });
 });
 app.post('/api/embed', (_req, res) => {

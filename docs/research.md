@@ -39,3 +39,20 @@ the lifecycle MCP tools (#112).
 **`Theory` objects** export with their debate, links and trial count. Import restores them as they were and adds
 their trials to the workspace's trial count, so the deflated Sharpe stays honest. Numbering continues after
 imported theories, and an existing theory is never overwritten.
+
+## Theory memory (#111)
+
+Every theory is embedded (title, hypothesis and signal logic). It is stored in the vector store (Weaviate here) for
+search, and in `theory_embeddings` with its vector for exact cosine similarity. Drafts, failed and rejected theories
+stay in memory, and they still count as trials.
+
+- **Search:** `GET /api/theories/search?q=` (and the `search_theories` tool, #112) returns the closest theories
+  with their similarity, ranked by the vector store's hybrid search when it is available.
+- **Duplicate check:** on submit for review (and on re-submit after a revision), a theory whose similarity to any
+  other is at or above the threshold (default **0.9**, research settings `duplicateThreshold`) is refused. The
+  error names the match and its score. Nothing is created, unless the theory says what is different in
+  `differsFrom`. The closest match is recorded on the transition.
+- **Embeddings:** the workspace's embedding provider (research settings `embeddingProviderId`, else its first
+  embedding model). Without one, a local **lexical** vector (hashed words and word pairs) is used and labelled as
+  such: it catches re-submissions and light rewording, not real paraphrases. Add an embedding model (for example
+  Gemini `gemini-embedding-001`) for semantic duplicates.
