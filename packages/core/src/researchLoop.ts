@@ -23,6 +23,25 @@ export const researchSettingsSchema = z.object({
   /** The evaluation scope the Coder uses: symbols and how many years before the holdout. */
   evaluationSymbols: z.array(z.string().min(1).max(20)).max(2000).default(DEFAULT_SYMBOLS),
   evaluationYears: z.number().int().min(1).max(15).default(3),
+  /** Paused: no scheduled cycles, and agents of a running cycle are told to stop (#116). */
+  paused: z.boolean().default(false),
+  /** Alerts only: never stops the loop. */
+  budget: z
+    .object({
+      dailyTokenAlert: z.number().int().min(0).optional(),
+      usdPerMillionTokens: z.number().min(0).optional(),
+    })
+    .default({}),
+  /** Model and skills per role (provider ids, skill ids); the harness is rebuilt when they change. */
+  agents: z
+    .object({
+      theorist: z.object({ providerId: z.string(), skillIds: z.array(z.string()).optional() }).optional(),
+      judge: z.object({ providerId: z.string(), skillIds: z.array(z.string()).optional() }).optional(),
+      coder: z.object({ providerId: z.string(), skillIds: z.array(z.string()).optional() }).optional(),
+    })
+    .default({}),
+  /** Cycles every N minutes (applied to the harness schedule). */
+  schedule: z.object({ enabled: z.boolean(), everyMinutes: z.number().int().min(10).max(10080) }).optional(),
 });
 export type ResearchSettings = z.infer<typeof researchSettingsSchema> & {
   steering?: { note: string; at: Date; by?: string }[];
@@ -117,6 +136,12 @@ export async function researchBrief(
     .limit(20)
     .toArray();
   const gates = await activeGates(ownerId);
+  if (s.paused)
+    return {
+      role: role ?? 'none',
+      paused: true,
+      instruction: 'The research loop is paused: do nothing and reply DONE.',
+    };
   return {
     role: role ?? 'none',
     focus: s.focus || 'none set: any family from the strategy-library skill',
@@ -194,12 +219,16 @@ export type ResearchLoopInput = {
   providers: { theorist: string; judge: string; coder: string };
   connections: Record<ResearchRole, string>;
   skills: { library?: string; plugin?: string; catalog?: string; judge?: string };
+  /** Skills per role chosen in the research settings (replace the seed skills for that role). */
+  roleSkills?: Partial<Record<ResearchRole, string[]>>;
   theorists: number;
   scheduleMinutes?: number;
 };
 /** The research loop harness (ids resolved). */
 export function makeResearchLoop(o: ResearchLoopInput): Workflow {
   const sk = (...ids: (string | undefined)[]) => ids.filter(Boolean) as string[];
+  const skillsFor = (role: ResearchRole, ...defaults: (string | undefined)[]) =>
+    o.roleSkills?.[role]?.length ? o.roleSkills[role]! : sk(...defaults);
   const agent = (
     name: string,
     providerId: string,
@@ -217,6 +246,10 @@ export function makeResearchLoop(o: ResearchLoopInput): Workflow {
       skillIds,
       maxTurns: 30,
       timeoutSeconds: 1800,
+      // No token budget (#263): the research loop is bounded by the per-theory caps the tools enforce, and watched
+      // by the Research Lab's budget alerts; the effort preset's budget stopped Theorists before they submitted.
+      tokenBudget: 0,
+      effort: 'high',
       ...extra,
     });
   const nodes: WorkflowNode[] = [
@@ -234,7 +267,7 @@ export function makeResearchLoop(o: ResearchLoopInput): Workflow {
         PROMPTS.theorist(i + 1, o.theorists),
         o.connections.theorist,
         ROLE_TOOLS.theorist,
-        sk(o.skills.library, o.skills.catalog),
+        skillsFor('theorist', o.skills.library, o.skills.catalog),
       ),
       prompt: 'Research cycle: {{input}}',
       next: 'judge_pre',
@@ -262,7 +295,7 @@ export function makeResearchLoop(o: ResearchLoopInput): Workflow {
         PROMPTS.judge_pre,
         o.connections.judge,
         ROLE_TOOLS.judge_pre,
-        sk(o.skills.judge, o.skills.catalog, o.skills.library),
+        skillsFor('judge', o.skills.judge, o.skills.catalog, o.skills.library),
       ),
       prompt: 'Review the theories submitted this cycle.\n\nTheorists said:\n{{last}}',
       next: 'anything_to_code',
@@ -289,7 +322,7 @@ export function makeResearchLoop(o: ResearchLoopInput): Workflow {
         PROMPTS.coder,
         o.connections.coder,
         ROLE_TOOLS.coder,
-        sk(o.skills.plugin, o.skills.catalog),
+        skillsFor('coder', o.skills.plugin, o.skills.catalog),
         {
           pattern: 'loop',
           patternConfig: { reflections: 1, iterations: 4, doneMarker: 'DONE', maxPlanSteps: 5 },
@@ -309,7 +342,7 @@ export function makeResearchLoop(o: ResearchLoopInput): Workflow {
         PROMPTS.judge_post,
         o.connections.judge,
         ROLE_TOOLS.judge_post,
-        sk(o.skills.judge, o.skills.library),
+        skillsFor('judge', o.skills.judge, o.skills.library),
       ),
       prompt: 'Give verdicts for the evaluated theories.',
       next: 'finish',

@@ -180,3 +180,84 @@ test('the research loop is a Harness object with its connections and skills by n
     assert.ok(yaml.includes(`name: ${n}`), n);
   assert.match(yaml, /type: parallel/);
 });
+
+test('Research Lab: status, board, charts, activity (JSON and SSE)', async () => {
+  const s = await ok('/research/status');
+  assert.equal(s.paused, false);
+  assert.equal(s.harness.name, 'Research loop');
+  assert.equal(s.kpis.theoriesToday, 2);
+  assert.equal(s.kpis.decided, 2);
+  assert.equal(s.kpis.successRate, 0);
+  assert.ok(s.kpis.trials >= 2);
+  assert.ok(s.kpis.tokensToday > 0, 'per-call usage is recorded');
+  assert.ok(Object.keys(s.tokensByRole).some((r) => ['theorist', 'judge', 'coder'].includes(r)));
+  assert.deepEqual(
+    s.board.columns.map((c: any) => c.label),
+    ['Draft', 'Pre-review', 'Coding', 'Evaluating', 'Post-review'],
+  );
+  assert.equal(s.board.verdictsToday.length, 2);
+  const charts = await ok('/research/charts?days=7');
+  assert.equal(charts.verdicts.dates.length, 7);
+  assert.equal(charts.verdicts.series.failed.at(-1), 2);
+  const feed = await ok(
+    `/research/activity?since=${encodeURIComponent(new Date(Date.now() - 3600_000).toISOString())}`,
+  );
+  assert.ok(feed.some((f: any) => f.to === 'failed' && f.role === 'judge'));
+  const ctrl = new AbortController();
+  const r = await fetch(
+    `${base}/api/research/activity?since=${encodeURIComponent(new Date(Date.now() - 3600_000).toISOString())}`,
+    {
+      headers: { Origin: base, Cookie: cookie, Accept: 'text/event-stream' },
+      signal: ctrl.signal,
+    },
+  );
+  assert.equal(r.headers.get('content-type'), 'text/event-stream');
+  const chunk = new TextDecoder().decode((await r.body!.getReader().read()).value);
+  ctrl.abort();
+  assert.match(chunk, /event: activity\ndata: \{/);
+});
+
+test('Research Lab: pause / resume, settings rebuild the harness, gates edits make a new version', async () => {
+  await ok('/research/settings', { schedule: { enabled: true, everyMinutes: 120 } }, 'PUT');
+  let wf = (await ok('/workflows')).find((w: any) => w.name === 'Research loop');
+  assert.deepEqual(
+    [wf.schedule?.enabled, wf.schedule?.everyMinutes],
+    [true, 120],
+    'the schedule is applied to the harness',
+  );
+  assert.equal(
+    wf.nodes.find((n: any) => n.id === 'coder').config.tokenBudget,
+    0,
+    'research agents have no token budget (#263)',
+  );
+  const paused = await ok('/research/pause', {});
+  assert.equal(paused.paused, true);
+  wf = (await ok('/workflows')).find((w: any) => w.name === 'Research loop');
+  assert.equal(wf.schedule.enabled, false, 'paused: no scheduled cycles');
+  assert.equal((await ok('/research/resume', {})).paused, false);
+  wf = (await ok('/workflows')).find((w: any) => w.name === 'Research loop');
+  assert.equal(wf.schedule.enabled, true);
+  await ok(
+    '/research/settings',
+    {
+      agents: { judge: { providerId: judgeProvider }, theorist: { providerId: theoristProvider } },
+      theoristsPerCycle: 3,
+    },
+    'PUT',
+  );
+  wf = (await ok('/workflows')).find((w: any) => w.name === 'Research loop');
+  assert.equal(
+    wf.nodes.filter((n: any) => n.id.startsWith('theorist_')).length,
+    3,
+    'rebuilt with three Theorists',
+  );
+  assert.equal(wf.nodes.find((n: any) => n.id === 'judge_pre').config.providerId, judgeProvider);
+  const before = await ok('/research/gates');
+  const used = before.versions.find((v: any) => v.version === before.active);
+  assert.ok(used.lockedAt, 'the cycle locked the gates it used');
+  const next = await ok('/research/gates', { minSharpe: 0.6, note: 'stricter' });
+  assert.equal(next.version, before.active + 1);
+  const after = await ok(`/research/gates/${before.active}`);
+  assert.deepEqual(after.gates, used.gates, 'the locked version is unchanged');
+  await ok('/research/settings', { schedule: { enabled: false, everyMinutes: 120 } }, 'PUT');
+});

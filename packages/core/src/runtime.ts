@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { HttpError } from './security.js';
 import {
   applyBinding,
@@ -956,6 +957,22 @@ async function runAgentUnchecked(stored: Agent, input: string, history: Run['his
           if (response.text) response.text = await checkRail(ctx, 'output', response.text);
           const estimated = fitted.tokens + toolTokens;
           if (response.usage?.input) await learnScale(response.usage.input, estimated);
+          // Per-call usage by run, step and model (#116: tokens and cost by role); never blocks the run.
+          void collection('model_usage')
+            .insertOne({
+              _id: randomUUID(),
+              ownerId: ctx.ownerId,
+              runId: ctx.runId,
+              ...(ctx.nodeId ? { nodeId: ctx.nodeId } : {}),
+              agent: agent.name,
+              provider: provider.name,
+              model: provider.model,
+              input: response.usage?.input ?? 0,
+              output: response.usage?.output ?? 0,
+              estimated: !(response.usage?.input || response.usage?.output),
+              at: new Date(),
+            } as Record<string, unknown> & { _id: string })
+            .catch(() => undefined);
           usage(
             response.usage?.input || response.usage?.output
               ? (response.usage.input ?? 0) + (response.usage.output ?? 0)

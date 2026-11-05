@@ -234,6 +234,7 @@ export type ObjectKind =
   | 'StrategyPlugin'
   | 'Evaluation'
   | 'Gates'
+  | 'ResearchSettings'
   | 'Theory';
 export type ObjectImportPlan = {
   mode: 'merge' | 'replace';

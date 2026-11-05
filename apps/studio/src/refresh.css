@@ -3006,3 +3006,113 @@ textarea::placeholder {
   border-color: #f3d29a;
   background: #fff8eb;
 }
+
+/* Research Lab (#116) */
+.research-page {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+.research-page > * {
+  min-width: 0;
+}
+.research-page .section-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+.research-page .section-heading h2 {
+  margin: 0;
+}
+.research-page .spacer {
+  flex: 1;
+}
+.research-page .kpi-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+}
+.research-page .eval-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+  gap: 16px;
+}
+.research-page .eval-grid > * {
+  min-width: 0;
+}
+.research-board {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(160px, 1fr));
+  gap: 10px;
+  overflow-x: auto;
+}
+.board-column {
+  background: var(--panel, #f8f9fb);
+  border: 1px solid var(--line, #e4e7ec);
+  border-radius: 10px;
+  padding: 8px;
+  display: grid;
+  gap: 8px;
+  align-content: start;
+  min-height: 120px;
+}
+.board-column h3 {
+  margin: 0;
+  font-size: 0.85rem;
+  display: flex;
+  justify-content: space-between;
+}
+.board-card {
+  text-align: left;
+  background: #fff;
+  border: 1px solid var(--line, #e4e7ec);
+  border-radius: 8px;
+  padding: 8px;
+  display: grid;
+  gap: 4px;
+  cursor: pointer;
+  font: inherit;
+}
+.board-card strong {
+  font-size: 0.85rem;
+}
+.board-card small,
+.board-card span {
+  font-size: 0.75rem;
+  color: var(--muted, #667085);
+}
+.activity-feed ol {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 360px;
+  overflow: auto;
+  display: grid;
+  gap: 8px;
+}
+.activity-feed li {
+  font-size: 0.85rem;
+  border-bottom: 1px solid var(--line, #eef0f3);
+  padding-bottom: 6px;
+}
+.activity-feed li p {
+  margin: 2px 0 0;
+  color: var(--muted, #667085);
+}
+.steering-box {
+  display: grid;
+  gap: 8px;
+  align-content: start;
+}
+.steering-box textarea,
+.research-settings textarea {
+  width: 100%;
+}
+.research-settings {
+  display: grid;
+  gap: 10px;
+}
+.theory-detail h4 {
+  margin: 12px 0 4px;
+}

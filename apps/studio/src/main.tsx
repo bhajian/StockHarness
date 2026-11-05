@@ -22,6 +22,7 @@ import {
   ShieldCheck,
   Sparkles,
   X,
+  FlaskConical,
 } from 'lucide-react';
 import { api, collections, emptyData, errorMessage, send, type Data, type Entity, type User } from './api';
 import { Button, ErrorNotice, UpdateNotice } from './components/ui';
@@ -35,6 +36,7 @@ import { MongoCollections } from './components/MongoCollections';
 import { SkillsPage } from './components/SkillsPage';
 import { DatasetsPage } from './components/DatasetsPage';
 import { EvaluationsPage } from './components/EvaluationsPage';
+import { ResearchPage } from './components/ResearchPage';
 import { DataFreshness } from './components/HealthTab';
 import { EmbedChat, Playground, playgroundTargets } from './components/Playground';
 import { IntegrationsPage, SettingsPage } from './components/Settings';
@@ -48,6 +50,7 @@ const nav = [
   { id: 'connections', label: 'MCP connections', icon: Plug },
   { id: 'knowledge', label: 'Knowledge', icon: BookOpen },
   { id: 'datasets', label: 'Datasets', icon: Database },
+  { id: 'research', label: 'Research', icon: FlaskConical },
   { id: 'inbox', label: 'Inbox', icon: ShieldCheck },
   { id: 'executions', label: 'Executions', icon: Activity },
   { id: 'integrations', label: 'Integrations', icon: Code2 },
@@ -560,6 +563,8 @@ function App() {
               <SettingsPage {...props} user={user} setUser={setUser} />
             ) : page === 'evaluations' ? (
               <EvaluationsPage />
+            ) : page === 'research' ? (
+              <ResearchPage data={data} isAdmin={user.role === 'admin'} />
             ) : (
               <WorkflowsPage {...props} />
             )}
