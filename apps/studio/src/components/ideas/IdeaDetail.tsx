@@ -6,6 +6,7 @@ import React, { useEffect, useState } from 'react';
 import {
   AlertTriangle,
   ArrowLeft,
+  CandlestickChart,
   Check,
   ClipboardCopy,
   Code2,
@@ -167,6 +168,16 @@ export function IdeaDetail({ id, tab, isAdmin }: { id: string; tab: string; isAd
           {isAdmin && idea.explore && (
             <button type="button" className="button" disabled={!!busy} onClick={() => reproduce()}>
               <RotateCcw size={14} /> Reproduce
+            </button>
+          )}
+          {isAdmin && idea.explore && (
+            <button
+              type="button"
+              className="button"
+              title="Run this idea through the paper broker"
+              onClick={() => go(`/simulations?new=${idea.ref}`)}
+            >
+              <CandlestickChart size={14} /> Simulate
             </button>
           )}
           <a className="button" href={`/api/ideas/${t.id}/export`} download>

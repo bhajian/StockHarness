@@ -18,6 +18,8 @@ export const SERIES_COLORS = [
 ];
 /** Sequential blue ramp (magnitude: heatmaps). */
 export const SEQUENTIAL = ['#cde2fb', '#9ec5f4', '#6da7ec', '#3987e5', '#256abf', '#184f95', '#0d366b'];
+/** Diverging red ↔ gray ↔ blue (polarity: losses red, gains blue, a neutral midpoint), three steps per arm. */
+export const DIVERGING = ['#a5302d', '#e34948', '#f3a8a7', '#f0efec', '#9ec5f4', '#3987e5', '#184f95'];
 export const INK = {
   primary: '#242625',
   secondary: '#626761',

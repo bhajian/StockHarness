@@ -9,6 +9,7 @@ import {
   INK,
   PRESETS,
   SEQUENTIAL,
+  DIVERGING,
   SERIES_COLORS,
   escapeHtml,
   fmtNumber,
@@ -374,6 +375,7 @@ export function HeatmapChart({
   subtitle,
   valueLabel = 'value',
   height = 260,
+  diverging = false,
 }: {
   x: string[];
   y: string[];
@@ -382,8 +384,12 @@ export function HeatmapChart({
   subtitle?: React.ReactNode;
   valueLabel?: string;
   height?: number;
+  /** Signed values (e.g. returns): a red ↔ gray ↔ blue scale centred on zero. */
+  diverging?: boolean;
 }) {
-  const max = Math.max(1, ...cells.map((c) => c[2]));
+  const max = diverging
+    ? Math.max(1e-9, ...cells.map((c) => Math.abs(c[2])))
+    : Math.max(1, ...cells.map((c) => c[2]));
   const option = useMemo(
     () => ({
       animation: false,
@@ -401,14 +407,14 @@ export function HeatmapChart({
       },
       yAxis: { type: 'category', data: y, ...axisStyle, splitLine: { show: false } },
       visualMap: {
-        min: 0,
+        min: diverging ? -max : 0,
         max,
         orient: 'horizontal',
         left: 'center',
         bottom: 0,
         itemHeight: 120,
         itemWidth: 10,
-        inRange: { color: SEQUENTIAL },
+        inRange: { color: diverging ? DIVERGING : SEQUENTIAL },
         textStyle: { color: INK.secondary, fontSize: 11 },
         calculable: false,
       },
@@ -421,7 +427,7 @@ export function HeatmapChart({
         },
       ],
     }),
-    [x, y, cells, max, valueLabel],
+    [x, y, cells, max, valueLabel, diverging],
   );
   return (
     <ChartFrame
