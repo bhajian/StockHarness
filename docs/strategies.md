@@ -123,3 +123,22 @@ one. Collections are cut by the same policy as `ctx.read_df`, so Layer 1 collect
 their known-at rule. Current-only and undocumented collections are refused (current-only only opens when the session
 is at the latest date and there is no holdout). `$where`, `$function` and `$accumulator` are refused. The fuzz
 test (`tests/integration/data-tools.test.ts`) checks that no tool returns a row known after the session as_of.
+
+## evaluate_strategy and the evaluation page (#109)
+
+The research MCP connection also serves:
+
+- `evaluate_strategy(plugin, version?, theory_id?, params)`: runs the trusted evaluator in the executor on a saved
+  plugin version (exploration only, before the holdout), counts a trial, stores the full record and returns a
+  compact summary: summary metrics, by year, excess, factor exposures, the deflated Sharpe and warnings, with
+  `page: /evaluations/<id>`. It waits up to 50 s; if the run is still going, call `get_evaluation(evaluation_id)`.
+- `get_evaluation(evaluation_id)`.
+
+`/evaluations` (dev view, not in the navigation) lists evaluations, and `/evaluations/<id>` renders one: KPIs,
+equity against the S&P 500, drawdown, rolling Sharpe, return by year, trade returns, folds, factor exposures,
+regimes, sector contributions and provenance.
+
+**`Evaluation` objects** export (Objects API `?kinds=Evaluation&names=<id>`, or the page's Export) for audit and
+sharing. Import restores the record with its provenance (code hash, data snapshot, evaluator version) and never
+re-runs anything. Existing records are immutable, and a record whose `plugin.hash` disagrees with its `codeHash`
+is refused. Evaluations are records, not configuration, so they are not part of the repo config backup.

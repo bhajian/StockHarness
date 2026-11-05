@@ -11,16 +11,14 @@ import {
   dataSession,
   verifyResearchToken,
 } from '../../../packages/core/src/dataTools.js';
+import {
+  STRATEGY_TOOLS,
+  callStrategyTool,
+  isStrategyTool,
+} from '../../../packages/core/src/strategyTools.js';
 import { HttpError, safeError } from '../../../packages/core/src/security.js';
 
 export const researchMcpRouter = Router();
-
-/** Extra tools served on the same connection (evaluate_strategy #109, test_strategy #153). */
-export type ResearchTool = {
-  definition: { name: string; description: string; inputSchema: Record<string, unknown> };
-  call: (ownerId: string, args: Record<string, unknown>) => Promise<unknown>;
-};
-export const extraResearchTools: ResearchTool[] = [];
 
 async function handle(req: Request, res: Response) {
   const auth = req.headers.authorization ?? '';
@@ -31,14 +29,13 @@ async function handle(req: Request, res: Response) {
     { capabilities: { tools: {} } },
   );
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
-    tools: [...DATA_TOOLS, ...extraResearchTools.map((t) => t.definition)] as any,
+    tools: [...DATA_TOOLS, ...STRATEGY_TOOLS] as any,
   }));
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: args = {} } = request.params;
     try {
-      const extra = extraResearchTools.find((t) => t.definition.name === name);
-      const result = extra
-        ? await extra.call(conn.ownerId, args)
+      const result = isStrategyTool(name)
+        ? await callStrategyTool(conn.ownerId, name, args)
         : await callDataTool(await dataSession(conn.ownerId, conn.asOf), name, args);
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     } catch (error) {

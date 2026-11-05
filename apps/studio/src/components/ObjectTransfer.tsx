@@ -12,6 +12,7 @@ const KIND_LABEL: Record<ObjectKind, string> = {
   CatalogEntry: 'catalog docs',
   Pipeline: 'pipelines',
   StrategyPlugin: 'strategy plugins',
+  Evaluation: 'evaluations',
 };
 
 /**

@@ -11,7 +11,8 @@ import { OBJECT_KINDS, type ObjectKind } from '../../../packages/core/src/object
 import { exportObjects } from './objects.js';
 
 /** One file per kind, matching deploy/config-io/config_io.py. */
-export const BACKUP_FILES: Record<ObjectKind, string> = {
+/** Repo backup files per kind. Records (Evaluation) are exported on demand, not into the config backup. */
+export const BACKUP_FILES: Partial<Record<ObjectKind, string>> = {
   Skill: 'skills.yaml',
   Agent: 'agents.yaml',
   Harness: 'harnesses.yaml',
@@ -72,8 +73,10 @@ export async function renderBackupFiles(ownerId: string) {
   const files: Record<string, string> = {};
   const objects: Record<string, number> = {};
   for (const kind of OBJECT_KINDS) {
+    const file = BACKUP_FILES[kind];
+    if (!file) continue;
     const { yaml, count } = await exportObjects(ownerId, [kind]);
-    files[BACKUP_FILES[kind]] = yaml;
+    files[file] = yaml;
     objects[kind] = count;
   }
   const hash = createHash('sha256')
