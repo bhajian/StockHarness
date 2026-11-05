@@ -75,3 +75,32 @@ proves the connection:
 
 Every write is a legal transition (#110) with its reasoning. The runtime tells research connections, and only
 them, which agent, run and model is calling. That is recorded as the actor of each step of the debate.
+
+## Success gates (#113)
+
+Success is mechanical. `set_verdict(successful | failed)` applies the active gates version
+(`GET/POST /api/research/gates`; defaults below) to the theory's latest exploration evaluation and its
+holdout:
+
+| Gate                                                | Default      |
+| --------------------------------------------------- | ------------ |
+| Exploration Sharpe                                  | ≥ 0.5        |
+| Deflated Sharpe probability (all trials)            | ≥ 0.95       |
+| Years with positive excess over the S&P 500         | ≥ 60%        |
+| Holdout excess over the S&P 500 / holdout Sharpe    | > 0 / ≥ 0.3  |
+| Trades / average names held                         | ≥ 100 / ≥ 10 |
+| Alpha t-stat after factors (Newey-West)             | ≥ 2          |
+| Blocking warnings (`empty_book`, `extreme_returns`) | none         |
+
+- **Holdout:** when the exploration gates pass and the theory has no holdout yet, a `successful` request spends
+  the theory's one holdout shot on that code version first (#105), then decides.
+- **Downgrade only:** the Judge may downgrade a passing theory with reasons (at least a sentence) but can never
+  upgrade a failing one. The verdict records the gates version, every gate's value and the mechanical result.
+- **Versions:** a version is locked by its first verdict. New thresholds always make a new, active version, so
+  verdicts stay comparable within a version. `Gates` objects export as `v<n>`. On import, identical thresholds are
+  unchanged, locked versions import read-only, and a version number already taken by other thresholds gets the
+  next number.
+- **forward_only:** a theory whose data includes estimate or consensus snapshots (`analyst_estimates`,
+  `price_target_consensus`, `grades_consensus`, `financial_scores`) has no history to backtest. It is tagged
+  `forward_only`, its backtest evaluation is refused, and it goes to paper tracking (Layer 5). A proxy built
+  from `analyst_events` can still be backtested as a separate theory.

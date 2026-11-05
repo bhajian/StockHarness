@@ -4,6 +4,7 @@
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { collection } from './db.js';
+import { isForwardOnly } from './gates.js';
 import { HttpError } from './security.js';
 import {
   DEFAULT_CAPS,
@@ -141,6 +142,8 @@ export async function createTheory(
     codeAttempts: 0,
     evaluationIds: [],
     trials: 0,
+    // Estimate / consensus snapshots have no history to backtest: paper tracking only (#113).
+    ...(isForwardOnly(content.dataNeeded) ? { forwardOnly: true } : {}),
     history: [{ type: 'create', to: 'draft', actor, reasoning: opts.reasoning ?? '', at: now }],
     createdAt: now,
     updatedAt: now,
@@ -193,7 +196,7 @@ export async function editTheory(
   const r = await theories().findOneAndUpdate(
     { _id: t._id, ownerId, status: t.status, updatedAt: t.updatedAt },
     {
-      $set: { ...next, updatedAt: new Date() },
+      $set: { ...next, forwardOnly: isForwardOnly(next.dataNeeded), updatedAt: new Date() },
       $push: { history: { type: 'edit', actor, reasoning, data: { fields: changed }, at: new Date() } },
     },
     { returnDocument: 'after' },

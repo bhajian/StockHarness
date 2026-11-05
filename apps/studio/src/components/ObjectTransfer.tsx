@@ -13,6 +13,7 @@ const KIND_LABEL: Record<ObjectKind, string> = {
   Pipeline: 'pipelines',
   StrategyPlugin: 'strategy plugins',
   Evaluation: 'evaluations',
+  Gates: 'success gates',
   Theory: 'theories',
 };
 

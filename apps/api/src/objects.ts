@@ -74,6 +74,7 @@ import {
   type StrategyPluginHistoryEntry,
 } from '../../../packages/core/src/strategyPlugins.js';
 import { evaluations, type Evaluation } from '../../../packages/core/src/evaluations.js';
+import { gatesSchema, gatesVersions } from '../../../packages/core/src/gates.js';
 import {
   restoreTheory,
   theories,
@@ -270,6 +271,23 @@ export async function exportObjects(
         const name = (e as Evaluation & { sourceId?: string }).sourceId ?? e._id;
         if (!wanted(name)) continue;
         docs.push({ apiVersion: API_VERSION, kind, metadata: { name }, spec: evaluationSpec(e) });
+      }
+      continue;
+    }
+    if (kind === 'Gates') {
+      for (const g of await gatesVersions().find({ ownerId }).sort({ version: 1 }).toArray()) {
+        const name = `v${g.version}`;
+        if (!wanted(name)) continue;
+        docs.push({
+          apiVersion: API_VERSION,
+          kind,
+          metadata: { name, version: String(g.version) },
+          spec: {
+            gates: g.gates,
+            ...(g.note ? { note: g.note } : {}),
+            ...(g.lockedAt ? { locked: true } : {}),
+          },
+        });
       }
       continue;
     }
@@ -567,6 +585,42 @@ async function plan(
     result.items.push({ kind: 'Evaluation', name, action: current ? 'unchanged' : 'create' });
   }
 
+  // Success gates (#113): versions. Same thresholds = unchanged; a version number taken by different thresholds
+  // gets the next number (a locked version is never changed).
+  const gatesDocs = docs.filter((d) => d.kind === 'Gates');
+  if (gatesDocs.length) {
+    const existing = await gatesVersions().find({ ownerId }).toArray();
+    let next = Math.max(0, ...existing.map((g) => g.version));
+    for (const doc of gatesDocs) {
+      const name = doc.metadata.name;
+      const parsed = gatesSchema.safeParse((doc.spec as { gates?: unknown }).gates);
+      const m = /^v(\d+)$/.exec(name);
+      if (!parsed.success || !m) {
+        result.errors.push({
+          kind: 'Gates',
+          name,
+          message: !m ? 'metadata.name must be v<number>' : `spec.gates: ${parsed.error!.issues[0].message}`,
+        });
+        continue;
+      }
+      const same = existing.find((g) => stableJson(g.gates) === stableJson(parsed.data));
+      if (same) {
+        prepared.push({ doc, action: 'unchanged' });
+        result.items.push({ kind: 'Gates', name, action: 'unchanged' });
+        continue;
+      }
+      const wantedVersion = Number(m[1]);
+      const version = existing.some((g) => g.version === wantedVersion) ? ++next : wantedVersion;
+      next = Math.max(next, version);
+      existing.push({ version, gates: parsed.data } as any);
+      prepared.push({
+        doc: { ...doc, metadata: { ...doc.metadata, version: String(version) } },
+        action: 'create',
+      });
+      result.items.push({ kind: 'Gates', name: `v${version}`, action: 'create' });
+    }
+  }
+
   // Theories (#110): records with their debate; restored as they were, never re-run. Immutable on re-import.
   for (const doc of docs.filter((d) => d.kind === 'Theory')) {
     const name = doc.metadata.name;
@@ -857,6 +911,20 @@ export async function applyObjectImport(
         importedAt: new Date(),
       } as Evaluation);
       done.push({ kind: 'Evaluation', name: p.doc.metadata.name, action: 'create' });
+    }
+    for (const p of prepared.filter((x) => x.doc.kind === 'Gates' && x.action === 'create')) {
+      const version = Number(p.doc.metadata.version);
+      const spec = p.doc.spec as { gates: unknown; note?: string; locked?: boolean };
+      await gatesVersions().insertOne({
+        _id: `${ownerId}:${version}`,
+        ownerId,
+        version,
+        gates: gatesSchema.parse(spec.gates),
+        ...(spec.note ? { note: spec.note } : {}),
+        createdAt: new Date(),
+        ...(spec.locked ? { lockedAt: new Date() } : {}),
+      });
+      done.push({ kind: 'Gates', name: `v${version}`, action: 'create' });
     }
     for (const p of prepared.filter((x) => x.doc.kind === 'Theory' && x.action === 'create')) {
       const name = p.doc.metadata.name;

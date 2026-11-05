@@ -16,6 +16,15 @@ import { searchTheories } from './theoryMemory.js';
 import { getEvaluation, startEvaluation, type Evaluation } from './evaluations.js';
 import { agentSummary, testStrategy } from './strategyTools.js';
 import type { TheoryRole } from './theoryLifecycle.js';
+import {
+  activeGates,
+  allGatesPass,
+  evaluateGates,
+  exploreGatesPass,
+  lockGates,
+  verdictProblem,
+} from './gates.js';
+import { startHoldoutEvaluation } from './evaluations.js';
 
 export type ResearchRole = 'theorist' | 'judge' | 'coder';
 type Meta = { agentId?: string; runId?: string; model?: string };
@@ -245,12 +254,24 @@ export async function callLifecycleTool(
     }
     case 'set_verdict': {
       need(role, ['judge'], name);
-      const to = ({ successful: 'successful', failed: 'failed', revise: 'revise_code' } as const)[
-        args.verdict as 'successful' | 'failed' | 'revise'
-      ];
-      if (!to) throw new HttpError(400, 'verdict must be successful, failed or revise');
-      return brief(
-        await transitionTheory(ownerId, String(args.theory_id), to, actorOf('judge', meta), args.reasoning),
+      if (args.verdict === 'revise')
+        return brief(
+          await transitionTheory(
+            ownerId,
+            String(args.theory_id),
+            'revise_code',
+            actorOf('judge', meta),
+            args.reasoning,
+          ),
+        );
+      if (args.verdict !== 'successful' && args.verdict !== 'failed')
+        throw new HttpError(400, 'verdict must be successful, failed or revise');
+      return mechanicalVerdict(
+        ownerId,
+        String(args.theory_id),
+        args.verdict,
+        String(args.reasoning ?? ''),
+        meta,
       );
     }
     case 'submit_code':
@@ -342,6 +363,11 @@ export async function evaluateForTheory(
       `T-${t.number} is ${t.status}; it is evaluated once per coding round, after submit_code passes`,
     );
   if (!t.plugin) throw new HttpError(409, `T-${t.number} has no code yet; call submit_code first`);
+  if (t.forwardOnly)
+    throw new HttpError(
+      409,
+      `T-${t.number} is forward_only: it needs estimate or consensus snapshots, which have no history to backtest. It goes to paper tracking (Layer 5) instead; a proxy from analyst_events can be backtested as a separate theory.`,
+    );
   if (args.plugin && args.plugin !== t.plugin.name)
     throw new HttpError(400, `T-${t.number}'s plugin is ${t.plugin.name}`);
   const version = Number(args.version) || Math.max(...t.plugin.versions);
@@ -382,3 +408,86 @@ export async function evaluateForTheory(
   const e = finished ?? (await getEvaluation(ownerId, evaluation._id));
   return { ...agentSummary(e), theory: brief(await getTheory(ownerId, t._id)) };
 }
+
+/**
+ * set_verdict successful | failed (#113): the gates decide. A successful request whose exploration gates pass
+ * first runs the one-shot holdout (#105) when the theory has none. The Judge may downgrade a passing theory with
+ * reasons, never upgrade a failing one. The gates version is locked by its first verdict.
+ */
+async function mechanicalVerdict(
+  ownerId: string,
+  theoryId: string,
+  requested: 'successful' | 'failed',
+  reasoning: string,
+  meta: Meta,
+) {
+  let t = await getTheory(ownerId, theoryId);
+  if (t.status !== 'post_review')
+    throw new HttpError(409, `T-${t.number} is ${t.status}; a verdict is given in post_review`);
+  const gates = await activeGates(ownerId);
+  const evals = await Promise.all(
+    t.evaluationIds.map((id) => getEvaluation(ownerId, id).catch(() => undefined)),
+  );
+  const explore = [...evals].reverse().find((e) => e && e.status === 'succeeded' && e.mode === 'explore') as
+    Evaluation | undefined;
+  let holdout = t.holdoutEvaluationId
+    ? await getEvaluation(ownerId, t.holdoutEvaluationId).catch(() => undefined)
+    : undefined;
+  let results = evaluateGates(
+    gates.gates,
+    explore?.record,
+    holdout?.status === 'succeeded' ? holdout.record : undefined,
+  );
+  if (requested === 'successful' && explore && exploreGatesPass(results) && !holdout) {
+    // The exploration passed: spend the theory's one holdout shot on this code version.
+    const { evaluation, done } = await startHoldoutEvaluation(ownerId, {
+      plugin: explore.pluginName,
+      version: explore.pluginVersion,
+      theoryId: t._id,
+      params: {
+        ...(explore.params.symbols ? { symbols: explore.params.symbols } : {}),
+        ...(explore.params.side ? { side: explore.params.side } : {}),
+        ...(explore.params.top_n ? { top_n: explore.params.top_n } : {}),
+        ...(explore.params.rebalance ? { rebalance: explore.params.rebalance } : {}),
+      },
+    });
+    t = await linkTheory(ownerId, t._id, { holdoutEvaluationId: evaluation._id }, actorOf('evaluator', meta));
+    holdout = await Promise.race([
+      done.catch(() => undefined),
+      new Promise<undefined>((r) => void setTimeout(r, WAIT_MAX_SECONDS * 1000)),
+    ]);
+    if (!holdout || holdout.status === 'running')
+      return {
+        ...brief(t),
+        holdout_evaluation_id: evaluation._id,
+        next: 'The holdout run is still going: call set_verdict again in a minute.',
+      };
+    results = evaluateGates(
+      gates.gates,
+      explore.record,
+      holdout.status === 'succeeded' ? holdout.record : undefined,
+    );
+  } else if (holdout?.status === 'running')
+    return {
+      ...brief(t),
+      holdout_evaluation_id: holdout._id,
+      next: 'The holdout run is still going: call set_verdict again in a minute.',
+    };
+  const mechanical = allGatesPass(results) ? 'successful' : 'failed';
+  const problem = verdictProblem(requested, mechanical, reasoning);
+  if (problem) throw new HttpError(409, `${problem}. Gates v${gates.version}: ${failing(results)}`);
+  t = await transitionTheory(ownerId, t._id, requested, actorOf('judge', meta), reasoning, {
+    gatesVersion: gates.version,
+    mechanical,
+    gates: results,
+    ...(explore ? { evaluationId: explore._id } : {}),
+    ...(holdout ? { holdoutEvaluationId: holdout._id } : {}),
+  });
+  await lockGates(gates);
+  return { ...brief(t), mechanical, gates_version: gates.version, gates: results };
+}
+const failing = (results: { gate: string; passed: boolean; value: unknown; threshold: unknown }[]) =>
+  results
+    .filter((r) => !r.passed)
+    .map((r) => `${r.gate} ${r.value ?? 'n/a'} (needs ${r.threshold})`)
+    .join('; ') || 'all pass';
