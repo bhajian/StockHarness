@@ -2983,3 +2983,26 @@ textarea::placeholder {
   grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
   gap: 12px;
 }
+/* Collection bindings (#148) */
+.collection-bindings {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+.collection-binding {
+  border: 1px solid var(--line, #e4e7ec);
+  border-radius: 10px;
+  padding: 10px 12px;
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+.collection-binding .check-row-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+}
+.collection-bindings .warning-notice {
+  border-color: #f3d29a;
+  background: #fff8eb;
+}

@@ -252,3 +252,26 @@ test('research tokens name their connection and workspace', { skip: skipReason }
     undefined,
   );
 });
+
+test(
+  'collection bindings: the strict as_of filter never lets a row through early',
+  { skip: skipReason },
+  async () => {
+    const { strictAsOfFilter } = await import('../../packages/core/src/collectionBindings.js');
+    let kept = 0;
+    for (const name of ['prices_daily', 'insider_trades', 'income_statement', 'eod_prices']) {
+      const p = policyOf({ layer: CATALOG[name].layer, timeSemantics: CATALOG[name].timeSemantics });
+      assert.equal(p.mode, 'pit');
+      if (p.mode !== 'pit') continue;
+      for (const D of DAYS.filter((_, i) => i % 7 === 0)) {
+        const rows = await db().collection(name).find(strictAsOfFilter(p.rule, D)).toArray();
+        for (const r of rows) {
+          const asOf = knownAtOf(p.rule, r)?.as_of_date;
+          assert.ok(asOf && asOf <= D, `${name} ${r.uid}: known ${asOf}, let through on ${D}`);
+        }
+        kept += rows.length;
+      }
+    }
+    assert.ok(kept > 500, `rows were let through (${kept})`);
+  },
+);

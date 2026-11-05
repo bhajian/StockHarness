@@ -158,3 +158,28 @@ is refused. Evaluations are records, not configuration, so they are not part of 
   5 it says to hand the plugin to the Judge.
 - The loop and its rules are in the `strategy-library` skill: check columns, use the known-at field, test on one
   date first, fix, then `evaluate_strategy` once. A failing gate goes to the Judge, not back into the fix loop.
+
+## Collection-scoped MongoDB tools for any harness (#148)
+
+On the harness canvas, open a MongoDB tools resource and **Bind a collection**. Each binding has:
+
+- **permissions:** `read` (find, aggregate, count, schema), `insert`, `update` and/or `delete`;
+- optional **limits:** max rows per read, only these fields, and a fixed filter;
+- **enforce as of:** reads are cut at the session as_of with the collection's known-at rule (conservatively, so a
+  borderline row waits a day rather than leaking);
+- **approve writes:** inserts, updates, deletes and `$out`/`$merge` wait for a human.
+
+The runtime enforces bindings on every call:
+
+- Only granted operations are offered. Admin tools (drop, rename, create or drop index, create collection) and
+  database-wide tools (`list-collections`, `db-stats`) are never available through a binding.
+- `collection` is an enum of the bound collections, and the tool description lists their fields.
+- A call to an unbound collection, or above its permission, gets an error the agent can act on.
+- `$lookup`, `$graphLookup` and `$unionWith` must stay in the bound set (and never join into a filtered or as-of
+  binding), and `$out`/`$merge` need write.
+- The fixed filter, projection, row cap and as_of cut go on the wire; the trace records the collection.
+
+Bindings live on the agent's connection binding, so they are part of the run snapshot and of the Agent and Harness
+YAML (connections by name). Without bindings, a MongoDB connection keeps its database-wide grant, and the canvas
+warns about it. The **Data chatbot** template binds `prices_daily`, `features_daily`, `securities` and `signals`
+read-only (200 rows a read).

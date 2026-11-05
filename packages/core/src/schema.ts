@@ -82,9 +82,32 @@ export const connectionSchema = z.object({
   oauthScope: z.string().max(2048).default(''),
   enabled: z.boolean().default(true),
 });
+/** Collection-scoped MongoDB grants (#148); enforced by packages/core/src/collectionBindings.ts. */
+export const COLLECTION_PERMISSIONS = ['read', 'insert', 'update', 'delete'] as const;
+export type CollectionPermission = (typeof COLLECTION_PERMISSIONS)[number];
+export const collectionBindingSchema = z.object({
+  name: z.string().trim().min(1).max(120),
+  permissions: z.array(z.enum(COLLECTION_PERMISSIONS)).min(1).max(4),
+  /** Most rows a read returns. */
+  maxRows: z.number().int().min(1).max(100_000).optional(),
+  /** Only these fields are returned by reads. */
+  fields: z.array(z.string().min(1).max(200)).max(200).optional(),
+  /** Always ANDed into reads, updates and deletes, e.g. { "symbol": { "$in": ["AAPL", "MSFT"] } }. */
+  filter: z.record(z.unknown()).optional(),
+  /** Cut reads at the session as_of with the collection's known-at rule (#84, #108). */
+  enforceAsOf: z.boolean().optional(),
+  /** Ask a human before inserts, updates and deletes. */
+  approval: z.enum(['never', 'always']).optional(),
+});
+export type CollectionBinding = z.infer<typeof collectionBindingSchema>;
 export const toolBindingSchema = z.object({
   connectionId: id,
   tools: z.array(z.string().min(1).max(200)).max(100),
+  /**
+   * MongoDB connections (#148): the collections this agent may use, with permissions, limits, an as_of cut and
+   * approval for writes. Empty or absent keeps the database-wide grant.
+   */
+  collections: z.array(collectionBindingSchema).max(50).optional(),
 });
 export const agentPatterns = ['react', 'plan-execute', 'reflection', 'loop'] as const;
 export type AgentPattern = (typeof agentPatterns)[number];
@@ -221,6 +244,8 @@ export const resourceSchema = z.discriminatedUnion('type', [
     type: z.literal('mcp'),
     connectionId: id,
     tools: z.array(z.string().min(1).max(200)).min(1).max(100),
+    /** MongoDB connections: the collections the attached agents may use (#148). */
+    collections: z.array(collectionBindingSchema).max(50).optional(),
   }),
   z.object({ ...baseNode, type: z.literal('knowledge'), knowledgeBaseId: id }),
   z.object({ ...baseNode, type: z.literal('guardrail'), policyId: id }),

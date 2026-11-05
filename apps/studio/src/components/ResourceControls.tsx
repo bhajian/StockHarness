@@ -3,6 +3,159 @@ import { KeyRound, Plus, RefreshCw, Upload } from 'lucide-react';
 import { api, defaultProviderId, errorMessage, send, type Data, type Entity } from '../api';
 import { Button, ErrorNotice, Field } from './ui';
 import { ConnectionEditor, KnowledgeEditor, ProviderEditor } from './editors';
+import type { CollectionBinding, CollectionPermission } from '../../../../packages/core/src/schema.js';
+
+const PERMISSIONS: CollectionPermission[] = ['read', 'insert', 'update', 'delete'];
+/**
+ * Collection bindings for a MongoDB resource (#148): which collections the agent may use and how. Without any,
+ * the grant is database-wide.
+ */
+export function CollectionBindingsEditor({
+  value,
+  onChange,
+}: {
+  value: CollectionBinding[];
+  onChange: (v: CollectionBinding[] | undefined) => void;
+}) {
+  const [names, setNames] = useState<string[]>([]);
+  const [filterErrors, setFilterErrors] = useState<Record<number, string>>({});
+  useEffect(() => {
+    void api<{ collection: string }[]>('/catalog')
+      .then((list) => setNames(list.map((e) => e.collection)))
+      .catch(() => undefined);
+  }, []);
+  const set = (i: number, patch: Partial<CollectionBinding>) =>
+    onChange(value.map((b, k) => (k === i ? { ...b, ...patch } : b)));
+  const unused = names.filter((n) => !value.some((b) => b.name === n));
+  return (
+    <div className="collection-bindings">
+      <p className="field-help">
+        <strong>Collections.</strong>{' '}
+        {value.length
+          ? 'The agent may use only these collections, with these permissions. Admin tools (drop, rename, indexes) are never available.'
+          : ''}
+      </p>
+      {!value.length && (
+        <p className="notice warning-notice" role="note">
+          Database-wide grant: the agent can use every collection in this database with the selected tools,
+          including deletes. Bind collections to limit it.
+        </p>
+      )}
+      {value.map((b, i) => (
+        <fieldset key={`${b.name}-${i}`} className="collection-binding" aria-label={`Binding ${b.name}`}>
+          <div className="two-columns">
+            <Field label="Collection">
+              <select
+                aria-label="Bound collection"
+                value={b.name}
+                onChange={(e) => set(i, { name: e.target.value })}
+              >
+                {[b.name, ...unused].filter(Boolean).map((n) => (
+                  <option key={n} value={n}>
+                    {n}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Max rows per read">
+              <input
+                aria-label="Max rows"
+                type="number"
+                min={1}
+                value={b.maxRows ?? ''}
+                onChange={(e) => set(i, { maxRows: e.target.value ? Number(e.target.value) : undefined })}
+              />
+            </Field>
+          </div>
+          <div className="check-row-group" role="group" aria-label="Permissions">
+            {PERMISSIONS.map((p) => (
+              <label key={p} className="check-row">
+                <input
+                  type="checkbox"
+                  checked={b.permissions.includes(p)}
+                  onChange={(e) => {
+                    const next = e.target.checked
+                      ? [...b.permissions, p]
+                      : b.permissions.filter((x) => x !== p);
+                    if (next.length) set(i, { permissions: PERMISSIONS.filter((x) => next.includes(x)) });
+                  }}
+                />
+                {p}
+              </label>
+            ))}
+            <label className="check-row">
+              <input
+                type="checkbox"
+                checked={!!b.enforceAsOf}
+                onChange={(e) => set(i, { enforceAsOf: e.target.checked || undefined })}
+              />
+              enforce as of
+            </label>
+            <label className="check-row">
+              <input
+                type="checkbox"
+                checked={b.approval === 'always'}
+                onChange={(e) => set(i, { approval: e.target.checked ? 'always' : undefined })}
+              />
+              approve writes
+            </label>
+          </div>
+          <Field label="Fixed filter (JSON, optional)" hint={filterErrors[i]}>
+            <input
+              aria-label="Fixed filter"
+              placeholder='{ "symbol": { "$in": ["AAPL", "MSFT"] } }'
+              defaultValue={b.filter ? JSON.stringify(b.filter) : ''}
+              onBlur={(e) => {
+                const text = e.target.value.trim();
+                try {
+                  const filter = text ? JSON.parse(text) : undefined;
+                  if (filter !== undefined && (typeof filter !== 'object' || Array.isArray(filter)))
+                    throw new Error('not an object');
+                  setFilterErrors((x) => ({ ...x, [i]: '' }));
+                  set(i, { filter });
+                } catch {
+                  setFilterErrors((x) => ({ ...x, [i]: 'Not a JSON object; not saved' }));
+                }
+              }}
+            />
+          </Field>
+          <Field label="Only these fields (optional)">
+            <input
+              aria-label="Fields"
+              placeholder="symbol, date, close"
+              defaultValue={b.fields?.join(', ') ?? ''}
+              onBlur={(e) => {
+                const fields = e.target.value
+                  .split(',')
+                  .map((f) => f.trim())
+                  .filter(Boolean);
+                set(i, { fields: fields.length ? fields : undefined });
+              }}
+            />
+          </Field>
+          <button
+            className="text-button"
+            type="button"
+            onClick={() => {
+              const next = value.filter((_, k) => k !== i);
+              onChange(next.length ? next : undefined);
+            }}
+          >
+            Remove
+          </button>
+        </fieldset>
+      ))}
+      <button
+        className="text-button"
+        type="button"
+        disabled={!unused.length}
+        onClick={() => onChange([...value, { name: unused[0], permissions: ['read'] }])}
+      >
+        <Plus size={14} /> Bind a collection
+      </button>
+    </div>
+  );
+}
 
 type Base = { data: Data; refresh: () => Promise<void> };
 export function ProviderControl({
@@ -68,7 +221,16 @@ export function McpControl({
   connectionId,
   tools,
   onChange,
-}: Base & { connectionId: string; tools: string[]; onChange: (id: string, tools: string[]) => void }) {
+  collections,
+  onCollections,
+}: Base & {
+  connectionId: string;
+  tools: string[];
+  onChange: (id: string, tools: string[]) => void;
+  /** MongoDB connections: collection bindings (#148). */
+  collections?: CollectionBinding[];
+  onCollections?: (collections: CollectionBinding[] | undefined) => void;
+}) {
   const [adding, setAdding] = useState(false),
     [error, setError] = useState(''),
     [busy, setBusy] = useState(false),
@@ -219,6 +381,9 @@ export function McpControl({
             </div>
           ) : (
             <p className="notice">Discover tools to select them here.</p>
+          )}
+          {connection.kind === 'mongodb' && onCollections && (
+            <CollectionBindingsEditor value={collections ?? []} onChange={onCollections} />
           )}
         </>
       )}

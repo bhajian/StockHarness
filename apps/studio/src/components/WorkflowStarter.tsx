@@ -11,6 +11,7 @@ import {
   Mail,
   Plug,
   Route,
+  Database,
 } from 'lucide-react';
 import { makeStarter, starterRecipes, type StarterKind } from '../../../../packages/core/src/starters.js';
 import type { Workflow } from '../../../../packages/core/src/schema.js';
@@ -20,6 +21,7 @@ import { KnowledgeControl, McpControl, ProviderControl } from './ResourceControl
 const starterIcons: Record<StarterKind, typeof Bot> = {
   research: BookOpen,
   mcp: Plug,
+  'data-chatbot': Database,
   review: Bot,
   team: GitFork,
   router: Route,
