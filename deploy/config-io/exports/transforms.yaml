@@ -420,7 +420,7 @@ apiVersion: stockharness/v1
 kind: Transform
 metadata:
   name: securities
-  version: "3"
+  version: "4"
 spec:
   description: "The securities master: one row per security with an immutable security_id, matched by CIK, then CUSIP, then ticker + name. Tickers, sectors, industries and exchanges are validity intervals (ISO dates)."
   code: |
@@ -474,7 +474,11 @@ spec:
         industry_observed_from:
           description: When the industry was first observed
         exchange_history:
-          description: Exchange intervals
+          description: Exchange intervals; the first is backfilled to the first observed date when exchange_is_backfilled
+        exchange_is_backfilled:
+          description: The earliest exchange interval was backfilled from the current exchange
+        exchange_observed_from:
+          description: When the exchange was first actually observed
         source_collections:
           description: Layer 1 inputs
   trigger:
