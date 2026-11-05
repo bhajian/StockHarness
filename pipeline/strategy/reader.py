@@ -66,6 +66,7 @@ class PitReader:
         self.max_lookback_days = max_lookback_days
         self._cache: dict[str, tuple] = {}
         self.stats = {"reads": 0, "rows": 0, "lookahead_attempts": 0, "refused": 0}
+        self.columns_seen: dict[str, list[str]] = {}  # collection -> columns its rows have (for clear errors)
 
     def policy(self, collection: str) -> dict:
         p = self.policies.get(collection)
@@ -132,6 +133,8 @@ class PitReader:
             self.stats["lookahead_attempts"] += 1
         frame, as_ofs, pit = self._load(collection, filter, columns)
         self.stats["reads"] += 1
+        if collection not in self.columns_seen or len(frame.columns) > len(self.columns_seen[collection]):
+            self.columns_seen[collection] = sorted(str(c) for c in frame.columns)
         if not pit or as_ofs is None:
             out = frame.copy()
         else:

@@ -58,6 +58,8 @@ export type StrategyPluginVersion = {
   note?: string;
   /** The test_strategy error this version produced, if any (#153). */
   error?: string;
+  /** 'passed' once test_strategy passed on this version (#153). */
+  tested?: 'passed';
   createdAt: Date;
   createdBy?: string;
 };

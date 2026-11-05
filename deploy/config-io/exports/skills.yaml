@@ -442,3 +442,51 @@ spec:
     - **R:** risk per share (trigger minus stop). T1 = 2R, T2 = 3R.
     - **Shares per $1,000 risk:** how many shares make the stop cost $1,000, already scaled by the regime size. Scale to your own risk per trade.
   enabled: true
+---
+apiVersion: stockharness/v1
+kind: Skill
+metadata:
+  name: strategy-library
+  version: 1.0.0
+spec:
+  description: Writing, testing and fixing strategy plugins for the trusted evaluator (signal(ctx), META, ctx.read_df), with the research data tools test_strategy and evaluate_strategy.
+  instructions: |-
+    # Strategy plugins: write, test, fix
+
+    A plugin is short Python that the trusted evaluator runs. You write the logic; the platform reads the data
+    point-in-time, builds the book, trades at the next close and scores it.
+
+    ```python
+    import numpy as np
+
+    META = {"side": "long", "horizon_days": 21, "rebalance": "monthly", "top_n": 10}
+
+    def signal(ctx):                      # a score per security_id on ctx.date; higher is better
+        f = ctx.read_df("features_ranked", columns=["security_id", "mom_12_1_pct"], lookback_days=7)
+        last = f.dropna().sort_values("as_of_date").groupby("security_id").tail(1)
+        return dict(zip(last.security_id, last.mom_12_1_pct))
+    ```
+
+    - `META`: side `long` | `short` | `long_short`, `horizon_days`, rebalance `daily` | `weekly` | `monthly`, `top_n`;
+      optional `params` (read as `ctx.params`).
+    - Read data only with `ctx.read_df(collection, filter=None, columns=None, lookback_days=None)`. It returns rows
+      known by `ctx.date`, each with its `as_of_date`. Imports: math, statistics, numpy, pandas, datetime,
+      collections, itertools, functools, random, re. No files, network, eval, or private (`_x`) attributes.
+
+    ## The loop
+
+    1. **Check the columns first.** Call `describe_collection` for every collection you read and use its exact
+       field names. Layer 2 tables (`features_ranked`, `prices_daily`, `fundamentals_pit`) are keyed by
+       `security_id`; Layer 1 tables use `symbol`.
+    2. **Use the known-at field.** Filter and sort on `as_of_date` (it is on every row `ctx.read_df` returns), not
+       on an event date such as `date` or `period_end`. Never ask for dates after `ctx.date`: such a read
+       returns nothing and `test_strategy` flags it as a blocked lookahead.
+    3. **Test on one date first.** `test_strategy(code, plugin=<name>, dates=[<one date>])` runs it on about 20
+       names. Read the error (type, message, your line number, and the real columns for a missing one) or the
+       warnings (`empty_signal`, `nan_scores`, `unknown_names`, `constant_scores`, `lookahead_blocked`).
+    4. **Fix and repeat.** Change only what the error points at, then call `test_strategy` again with the same
+       `plugin` name; every attempt is saved as a version with its outcome. After 5 failed attempts in a row,
+       stop and hand it to the Judge with a one-line summary.
+    5. **Then evaluate once.** When `test_strategy` passes, call `evaluate_strategy(plugin, params={start, end})`.
+       Every evaluation is a trial that lowers the deflated Sharpe of every idea, so do not tune the code to
+       the metrics. A failing gate is not a bug: it goes to the Judge, not back into the fix loop.

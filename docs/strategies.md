@@ -142,3 +142,19 @@ regimes, sector contributions and provenance.
 sharing. Import restores the record with its provenance (code hash, data snapshot, evaluator version) and never
 re-runs anything. Existing records are immutable, and a record whose `plugin.hash` disagrees with its `codeHash`
 is refused. Evaluations are records, not configuration, so they are not part of the repo config backup.
+
+## Run–test–fix loop for agent code (#153)
+
+- **Readable `run_python` errors:** a failed job comes back with `failure: { type, message, lines }`, the traceback
+  trimmed to the agent's own `main.py` frames with the code on each line. On a `KeyError` or `AttributeError` it
+  also lists the catalog fields of the collections the job read.
+- **`test_strategy(code, plugin?, note?, symbols?, dates?)`** (research MCP): a dry run through the evaluator's
+  as_of reader on about 20 symbols × 4 dates before the holdout. It returns the error (type, message, the
+  plugin's line numbers, and the real columns for a missing one) or a sanity summary: names scored per date,
+  NaNs, non-numeric and unknown names, and warnings (`empty_signal`, `lookahead_blocked`, `nan_scores`,
+  `unknown_names`, `constant_scores`). It never returns performance numbers and is not a trial.
+- **History:** with `plugin`, every attempt is saved as that plugin's next version with its outcome (`error` or
+  `tested: passed`), so Ideas → Code can show the diffs. The response counts consecutive failed attempts; after
+  5 it says to hand the plugin to the Judge.
+- The loop and its rules are in the `strategy-library` skill: check columns, use the known-at field, test on one
+  date first, fix, then `evaluate_strategy` once. A failing gate goes to the Judge, not back into the fix loop.
