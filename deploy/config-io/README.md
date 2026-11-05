@@ -73,3 +73,15 @@ Setup:
    administrator's workspace), `CONFIG_BACKUP_INTERVAL_MINUTES`.
 
 Without the token the backup runs in detect-only mode: it records changes but pushes nothing.
+
+## Restoring on a new install
+
+The committed exports (refreshed from the live workspace in #200) import into an empty workspace with no
+errors once the objects that hold secrets exist, because those are never exported:
+
+- connections **MongoDB** (the built-in one), **FMP** (with the `apikey` in its URL) and **Parallel**;
+- model providers **Gemini-flash-3-8** and **Gemini-flash-vision**.
+
+Then run `python3 config_io.py apply --dry-run` and `apply`. Syncs, transforms (with their Python code), the
+skill and the harnesses are created; data is not included, so run the syncs (or a backfill) and then the
+transforms to rebuild the collections.
