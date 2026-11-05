@@ -18,6 +18,8 @@ export const OBJECT_KINDS = [
   'Gates',
   'ResearchSettings',
   'Theory',
+  'SimulationConfig',
+  'SimulationRun',
 ] as const;
 export type ObjectKind = (typeof OBJECT_KINDS)[number];
 /**
@@ -37,6 +39,8 @@ export const REF_TYPE_BY_KIND: Record<ObjectKind, string> = {
   Gates: 'gates',
   ResearchSettings: 'researchSettings',
   Theory: 'theories',
+  SimulationConfig: 'simulationConfigs',
+  SimulationRun: 'simulations',
 };
 /** Referenceable types that are never exported (they hold secrets); they must already exist on the target. */
 export const EXTERNAL_REF_TYPES = ['connections', 'providers', 'knowledge', 'guardrails'] as const;

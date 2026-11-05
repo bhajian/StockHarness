@@ -74,6 +74,17 @@ import {
   type StrategyPluginHistoryEntry,
 } from '../../../packages/core/src/strategyPlugins.js';
 import { evaluations, type Evaluation } from '../../../packages/core/src/evaluations.js';
+import {
+  restoreSimulationConfig,
+  restoreSimulationRun,
+  simulationConfigSchema,
+  simulationConfigSpec,
+  simulationConfigs,
+  simulationRunSpec,
+  simulationRunSpecSchema,
+  simulations,
+  type Simulation,
+} from '../../../packages/core/src/simulations.js';
 import { gatesSchema, gatesVersions } from '../../../packages/core/src/gates.js';
 import { researchSettings, updateResearchSettings } from '../../../packages/core/src/researchLoop.js';
 import {
@@ -313,6 +324,29 @@ export async function exportObjects(
         const name = (t as Theory & { sourceId?: string }).sourceId ?? t._id;
         if (!wanted(name) && !wanted(`T-${t.number}`)) continue;
         docs.push({ apiVersion: API_VERSION, kind, metadata: { name }, spec: theorySpec(t) });
+      }
+      continue;
+    }
+    if (kind === 'SimulationConfig') {
+      for (const c of await simulationConfigs().find({ ownerId }).sort({ name: 1 }).toArray()) {
+        if (!wanted(c.name)) continue;
+        docs.push({
+          apiVersion: API_VERSION,
+          kind,
+          metadata: { name: c.name },
+          spec: simulationConfigSpec(c.config),
+        });
+      }
+      continue;
+    }
+    if (kind === 'SimulationRun') {
+      for (const r of await simulations()
+        .find({ ownerId, status: { $ne: 'running' } })
+        .sort({ createdAt: 1 })
+        .toArray()) {
+        const name = r.sourceId ?? r._id;
+        if (!wanted(name)) continue;
+        docs.push({ apiVersion: API_VERSION, kind, metadata: { name }, spec: simulationRunSpec(r) });
       }
       continue;
     }
@@ -699,6 +733,60 @@ async function plan(
     result.items.push({ kind: 'Theory', name, action: current ? 'unchanged' : 'create' });
   }
 
+  // Simulation configs (#125): definitions by name (ideas as T-n, plugins by name and version); merge semantics.
+  for (const doc of docs.filter((d) => d.kind === 'SimulationConfig')) {
+    const name = doc.metadata.name;
+    const parsed = simulationConfigSchema.safeParse({ ...doc.spec, name });
+    if (!parsed.success) {
+      const issue = parsed.error.issues[0];
+      result.errors.push({
+        kind: 'SimulationConfig',
+        name,
+        message: `${issue.path.join('.') || 'spec'}: ${issue.message}`,
+      });
+      continue;
+    }
+    const current = await simulationConfigs().findOne({ ownerId, name });
+    const action = !current
+      ? 'create'
+      : stableJson(simulationConfigSpec(current.config)) === stableJson(simulationConfigSpec(parsed.data))
+        ? 'unchanged'
+        : 'update';
+    prepared.push({ doc, action });
+    result.items.push({ kind: 'SimulationConfig', name, action });
+  }
+  // Simulation runs: records (summary, series, attribution), restored as they were and never re-run; immutable.
+  for (const doc of docs.filter((d) => d.kind === 'SimulationRun')) {
+    const name = doc.metadata.name;
+    const parsed = simulationRunSpecSchema.safeParse(doc.spec);
+    const cfg = parsed.success
+      ? simulationConfigSchema.safeParse({ ...parsed.data.config, name: parsed.data.configName })
+      : undefined;
+    if (!parsed.success || !cfg?.success) {
+      const issue = (parsed.success ? cfg!.error! : parsed.error).issues[0]!;
+      result.errors.push({
+        kind: 'SimulationRun',
+        name,
+        message: `${issue.path.join('.') || 'spec'}: ${issue.message}`,
+      });
+      continue;
+    }
+    const current = await simulations().findOne({
+      ownerId,
+      $or: [{ _id: name }, { sourceId: name }],
+    } as Record<string, unknown>);
+    if (current && stableJson(simulationRunSpec(current as Simulation)) !== stableJson(doc.spec)) {
+      result.errors.push({
+        kind: 'SimulationRun',
+        name,
+        message: 'Simulation runs are immutable; this one differs',
+      });
+      continue;
+    }
+    prepared.push({ doc, action: current ? 'unchanged' : 'create' });
+    result.items.push({ kind: 'SimulationRun', name, action: current ? 'unchanged' : 'create' });
+  }
+
   // Catalog docs: curated descriptions only, matched by collection name (merge semantics in both modes).
   for (const doc of docs.filter((d) => d.kind === 'CatalogEntry')) {
     const name = doc.metadata.name;
@@ -983,6 +1071,14 @@ export async function applyObjectImport(
       if (taken)
         await theories().updateOne({ _id: t._id }, { $set: { sourceId: name } } as Record<string, unknown>);
       done.push({ kind: 'Theory', name, action: 'create' });
+    }
+    for (const p of prepared.filter((x) => x.doc.kind === 'SimulationConfig' && x.action !== 'unchanged')) {
+      await restoreSimulationConfig(ownerId, p.doc.metadata.name, p.doc.spec);
+      done.push({ kind: 'SimulationConfig', name: p.doc.metadata.name, action: p.action });
+    }
+    for (const p of prepared.filter((x) => x.doc.kind === 'SimulationRun' && x.action === 'create')) {
+      await restoreSimulationRun(ownerId, p.doc.metadata.name, simulationRunSpecSchema.parse(p.doc.spec));
+      done.push({ kind: 'SimulationRun', name: p.doc.metadata.name, action: 'create' });
     }
     // Removals last and in reverse dependency order, so harnesses go before the skills/agents they use.
     for (const kind of [...OBJECT_KINDS].reverse()) {

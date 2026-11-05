@@ -40,6 +40,7 @@ FILES = [
     ("StrategyPlugin", "strategy-plugins.yaml", []),
     ("Gates", "research-gates.yaml", []),
     ("ResearchSettings", "research-settings.yaml", []),
+    ("SimulationConfig", "simulation-configs.yaml", []),
 ]
 BASE = os.environ.get("OH_BASE", "https://openharness.faberiq.ai").rstrip("/")
 _opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
