@@ -6,6 +6,7 @@ import {
   CircleDollarSign,
   FlaskConical,
   Gauge,
+  Lightbulb,
   Pause,
   Play,
   Settings2,
@@ -14,7 +15,9 @@ import {
 } from 'lucide-react';
 import { api, send, type Data } from '../api';
 import { Button, Field } from './ui';
-import { Drawer, KpiCard, Skeleton, StatusPill, Timeline } from './kit';
+import { Drawer, KpiCard, Skeleton, StatusPill } from './kit';
+import { IdeaStatus } from './ideas/IdeaStatus';
+import { go } from './ideas/nav';
 import { BarChart, TimeSeriesChart } from '../charts/Charts';
 import { ObjectTransfer } from './ObjectTransfer';
 
@@ -66,7 +69,6 @@ export function ResearchPage({ data, isAdmin }: { data: Data; isAdmin: boolean }
   const [status, setStatus] = useState<Status | null>(null);
   const [charts, setCharts] = useState<any>(null);
   const [feed, setFeed] = useState<Item[]>([]);
-  const [open, setOpen] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [note, setNote] = useState('');
   const [error, setError] = useState('');
@@ -119,6 +121,9 @@ export function ResearchPage({ data, isAdmin }: { data: Data; isAdmin: boolean }
           <span className="muted-line">every {status.harness.schedule.everyMinutes} min</span>
         )}
         <span className="spacer" />
+        <Button onClick={() => go('/ideas')}>
+          <Lightbulb size={14} /> All ideas
+        </Button>
         {isAdmin && (
           <>
             <Button
@@ -175,12 +180,12 @@ export function ResearchPage({ data, isAdmin }: { data: Data; isAdmin: boolean }
               {col.label} <small>{col.cards.length}</small>
             </h3>
             {col.cards.map((c) => (
-              <button key={c.id} type="button" className="board-card" onClick={() => setOpen(c.id)}>
+              <button key={c.id} type="button" className="board-card" onClick={() => go(`/ideas/${c.ref}`)}>
                 <strong>
                   {c.ref} {c.title}
                 </strong>
                 <span>
-                  <StatusPill status={c.status} /> {c.family}
+                  <IdeaStatus status={c.status} /> {c.family}
                   {c.forwardOnly ? ' · forward only' : ''}
                 </span>
                 <small>
@@ -201,7 +206,7 @@ export function ResearchPage({ data, isAdmin }: { data: Data; isAdmin: boolean }
             {feed.map((f, i) => (
               <li key={`${f.at}-${i}`}>
                 <time>{new Date(f.at).toLocaleTimeString()}</time>{' '}
-                <button type="button" className="link-button" onClick={() => setOpen(f.theoryId)}>
+                <button type="button" className="link-button" onClick={() => go(`/ideas/${f.theoryId}`)}>
                   {f.theory}
                 </button>{' '}
                 <strong>{f.role}</strong> {f.type === 'transition' ? `${f.from} → ${f.to}` : f.type}
@@ -264,7 +269,6 @@ export function ResearchPage({ data, isAdmin }: { data: Data; isAdmin: boolean }
           />
         </div>
       )}
-      {open && <TheoryDrawer id={open} onClose={() => setOpen(null)} />}
       {settingsOpen && (
         <SettingsDrawer
           data={data}
@@ -274,74 +278,6 @@ export function ResearchPage({ data, isAdmin }: { data: Data; isAdmin: boolean }
         />
       )}
     </section>
-  );
-}
-
-function TheoryDrawer({ id, onClose }: { id: string; onClose: () => void }) {
-  const [t, setT] = useState<any>(null);
-  useEffect(() => {
-    void api(`/theories/${id}`).then(setT);
-  }, [id]);
-  return (
-    <Drawer title={t ? `${t.ref} ${t.title}` : 'Theory'} onClose={onClose}>
-      {!t ? (
-        <Skeleton rows={6} />
-      ) : (
-        <div className="theory-detail">
-          <p>
-            <StatusPill status={t.status} /> {t.family} · {t.direction} · {t.horizonDays} days · {t.trials}{' '}
-            trials
-            {t.forwardOnly ? ' · forward only' : ''}
-          </p>
-          <h4>Hypothesis</h4>
-          <p>{t.hypothesis}</p>
-          <h4>Signal</h4>
-          <p>{t.signalLogic}</p>
-          <h4>Falsified if</h4>
-          <p>{t.falsification}</p>
-          {t.plugin && (
-            <p className="muted-line">
-              Plugin {t.plugin.name} · versions {t.plugin.versions.join(', ')}
-            </p>
-          )}
-          {t.evaluationIds.length > 0 && (
-            <p>
-              Evaluations:{' '}
-              {t.evaluationIds.map((e: string) => (
-                <a key={e} href={`/evaluations/${e}`}>
-                  {e.slice(0, 8)}{' '}
-                </a>
-              ))}
-              {t.holdoutEvaluationId && (
-                <>
-                  · holdout{' '}
-                  <a href={`/evaluations/${t.holdoutEvaluationId}`}>{t.holdoutEvaluationId.slice(0, 8)}</a>
-                </>
-              )}
-            </p>
-          )}
-          <h4>Debate</h4>
-          <Timeline
-            events={[...t.history].reverse().map((h: any, i: number) => ({
-              id: String(i),
-              at: h.at,
-              role: h.actor.role,
-              title:
-                h.type === 'transition'
-                  ? `${h.actor.role}: ${h.from} → ${h.to}`
-                  : `${h.actor.role}: ${h.type}`,
-              status: h.to,
-              body: (
-                <>
-                  {h.reasoning && <p>{h.reasoning}</p>}
-                  {h.actor.model && <small className="muted-line">{h.actor.model}</small>}
-                </>
-              ),
-            }))}
-          />
-        </div>
-      )}
-    </Drawer>
   );
 }
 
