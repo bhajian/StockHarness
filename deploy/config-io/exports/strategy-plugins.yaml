@@ -1,0 +1,36 @@
+# StockHarness objects (apiVersion stockharness/v1). Import from Settings -> Configuration or the
+# object list pages. References are by name; secrets and data rows are never included.
+apiVersion: stockharness/v1
+kind: StrategyPlugin
+metadata:
+  name: coder_check_mom
+  version: "2"
+spec:
+  evaluatorVersion: "1"
+  hash: sha256:633d831001dc297513e42f25f286fe5f187476d9bc1e499c8d2d1079bcddf353
+  code: |
+    META = {"side": "long", "horizon_days": 21, "rebalance": "monthly", "top_n": 10}
+
+    def signal(ctx):
+        f = ctx.read_df("features_ranked", columns=["security_id", "mom_12_1_pct"], lookback_days=7)
+        last = f.dropna().sort_values("as_of_date").groupby("security_id").tail(1)
+        return dict(zip(last.security_id, last.mom_12_1_pct))
+---
+apiVersion: stockharness/v1
+kind: StrategyPlugin
+metadata:
+  name: mom_12_1
+  version: "2"
+spec:
+  description: 12-1 momentum (M3 live check)
+  evaluatorVersion: "1"
+  hash: sha256:5f9e509ac5d7adf0773c813ed3657bbe7e83f0aed89e3ad2fce9d750cc3edcfe
+  code: |
+    META = {"side": "long", "horizon_days": 21, "rebalance": "monthly", "top_n": 10,
+            "description": "12-1 momentum: buy the 10 strongest names over the last year, skipping the last month"}
+
+
+    def signal(ctx):
+        f = ctx.read_df("features_ranked", columns=["security_id", "mom_12_1_pct"], lookback_days=7)
+        last = f.dropna().sort_values("as_of_date").groupby("security_id").tail(1)
+        return dict(zip(last.security_id, last.mom_12_1_pct))
