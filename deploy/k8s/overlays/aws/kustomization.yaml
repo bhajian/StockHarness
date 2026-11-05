@@ -20,7 +20,7 @@ images:
     newTag: c6f90af9dacf
   - name: openharness-python-executor
     newName: 491085405405.dkr.ecr.us-east-1.amazonaws.com/openharness/python-executor
-    newTag: bd8ab29e8e1a
+    newTag: d9d7c3133d3b
 patches:
   # Drop the Caddy TLS proxy (the ALB replaces it).
   - patch: |-
