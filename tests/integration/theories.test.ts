@@ -245,3 +245,14 @@ test(
     }
   },
 );
+
+test('seed skills import on a fresh install and export identically', { skip: skipReason }, async () => {
+  const { readFile } = await import('node:fs/promises');
+  const seed = await readFile('deploy/config-io/seed/skills.yaml', 'utf8');
+  const F = `seed-${randomUUID()}`;
+  const r = await applyObjectImport(who(F), seed, 'merge');
+  assert.equal(r.applied, true, JSON.stringify(r));
+  assert.equal((await exportObjects(F, ['Skill'])).yaml, seed, 'identical round trip');
+  assert.ok(!SECRET_FIELD_PATTERN.test(seed));
+  for (const c of ['skills', 'skill_versions']) await collection<any>(c).deleteMany({ ownerId: F });
+});

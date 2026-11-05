@@ -97,6 +97,13 @@ class Reader(unittest.TestCase):
         # rows past the end never even load
         self.assertEqual(r.read_df("prices_daily", as_of="2024-03-07")["as_of_date"].max(), "2024-03-07")
 
+    def test_date_helpers(self):
+        ctx = StrategyContext("2024-03-08", reader())
+        self.assertEqual(ctx.days_ago(3), "2024-03-05")
+        self.assertEqual(ctx.trading_days_ago(2), "2024-03-06")
+        self.assertEqual(ctx.trading_days_ago(4), "2024-03-04")
+        self.assertEqual(contract.validate(GOOD.replace("lookback_days=10)", "lookback_days=10, filter={\"date\": {\"$gte\": ctx.days_ago(30)}})")), [])
+
     def test_scope_limits_rows(self):
         r = reader(scope_ids=["SEC_B"])
         self.assertEqual(set(r.read_df("prices_daily", as_of="2024-03-11")["security_id"]), {"SEC_B"})

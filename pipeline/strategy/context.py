@@ -21,5 +21,15 @@ class StrategyContext:
         """
         return self._reader.read_df(collection, filter, columns, as_of=self.date, lookback_days=lookback_days)
 
+    def days_ago(self, n: int) -> str:
+        """The date n calendar days before ctx.date (YYYY-MM-DD)."""
+        from datetime import date, timedelta
+
+        return (date.fromisoformat(self.date) - timedelta(days=int(n))).isoformat()
+
+    def trading_days_ago(self, n: int) -> str:
+        """The session n trading days before ctx.date (from trading_calendar; weekdays when it has none)."""
+        return self._reader.trading_day_before(self.date, int(n))
+
     def __repr__(self):
         return f"StrategyContext(date={self.date!r})"

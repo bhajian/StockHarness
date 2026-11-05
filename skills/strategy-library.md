@@ -11,7 +11,7 @@ This skill is the shared map of strategy ideas for the StockHarness research age
 - **Coder:** use the card's **Signal** and **Data** sections to write the plugin, using the field names exactly as listed.
 - **Judge:** use **Status** and **Point-in-time traps** to decide testability and lookahead risk.
 
-Every field name below is real. It exists in the StockHarness workspace today, or it is marked _(Layer 2, planned)_ with the collection that will provide it. **Reading Layer 1 collections directly is normal.** The as_of reader applies each dataset's known-at rule (Part 1, rule 3); use a Layer 2 collection only when one exists and adds something (e.g. `security_id` joins, adjusted prices, restatement versions).
+Every field name below is real. It exists in the StockHarness workspace today, or it is marked _(planned)_ with the collection that will provide it. Layer 2 tables that exist today: `securities`, `trading_calendar`, `corporate_actions`, `prices_daily`, `macro_daily`, `fundamentals_pit`, `universe_daily`, `features_daily` and `features_ranked`; call `describe_collection` for their exact fields. **Reading Layer 1 collections directly is normal.** The as_of reader applies each dataset's known-at rule (Part 1, rule 3); use a Layer 2 collection only when one exists and adds something (e.g. `security_id` joins, adjusted prices, restatement versions).
 
 ---
 
@@ -41,7 +41,7 @@ Every field name below is real. It exists in the StockHarness workspace today, o
    - and `financial_scores`, except from its `snapshot_date` onward.
 5. **Market cap history:** `historical_market_cap` only starts in July 2026. For backtests compute `mcap = adj_close × weightedAverageShsOutDil`, using the latest `income_statement` known at D.
 6. **Recompute valuation with the price on D.** FMP's `ratios` and `key_metrics` valuation fields (`priceToEarningsRatio`, `earningsYield`, `evToEBITDA`, …) use the price at period end. Use their accounting inputs, but rebuild the ratios with `adj_close` on D.
-7. **Universe:** use `universe_daily` _(Layer 2, planned)_ once it exists. Until then, include a name on D if:
+7. **Universe:** the evaluator's default universe is `universe_daily.in_universe` on D (`ctx.universe_ids`). For a narrower universe, include a name on D if:
    - it has a `prices_daily` row on D,
    - `adj_close ≥ 5`,
    - its 20-day mean `dollar_volume ≥ $5M`,
@@ -62,17 +62,17 @@ Every field name below is real. It exists in the StockHarness workspace today, o
 
 ### What history exists today (Nov 2026)
 
-| Data                                                                                    | History                                      |
-| --------------------------------------------------------------------------------------- | -------------------------------------------- |
-| `prices_daily`, `eod_prices`, `eod_index`, `macro_daily`                                | 2021-10-25 onward (target: 2016+)            |
-| `income_statement`, `balance_sheet`, `cash_flow` (quarterly)                            | about 8 quarters per symbol (target: 40)     |
-| `key_metrics`, `ratios`, `enterprise_values` (annual, FY)                               | about 10 fiscal years                        |
-| `dividends_history`                                                                     | back to 1977                                 |
-| `splits_history`, `corporate_actions`                                                   | full history                                 |
-| `earnings_surprises` (legacy)                                                           | long history of `epsActual` / `epsEstimated` |
-| `earnings_calendar`                                                                     | rolling window only (backfill pending)       |
-| `analyst_estimates`, `grades_consensus`, `price_target_consensus`, `financial_scores`   | weekly since 2026-10-23                      |
-| `insider_trades`, `congress_*`, `analyst_grades`, `price_target_changes`, `news_stocks` | since 2026-10-22                             |
+| Data                                                                                     | History                                      |
+| ---------------------------------------------------------------------------------------- | -------------------------------------------- |
+| `prices_daily`, `eod_prices`, `eod_index`, `macro_daily`, `features_*`, `universe_daily` | 2016-01-04 onward (10 years)                 |
+| `income_statement`, `balance_sheet`, `cash_flow` (quarterly), `fundamentals_pit`         | about 40 quarters per symbol                 |
+| `key_metrics`, `ratios`, `enterprise_values` (annual, FY)                                | about 10 fiscal years                        |
+| `dividends_history`                                                                      | back to 1977                                 |
+| `splits_history`, `corporate_actions`                                                    | full history                                 |
+| `earnings_surprises` (legacy)                                                            | long history of `epsActual` / `epsEstimated` |
+| `earnings_calendar`                                                                      | about one year (the plan's limit)            |
+| `analyst_estimates`, `grades_consensus`, `price_target_consensus`, `financial_scores`    | weekly since 2026-10-23                      |
+| `insider_trades`, `congress_*`, `analyst_grades`, `price_target_changes`, `news_stocks`  | since 2026-10-22                             |
 
 ---
 
@@ -82,7 +82,7 @@ Every field name below is real. It exists in the StockHarness workspace today, o
 META = {"side": "long", "horizon_days": 40, "rebalance": "weekly", "top_n": 30}
 
 def universe(ctx):
-    # Preferred once it exists: ctx.read_df("universe_daily", {"date": ctx.date, "in_universe": True})
+    # Optional: the default is universe_daily.in_universe on ctx.date (ctx.universe_ids). A narrower one:
     px = ctx.read_df("prices_daily", {"date": {"$gte": ctx.days_ago(30)}},
                      columns=["security_id", "date", "adj_close", "dollar_volume"])
     last = px[px.date == px.date.max()]
@@ -112,7 +112,7 @@ Card IDs S01–S42 match the strategy-ideas table in `PRODUCT.md` §7.
 
 - **How it works:** investors under-react to news, so prices trend over 3–12 months. Skipping the most recent month avoids the short-term reversal.
 - **Signal:** `mom_12_1 = adj_close[t−21] / adj_close[t−252] − 1`. Long the top decile; long/short top versus bottom.
-- **Data:** `prices_daily.adj_close` (or `tr_1d` compounded) · _(Layer 2, planned)_ `features_daily.mom_12_1`.
+- **Data:** `prices_daily.adj_close` (or `tr_1d` compounded) · `features_daily.mom_12_1` (and `features_ranked.mom_12_1_pct`).
 - **Defaults:** monthly rebalance, horizon 21–63 days, `top_n` 30–50, equal weight.
 - **Explore:** a 6-1 lookback, industry-neutral ranking, volatility scaling, excluding names within 5 days of earnings.
 - **Traps:** momentum crashes after sharp market rebounds (2009, Nov 2020, 2022). Report the drawdown, don't hide it. Needs 252 bars before the first signal.
@@ -122,7 +122,7 @@ Card IDs S01–S42 match the strategy-ideas table in `PRODUCT.md` §7.
 
 - **How it works:** investors anchor on the 52-week high and under-react to good news near it.
 - **Signal:** `pct_from_52w_high = adj_close[t] / max(adj_high[t−251..t]) − 1`. Long the names closest to 0 (e.g. above −5%).
-- **Data:** `prices_daily.adj_close`, `adj_high` · _(planned)_ `features_daily.pct_from_52w_high`.
+- **Data:** `prices_daily.adj_close`, `adj_high` · `features_daily.dist_52w_high`.
 - **Defaults:** weekly rebalance, horizon 63–126 days, `top_n` 30.
 - **Explore:** combine with S13 quality, require volume confirmation (`dollar_volume` above its 50-day mean), exclude 52-week-high breakouts on earnings day.
 - **Traps:** use adjusted highs, because raw highs break across splits.
@@ -186,7 +186,7 @@ Card IDs S01–S42 match the strategy-ideas table in `PRODUCT.md` §7.
 
 - **How it works:** investors overpay for "lottery" stocks, so low-volatility names deliver similar returns with less risk.
 - **Signal:** `vol_60d = std(tr_1d over 60 days) × √252`. Long the lowest-volatility quintile.
-- **Data:** `prices_daily.tr_1d` · _(planned)_ `features_daily.vol_60d`.
+- **Data:** `prices_daily.tr_1d` · `features_daily.vol_63d` (and `vol_21d`).
 - **Defaults:** monthly rebalance, horizon 21–63 days, `top_n` 50.
 - **Explore:** 252-day volatility, sector-neutral ranking, combining with quality.
 - **Traps:** a big tilt toward utilities and staples, and sensitivity to rates. The Judge should check sector concentration and correlation with `ust_10y`.
@@ -208,7 +208,7 @@ Card IDs S01–S42 match the strategy-ideas table in `PRODUCT.md` §7.
 
 - **How it works:** cheap stocks relative to earnings outperform over time, as compensation for risk or because of mispricing.
 - **Signal:** `earnings_yield = TTM netIncome / mcap`, where TTM is the sum of the last 4 quarterly `income_statement.netIncome` values known at D, and `mcap = adj_close × weightedAverageShsOutDil`. Rank within sector; long the top quintile, excluding negative earnings.
-- **Data:** `income_statement.netIncome`, `weightedAverageShsOutDil`, `acceptedDate`; `prices_daily.adj_close` · _(planned)_ `fundamentals_pit`, `features_daily.earnings_yield_ttm`.
+- **Data:** `income_statement.netIncome`, `weightedAverageShsOutDil`, `acceptedDate`; `prices_daily.adj_close` · `fundamentals_pit` (point-in-time statements by `security_id`), `features_daily.earnings_yield`.
 - **Defaults:** monthly rebalance, horizon 126–252 days.
 - **Explore:** use annual `key_metrics` for a longer history today (its `netIncomePerShare` and similar, lagged), normalized earnings (a 3-year average), excluding financials.
 - **Traps:** use `acceptedDate` and the lag rule. Convert to USD when `reportedCurrency ≠ USD`. Only 8 quarters today means TTM history is about 1 year; use the annual path or wait for M1.
@@ -240,7 +240,7 @@ Card IDs S01–S42 match the strategy-ideas table in `PRODUCT.md` §7.
 
 - **How it works:** gross profit relative to assets is a clean measure of economic productivity and predicts returns as strongly as value does.
 - **Signal:** `gp_assets = TTM income_statement.grossProfit / balance_sheet.totalAssets` (latest known). Long the top quintile.
-- **Data:** `income_statement.grossProfit`, `balance_sheet.totalAssets`, `acceptedDate` · _(planned)_ `features_daily.gross_profitability`.
+- **Data:** `income_statement.grossProfit`, `balance_sheet.totalAssets`, `acceptedDate` · `features_daily.gross_margin` (gross profit / revenue; gross profit / assets is built from `fundamentals_pit`).
 - **Defaults:** monthly rebalance, horizon 252 days.
 - **Explore:** combine with S10 (quality at a reasonable price), use operating profitability (`operatingIncome / totalAssets`).
 - **Traps:** banks and insurers report `grossProfit = 0` or something not comparable, so exclude them.
@@ -343,7 +343,7 @@ Card IDs S01–S42 match the strategy-ideas table in `PRODUCT.md` §7.
 
 - **How it works:** the market extrapolates past growth, so _accelerating_ growth surprises it.
 - **Signal:** `rev_growth_yoy = revenue[q] / revenue[q−4] − 1`; `rev_accel = rev_growth_yoy[q] − rev_growth_yoy[q−1]`. Long the top quintile of `rev_accel` with `rev_growth_yoy > 0` and a gross margin that isn't falling.
-- **Data:** `income_statement.revenue`, `grossProfit`, `acceptedDate` · _(planned)_ `features_daily.rev_growth_yoy`, `rev_accel`.
+- **Data:** `income_statement.revenue`, `grossProfit`, `acceptedDate` · `features_daily.revenue_growth_yoy` (`rev_accel` planned).
 - **Defaults:** monthly rebalance, horizon 63–252 days.
 - **Explore:** require two consecutive accelerating quarters, combine with S24 (a positive surprise on the same report).
 - **Traps:** needs 6 quarters to compute two growth rates, so it's short today.
@@ -533,7 +533,7 @@ Card IDs S01–S42 match the strategy-ideas table in `PRODUCT.md` §7.
 
 - **How it works:** the factors have low correlation with each other. A composite gives steadier excess returns than any one alone.
 - **Signal:** the average of cross-sectional percentile ranks of `value_score` (S10/S11), `quality_score` (S13/S15) and `momentum_score` (S01). Long the top quintile.
-- **Data:** _(planned)_ `features_ranked.value_score`, `quality_score`, `momentum_score`. Today, build each component from its card.
+- **Data:** `features_ranked.value_score`, `quality_score`, `momentum_score`, `growth_score`, `low_vol_score`, `composite_pct` and the sector-relative `*_sector_pct`.
 - **Defaults:** monthly rebalance, horizon 63 days.
 - **Explore:** the component weights (from walk-forward folds only, never from the full sample), sector neutrality.
 - **Traps:** each weighting variant counts as a trial for deflated Sharpe. Keep variants few.
