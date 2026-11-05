@@ -14,6 +14,7 @@ const KIND_LABEL: Record<ObjectKind, string> = {
   StrategyPlugin: 'strategy plugins',
   Evaluation: 'evaluations',
   Gates: 'success gates',
+  ResearchSettings: 'research settings',
   Theory: 'theories',
 };
 

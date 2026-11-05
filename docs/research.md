@@ -144,3 +144,29 @@ Start → Theorists (Parallel, N agent cards) → Judge (pre-code) → Anything 
   The default scope is small: 50 large caps over the 3 years before the holdout.
 - **Running it:** run it like any harness, on its schedule (`scheduleMinutes`) or continuously. Per-theory
   caps are enforced by the tools, so the budget can stay unlimited.
+
+## Research Lab (#116)
+
+**Research** in the navigation is the research loop at a glance:
+
+- **KPIs:** theories today, in flight, the share of verdicts that were successful, total trials, and tokens today
+  (with a cost once a $ per million tokens rate is set). Every model call's usage is recorded per run, step and
+  model in `model_usage`.
+- **Pipeline board:** Draft → Pre-review → Coding → Evaluating → Post-review, plus today's verdicts. A card opens
+  the theory with its debate.
+- **Live activity:** every transition, edit and link as it happens (`GET /api/research/activity`, Server-Sent
+  Events), with the role, model and reasoning.
+- **Charts:** verdicts per day, success rate, cumulative trials, tokens by role.
+- **Steering box:** a note for the next cycle's Theorists.
+- **Pause / Resume:** paused, the harness schedule stops and running agents are told to stop.
+- **Settings drawer:**
+  - the model per role (the harness is rebuilt);
+  - the focus, Theorists per cycle, and evaluation symbols and years;
+  - the schedule;
+  - budget alerts (alerts only; the research agents have no token budget, #263);
+  - the gates. Editing a threshold creates the next version and warns that verdicts under different versions
+    are not comparable; a locked version never changes.
+  - Export / import of `ResearchSettings` (models and skills by name; steering stays in the workspace) and `Gates`.
+
+APIs: `GET /api/research/status`, `POST /api/research/pause|resume`, `GET/PUT /api/research/settings`,
+`GET /api/research/gates/:version`, `GET /api/research/charts?days=`, `GET /api/research/activity?since=`.

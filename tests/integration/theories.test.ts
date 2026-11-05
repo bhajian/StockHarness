@@ -256,3 +256,41 @@ test('seed skills import on a fresh install and export identically', { skip: ski
   assert.ok(!SECRET_FIELD_PATTERN.test(seed));
   for (const c of ['skills', 'skill_versions']) await collection<any>(c).deleteMany({ ownerId: F });
 });
+
+test('ResearchSettings YAML: models and skills by name, round trip', { skip: skipReason }, async () => {
+  const R = await import('../../packages/core/src/researchLoop.js');
+  const A = `rs-a-${randomUUID()}`;
+  const B = `rs-b-${randomUUID()}`;
+  const provider = async (o: string) =>
+    (
+      await collection<any>('providers').insertOne({
+        _id: randomUUID(),
+        ownerId: o,
+        name: 'Judge model',
+        kind: 'openai-compatible',
+        baseUrl: 'http://x',
+        model: 'm',
+        modelType: 'llm',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      })
+    ).insertedId;
+  const pa = await provider(A);
+  await provider(B);
+  await R.updateResearchSettings(A, {
+    focus: 'Quality and low volatility',
+    theoristsPerCycle: 3,
+    agents: { judge: { providerId: pa } },
+    budget: { dailyTokenAlert: 500000 },
+  });
+  await R.addSteeringNote(A, 'Not exported: steering is per workspace');
+  const { yaml } = await exportObjects(A, ['ResearchSettings']);
+  assert.match(yaml, /kind: ResearchSettings/);
+  assert.match(yaml, /judge:\n\s+providerId:\n\s+\$ref:\n\s+type: providers\n\s+name: Judge model/);
+  assert.ok(!yaml.includes('steering') && !yaml.includes(pa));
+  const r = await applyObjectImport(who(B), yaml, 'merge');
+  assert.equal(r.applied, true, JSON.stringify(r));
+  assert.equal((await exportObjects(B, ['ResearchSettings'])).yaml, yaml, 'identical round trip');
+  await collection<any>('providers').deleteMany({ ownerId: { $in: [A, B] } });
+  await collection<any>('research_settings').deleteMany({ _id: { $in: [A, B] } });
+});

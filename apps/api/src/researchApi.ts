@@ -11,6 +11,12 @@ import {
   updateResearchSettings,
 } from '../../../packages/core/src/researchLoop.js';
 import { saveResource, type ResourcePrincipal } from './resources.js';
+import {
+  researchActivity,
+  researchCharts,
+  researchHarness,
+  researchStatus,
+} from '../../../packages/core/src/researchLab.js';
 import { discoverTools } from '../../../packages/core/src/mcp.js';
 
 export const researchRouter = Router();
@@ -23,7 +29,13 @@ researchRouter.get('/research/settings', async (req, res) => {
 });
 researchRouter.put('/research/settings', async (req, res) => {
   adminOnly(req.principal!.user.role);
-  res.json(await updateResearchSettings(req.principal!.tenantId, req.body ?? {}));
+  const ownerId = req.principal!.tenantId;
+  const next = await updateResearchSettings(ownerId, req.body ?? {});
+  // Models, skills, the Theorists per cycle and the schedule live in the harness: rebuild it when it exists.
+  const touched = ['agents', 'schedule', 'theoristsPerCycle'].some((k) => k in (req.body ?? {}));
+  if (touched && (await researchHarness(ownerId)))
+    await installResearchLoop(req.principal! as unknown as ResourcePrincipal);
+  res.json(next);
 });
 researchRouter.post('/research/steering', async (req, res) => {
   adminOnly(req.principal!.user.role);
@@ -39,7 +51,9 @@ const SKILLS = {
 } as const;
 const installInput = z.object({
   name: z.string().trim().min(1).max(120).default('Research loop'),
-  providers: z.object({ theorist: z.string(), judge: z.string(), coder: z.string().optional() }),
+  providers: z
+    .object({ theorist: z.string().optional(), judge: z.string().optional(), coder: z.string().optional() })
+    .optional(),
   theorists: z.number().int().min(1).max(8).optional(),
   scheduleMinutes: z.number().int().min(10).max(10080).optional(),
 });
@@ -64,39 +78,121 @@ export async function ensureRoleConnections(principal: ResourcePrincipal) {
   }
   return ids;
 }
-/** Install (or update) the research loop harness: role connections, seed skills by name, providers by id. */
-researchRouter.post('/research/loop', async (req, res) => {
-  adminOnly(req.principal!.user.role);
-  const body = installInput.parse(req.body ?? {});
-  const principal = req.principal! as unknown as ResourcePrincipal;
+/**
+ * Install (or rebuild) the research loop harness: the role connections, seed skills by name (or the skills chosen per
+ * role in the research settings), providers per role, the Theorists per cycle and the schedule.
+ */
+export async function installResearchLoop(
+  principal: ResourcePrincipal,
+  o: {
+    name?: string;
+    providers?: { theorist?: string; judge?: string; coder?: string };
+    theorists?: number;
+    scheduleMinutes?: number;
+  } = {},
+) {
   const ownerId = principal.tenantId;
+  const name = o.name ?? 'Research loop';
+  const s = await researchSettings(ownerId);
   const connections = await ensureRoleConnections(principal);
   const skills: Record<string, string | undefined> = {};
-  for (const [k, name] of Object.entries(SKILLS))
-    skills[k] = (await collection<any>('skills').findOne({ ownerId, name }, { projection: { _id: 1 } }))?._id;
-  const s = await researchSettings(ownerId);
+  for (const [k, n] of Object.entries(SKILLS))
+    skills[k] = (await collection<any>('skills').findOne({ ownerId, name: n }, { projection: { _id: 1 } }))
+      ?._id;
+  const fallback = (
+    await collection<any>('providers').findOne(
+      { ownerId, modelType: { $ne: 'embedding' } },
+      { sort: { createdAt: 1 } },
+    )
+  )?._id;
+  const provider = (role: 'theorist' | 'judge' | 'coder') =>
+    o.providers?.[role] ??
+    s.agents[role]?.providerId ??
+    o.providers?.theorist ??
+    s.agents.theorist?.providerId ??
+    fallback;
+  const providers = { theorist: provider('theorist'), judge: provider('judge'), coder: provider('coder') };
+  if (!providers.theorist || !providers.judge || !providers.coder)
+    throw new HttpError(400, 'Add a chat model first: the research agents need a model provider');
+  const schedule =
+    o.scheduleMinutes ?? (s.schedule?.enabled && !s.paused ? s.schedule.everyMinutes : undefined);
   const workflow = makeResearchLoop({
-    name: body.name,
-    providers: {
-      theorist: body.providers.theorist,
-      judge: body.providers.judge,
-      coder: body.providers.coder ?? body.providers.theorist,
-    },
+    name,
+    providers: providers as { theorist: string; judge: string; coder: string },
     connections,
     skills,
-    theorists: body.theorists ?? s.theoristsPerCycle,
-    scheduleMinutes: body.scheduleMinutes,
+    roleSkills: Object.fromEntries(
+      (['theorist', 'judge', 'coder'] as const)
+        .filter((r) => s.agents[r]?.skillIds?.length)
+        .map((r) => [r, s.agents[r]!.skillIds!]),
+    ),
+    theorists: o.theorists ?? s.theoristsPerCycle,
+    scheduleMinutes: schedule,
   });
-  const existing = await collection<any>('workflows').findOne(
-    { ownerId, name: body.name },
-    { projection: { _id: 1 } },
-  );
+  const existing = await collection<any>('workflows').findOne({ ownerId, name }, { projection: { _id: 1 } });
   const saved = await saveResource('workflows', principal, workflow, existing ? { id: existing._id } : {});
-  res.status(existing ? 200 : 201).json({
+  return {
+    created: !existing,
     harness: saved,
     connections,
     missingSkills: Object.entries(SKILLS)
       .filter(([k]) => !skills[k])
       .map(([, n]) => n),
-  });
+  };
+}
+researchRouter.post('/research/loop', async (req, res) => {
+  adminOnly(req.principal!.user.role);
+  const body = installInput.parse(req.body ?? {});
+  const r = await installResearchLoop(req.principal! as unknown as ResourcePrincipal, body);
+  res.status(r.created ? 201 : 200).json(r);
 });
+
+// Research Lab (#116): status and KPIs, charts, the activity feed, pause / resume.
+researchRouter.get('/research/status', async (req, res) => {
+  res.json(await researchStatus(req.principal!.tenantId));
+});
+researchRouter.get('/research/charts', async (req, res) => {
+  res.json(
+    await researchCharts(req.principal!.tenantId, Math.min(120, Math.max(7, Number(req.query.days) || 30))),
+  );
+});
+/** The debate as it happens: JSON for ?since=, or a Server-Sent Events stream (Accept: text/event-stream). */
+researchRouter.get('/research/activity', async (req, res) => {
+  const ownerId = req.principal!.tenantId;
+  let since = new Date(typeof req.query.since === 'string' ? req.query.since : Date.now() - 86400_000);
+  if (Number.isNaN(since.getTime())) throw new HttpError(400, 'since must be an ISO date');
+  if (!String(req.headers.accept ?? '').includes('text/event-stream'))
+    return void res.json(await researchActivity(ownerId, since));
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-store',
+    Connection: 'keep-alive',
+  });
+  let open = true;
+  req.on('close', () => (open = false));
+  while (open) {
+    const items = await researchActivity(ownerId, since).catch(() => []);
+    for (const item of items) res.write(`event: activity\ndata: ${JSON.stringify(item)}\n\n`);
+    if (items.length) since = new Date(items[items.length - 1].at);
+    else res.write(': keep-alive\n\n');
+    await new Promise((r) => setTimeout(r, 3000));
+  }
+  res.end();
+});
+async function setPaused(req: any, paused: boolean) {
+  adminOnly(req.principal!.user.role);
+  const ownerId = req.principal!.tenantId;
+  await updateResearchSettings(ownerId, { paused });
+  const h = await researchHarness(ownerId);
+  if (h?.schedule) {
+    const s = await researchSettings(ownerId);
+    // Paused: no scheduled cycles. Resumed: the schedule from the settings again.
+    await collection<any>('workflows').updateOne(
+      { _id: h._id, ownerId },
+      { $set: { 'schedule.enabled': !paused && (s.schedule?.enabled ?? true), updatedAt: new Date() } },
+    );
+  }
+  return researchStatus(ownerId);
+}
+researchRouter.post('/research/pause', async (req, res) => res.json(await setPaused(req, true)));
+researchRouter.post('/research/resume', async (req, res) => res.json(await setPaused(req, false)));

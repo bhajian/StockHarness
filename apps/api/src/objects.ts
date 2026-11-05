@@ -75,6 +75,7 @@ import {
 } from '../../../packages/core/src/strategyPlugins.js';
 import { evaluations, type Evaluation } from '../../../packages/core/src/evaluations.js';
 import { gatesSchema, gatesVersions } from '../../../packages/core/src/gates.js';
+import { researchSettings, updateResearchSettings } from '../../../packages/core/src/researchLoop.js';
 import {
   restoreTheory,
   theories,
@@ -272,6 +273,22 @@ export async function exportObjects(
         if (!wanted(name)) continue;
         docs.push({ apiVersion: API_VERSION, kind, metadata: { name }, spec: evaluationSpec(e) });
       }
+      continue;
+    }
+    if (kind === 'ResearchSettings') {
+      const doc = await collection<any>('research_settings').findOne({ _id: ownerId });
+      if (!doc || !wanted('research')) continue;
+      const s = await researchSettings(ownerId);
+      const { steering: _s, paused: _p, ...rest } = s;
+      docs.push({
+        apiVersion: API_VERSION,
+        kind,
+        metadata: { name: 'research' },
+        spec: toRefs(
+          { ...rest, ...(doc.gatesVersion ? { gatesVersion: doc.gatesVersion } : {}) },
+          byId,
+        ) as Record<string, unknown>,
+      });
       continue;
     }
     if (kind === 'Gates') {
@@ -621,6 +638,27 @@ async function plan(
     }
   }
 
+  // Research settings (#116): one object per workspace; models and skills by name; merge semantics.
+  for (const doc of docs.filter((d) => d.kind === 'ResearchSettings')) {
+    const missing: { type: string; name: string }[] = [];
+    fromRefs(doc.spec, (t, n) => (byName.get(`${t}\u0000${n}`) ?? [])[0], missing);
+    if (missing.length) {
+      result.errors.push({
+        kind: 'ResearchSettings',
+        name: doc.metadata.name,
+        message: `Missing references: ${missing.map((m) => `${m.type} "${m.name}"`).join(', ')}`,
+      });
+      continue;
+    }
+    const current = await collection<any>('research_settings').findOne({ _id: ownerId });
+    prepared.push({ doc, action: current ? 'update' : 'create' });
+    result.items.push({
+      kind: 'ResearchSettings',
+      name: doc.metadata.name,
+      action: current ? 'update' : 'create',
+    });
+  }
+
   // Theories (#110): records with their debate; restored as they were, never re-run. Immutable on re-import.
   for (const doc of docs.filter((d) => d.kind === 'Theory')) {
     const name = doc.metadata.name;
@@ -911,6 +949,17 @@ export async function applyObjectImport(
         importedAt: new Date(),
       } as Evaluation);
       done.push({ kind: 'Evaluation', name: p.doc.metadata.name, action: 'create' });
+    }
+    for (const p of prepared.filter((x) => x.doc.kind === 'ResearchSettings' && x.action !== 'unchanged')) {
+      const { byName: names } = await referenceIndex(ownerId);
+      const { gatesVersion, ...spec } = fromRefs(
+        p.doc.spec,
+        (t, n) => (names.get(`${t}\u0000${n}`) ?? [])[0],
+      ) as Record<string, any>;
+      await updateResearchSettings(ownerId, spec);
+      if (gatesVersion && (await gatesVersions().findOne({ ownerId, version: gatesVersion })))
+        await collection<any>('research_settings').updateOne({ _id: ownerId }, { $set: { gatesVersion } });
+      done.push({ kind: 'ResearchSettings', name: p.doc.metadata.name, action: p.action });
     }
     for (const p of prepared.filter((x) => x.doc.kind === 'Gates' && x.action === 'create')) {
       const version = Number(p.doc.metadata.version);
