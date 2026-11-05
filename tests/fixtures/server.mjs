@@ -596,6 +596,41 @@ function answer(messages, tools) {
     cycleVisits.set(token, visits);
     return { content: visits >= Number(target) ? `Visit ${visits}: DONE` : `Visit ${visits}: continue` };
   }
+  if (String(input).includes('collection bindings check')) {
+    // #148: a fixed sequence of MongoDB calls against an agent with collection bindings; reports raw results.
+    const byTool = (n) => tools?.find((t) => t.function.description?.includes(`/ ${n}:`))?.function;
+    const steps = [
+      ['find', { collection: 'secret_col', filter: {} }],
+      ['delete-many', { collection: 'prices', filter: {} }],
+      [
+        'aggregate',
+        {
+          collection: 'prices',
+          pipeline: [
+            { $lookup: { from: 'secret_col', localField: 'symbol', foreignField: 'symbol', as: 'x' } },
+          ],
+        },
+      ],
+      ['delete-many', { collection: 'watch', filter: {} }],
+      ['insert-many', { collection: 'watch', documents: [{ symbol: 'AAA', note: 'from agent' }] }],
+      ['find', { collection: 'prices', filter: {}, limit: 50 }],
+    ];
+    const done = messages.filter((m) => m.role === 'tool');
+    if (done.length < steps.length) {
+      const [name, args] = steps[done.length];
+      const tool = byTool(name);
+      if (!tool) return { content: `NO TOOL ${name}` };
+      return memoryCall(tool.name, args);
+    }
+    return {
+      content: JSON.stringify({
+        offered: (tools ?? []).map((t) => t.function.description.split(':')[0]),
+        findEnum: byTool('find')?.parameters?.properties?.collection?.enum,
+        findDescription: byTool('find')?.description,
+        results: done.map((m) => String(m.content)),
+      }),
+    };
+  }
   if (String(input).includes('strategy fix loop')) {
     // #153: write -> test_strategy -> read the error -> fix, through the research MCP connection. Three seeded
     // bugs (a column typo, the wrong date field, a syntax error), each checked for a clear error, then the fix.

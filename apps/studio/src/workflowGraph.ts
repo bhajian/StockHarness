@@ -258,6 +258,7 @@ export function editableWorkflow(value: Entity | Workflow | undefined, data: Dat
           type: 'mcp',
           connectionId: c.connectionId,
           tools: c.tools,
+          ...(c.collections?.length ? { collections: c.collections } : {}),
           position: { x: n.position?.x ?? 300, y: (n.position?.y ?? 140) + 300 },
         });
         f.bindings.push({ agentNodeId: n.id, resourceId: id });

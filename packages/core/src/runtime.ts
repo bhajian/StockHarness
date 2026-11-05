@@ -1,4 +1,15 @@
 import { HttpError } from './security.js';
+import {
+  applyBinding,
+  bindingProblem,
+  needsBindingApproval,
+  scopeToolSchema,
+  scopedToolNames,
+  type CollectionBinding,
+} from './collectionBindings.js';
+import { dataSession } from './dataTools.js';
+import { pitPolicies } from './pitPolicy.js';
+import { listCatalog } from './schemaCatalog.js';
 import { durableToolCall } from './executionRecovery.js';
 import { callSignature, classifyToolFailure, toolCallTimeoutMs, uncertainToolResult } from './toolOutcome.js';
 import { gatewayAdmin, type DeviceView } from './devices.js';
@@ -180,6 +191,8 @@ type Handler = {
   requiresApproval?: boolean;
   deviceId?: string;
   trustedGateway?: boolean;
+  /** Collection bindings on a MongoDB connection (#148): enforced on every call. */
+  collections?: CollectionBinding[];
 };
 
 export async function runAgent(
@@ -295,6 +308,19 @@ async function runAgentUnchecked(stored: Agent, input: string, history: Run['his
   const sessions: Session[] = [];
   const tools: ToolDefinition[] = [];
   const handlers = new Map<string, Handler>();
+  // The as_of session for collection bindings that enforce it (#148), resolved once per run.
+  let bindingSessionPromise: Promise<{ asOf: string; ruleOf: (c: string) => any }> | undefined;
+  const bindingSession = () =>
+    (bindingSessionPromise ??= (async () => {
+      const [s, policies] = await Promise.all([dataSession(ctx.ownerId), pitPolicies(ctx.ownerId)]);
+      return {
+        asOf: s.asOf,
+        ruleOf: (c: string) => {
+          const p = policies[c];
+          return p?.mode === 'pit' ? p.rule : p?.mode === 'static' ? ('static' as const) : undefined;
+        },
+      };
+    })());
   type Progress = {
     elapsedMs?: number;
     completed: string[];
@@ -395,15 +421,32 @@ async function runAgentUnchecked(stored: Agent, input: string, history: Run['his
       const session = await connectMcp(connection, signal);
       sessions.push(session);
       const available = await session.tools();
-      for (const name of new Set(binding.tools)) {
+      // Collection bindings (#148): only granted operations, `collection` limited to the bound ones.
+      const scoped =
+        connection.kind === 'mongodb' && binding.collections?.length ? binding.collections : undefined;
+      const catalog = scoped ? await listCatalog(ctx.ownerId) : [];
+      const fieldsOf = (c: string) => catalog.find((e) => e.collection === c)?.fields.map((f) => f.name);
+      for (const name of scoped
+        ? scopedToolNames([...new Set(binding.tools)], scoped)
+        : new Set(binding.tools)) {
         const tool = available.find((t) => t.name === name);
         if (!tool) throw new Error(`Tool ${name} is no longer available on ${connection.name}`);
         const alias = toolAlias(connection._id, name);
         if (handlers.has(alias)) continue;
+        const shaped = scoped
+          ? scopeToolSchema(
+              name,
+              tool.inputSchema as Record<string, any>,
+              `${connection.name} / ${name}: ${tool.description ?? ''}`,
+              scoped,
+              fieldsOf,
+            )
+          : undefined;
         tools.push({
           name: alias,
-          description: `${connection.name} / ${name}: ${tool.description ?? ''}`.slice(0, 3000),
-          inputSchema: tool.inputSchema,
+          description:
+            shaped?.description ?? `${connection.name} / ${name}: ${tool.description ?? ''}`.slice(0, 3000),
+          inputSchema: (shaped?.inputSchema ?? tool.inputSchema) as typeof tool.inputSchema,
         });
         handlers.set(alias, {
           session,
@@ -411,8 +454,9 @@ async function runAgentUnchecked(stored: Agent, input: string, history: Run['his
           name,
           label: `${connection.name} / ${name}`,
           connectionName: connection.name,
-          inputSchema: tool.inputSchema as Record<string, unknown>,
+          inputSchema: (shaped?.inputSchema ?? tool.inputSchema) as Record<string, unknown>,
           annotations: tool.annotations,
+          ...(scoped ? { collections: scoped } : {}),
           requiresApproval: tool._meta?.['openharness/approvalRequired'] === true,
           machine: connection.kind === 'device',
           deviceId: connection.deviceId,
@@ -1920,8 +1964,11 @@ async function runAgentUnchecked(stored: Agent, input: string, history: Run['his
               );
             prepared[gateKey] = gate;
             if (gate.allowed) call.arguments = gate.input;
+            // Binding problems first (#148): they say which collection and permission, not just "invalid".
             let validationError = gate.allowed
-              ? validateToolArguments(handler.inputSchema, call.arguments)
+              ? (handler.collections &&
+                  bindingProblem(handler.name, call.arguments as Record<string, any>, handler.collections)) ||
+                validateToolArguments(handler.inputSchema, call.arguments)
               : undefined;
             let approval: HumanDecision | undefined;
             if (
@@ -1930,6 +1977,12 @@ async function runAgentUnchecked(stored: Agent, input: string, history: Run['his
               !validationError &&
               (gate.approvalRequired ||
                 (handler.machine && handler.requiresApproval) ||
+                (handler.collections &&
+                  needsBindingApproval(
+                    handler.name,
+                    call.arguments as Record<string, any>,
+                    handler.collections,
+                  )) ||
                 needsApproval(
                   agent.approvals ?? ctx.approvals,
                   tool.id,
@@ -1986,13 +2039,23 @@ async function runAgentUnchecked(stored: Agent, input: string, history: Run['his
                   'Approved arguments changed under the safety policy; propose a new call.',
                 );
               call.arguments = JSON.parse(checked);
-              validationError = validateToolArguments(handler.inputSchema, call.arguments);
+              validationError =
+                (handler.collections &&
+                  bindingProblem(handler.name, call.arguments as Record<string, any>, handler.collections)) ||
+                validateToolArguments(handler.inputSchema, call.arguments);
             }
             // callId and tool let API clients pair each call with its result (Open Harness tool_call_* events).
             await ctx.event({
               type: 'tool_started',
               message: handler.label,
-              data: { callId: call.id, tool: handler.name, arguments: asText(call.arguments).slice(0, 6000) },
+              data: {
+                callId: call.id,
+                tool: handler.name,
+                arguments: asText(call.arguments).slice(0, 6000),
+                ...(handler.collections
+                  ? { collection: (call.arguments as Record<string, unknown>).collection }
+                  : {}),
+              },
             });
             const readOnlyCall =
               handler.annotations?.readOnlyHint === true && handler.annotations?.destructiveHint !== true;
@@ -2032,6 +2095,15 @@ async function runAgentUnchecked(stored: Agent, input: string, history: Run['his
                 // A stable key per call lets idempotency-aware MCP servers deduplicate a replayed request.
                 const idempotencyKey = `${ctx.runId}:${executionKey}:${passIndex}:${turn}:${callIndex}`;
                 toolCalls++;
+                // Bindings (#148): fixed filter, as_of cut, projection and row cap go on the wire.
+                const sentArguments = handler.collections
+                  ? applyBinding(
+                      handler.name,
+                      call.arguments as Record<string, any>,
+                      handler.collections,
+                      await bindingSession(),
+                    )
+                  : call.arguments;
                 const result = ctx.evaluation
                   ? {
                       content: [
@@ -2046,7 +2118,7 @@ async function runAgentUnchecked(stored: Agent, input: string, history: Run['his
                       handler.session.client.callTool(
                         {
                           name: handler.name,
-                          arguments: call.arguments,
+                          arguments: sentArguments,
                           _meta: {
                             idempotencyKey,
                             ...(approval?.decision === 'approve' &&

@@ -7,6 +7,9 @@ import {
   type WorkflowNode,
 } from './schema.js';
 
+/** Collections the data chatbot template binds read-only (#148). */
+export const DATA_CHATBOT_COLLECTIONS = ['prices_daily', 'features_daily', 'securities', 'signals'];
+
 export const starterRecipes = [
   {
     id: 'research',
@@ -22,6 +25,16 @@ export const starterRecipes = [
     name: 'MCP tool assistant',
     description: 'Give an agent the tools it needs to look up information or take action.',
     shape: 'Start → Tool assistant → Finish',
+    needsKnowledge: false,
+    needsTools: true,
+    agents: 1,
+  },
+  {
+    id: 'data-chatbot',
+    name: 'Data chatbot',
+    description:
+      'Answer questions from your MongoDB collections (prices_daily, features_daily, securities, signals), read-only, with cited rows.',
+    shape: 'Start → Data analyst → Finish',
     needsKnowledge: false,
     needsTools: true,
     agents: 1,
@@ -248,6 +261,16 @@ export function makeStarter(options: {
           type: 'mcp',
           connectionId: options.connectionId,
           tools: options.tools,
+          // The data chatbot reads only these collections (#148); never a database-wide grant.
+          ...(kind === 'data-chatbot'
+            ? {
+                collections: DATA_CHATBOT_COLLECTIONS.map((name) => ({
+                  name,
+                  permissions: ['read' as const],
+                  maxRows: 200,
+                })),
+              }
+            : {}),
           position: { x: 365, y: 425 },
         });
       workflow.bindings.push({ agentNodeId, resourceId: 'tools' });
@@ -271,6 +294,20 @@ export function makeStarter(options: {
     case 'blank':
       nodes.push(start('finish'), finish(770));
       break;
+    case 'data-chatbot': {
+      const agent = inlineAgent(
+        providerId,
+        'Data analyst',
+        "Answer questions from the bound MongoDB collections only. Check a collection's fields with collection-schema before querying, query narrowly (filters, projections, small limits), and cite the rows you used (collection, key fields and date). Say when the data does not contain the answer; never guess a number.",
+      );
+      nodes.push(
+        start('assistant'),
+        agentNode('assistant', agent, 'finish', '{{input}}', { x: 340, y: 110 }),
+        finish(770),
+      );
+      attach('assistant');
+      break;
+    }
     case 'research':
     case 'mcp': {
       const agent = inlineAgent(

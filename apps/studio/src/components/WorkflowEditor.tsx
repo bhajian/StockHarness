@@ -1521,10 +1521,14 @@ export function WorkflowEditor({
                 refresh={onSaved}
                 connectionId={openResource.connectionId}
                 tools={openResource.tools}
+                collections={openResource.collections}
+                onCollections={(collections) => patch(openResource.id, { collections })}
                 onChange={(connectionId, tools) =>
                   patch(openResource.id, {
                     connectionId,
                     tools,
+                    // Bindings belong to one connection's database.
+                    ...(connectionId !== openResource.connectionId ? { collections: undefined } : {}),
                     name: data.connections.find((c) => c.id === connectionId)?.name ?? openResource.name,
                   })
                 }
