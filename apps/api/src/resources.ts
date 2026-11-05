@@ -25,6 +25,7 @@ import {
 } from '../../../packages/core/src/schema.js';
 import { encrypt, HttpError, safeError, validateRemoteUrl } from '../../../packages/core/src/security.js';
 import { discoverTools, startOAuth } from '../../../packages/core/src/mcp.js';
+import { researchMcpUrl } from '../../../packages/core/src/dataTools.js';
 import { grantWorkspaceDatabase, workspaceDatabase } from '../../../packages/core/src/mongoMcp.js';
 import { chat, embed, ownedProvider, type ProviderRecord } from '../../../packages/core/src/llm.js';
 import { dropKnowledgeIndex, searchKnowledge } from '../../../packages/core/src/knowledge.js';
@@ -72,6 +73,11 @@ function builtInMongoConnection(input: unknown) {
   const body = input as Record<string, unknown>;
   if (body.kind === 'mongodb' && !body.builtIn && !body.database)
     throw new HttpError(400, 'Choose the database this MongoDB connection uses');
+  // The research data server (#108) is always the installation's own: no URL or credentials of its own.
+  if (body.kind === 'research') {
+    const { token: _t, oauthClientId: _i, oauthClientSecret: _s, database: _d, ...rest } = body;
+    return { ...rest, url: researchMcpUrl(), transport: 'http', authType: 'none', builtIn: true };
+  }
   // Explicitly false, so turning it off on an update replaces the stored flag.
   if (body.kind !== 'mongodb' || !body.builtIn) return { ...body, builtIn: false };
   if (!config.MONGODB_MCP_URL) throw new HttpError(400, 'This installation has no MongoDB MCP server');
