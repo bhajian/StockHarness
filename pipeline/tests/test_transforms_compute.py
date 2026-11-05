@@ -32,8 +32,8 @@ def reader(data):
 
 
 class PricesDaily(unittest.TestCase):
-    def rows(self, window, actions=()):
-        read = reader({"securities": SECURITIES, "eod_prices": BARS, "corporate_actions": list(actions)})
+    def rows(self, window, actions=(), bars=BARS):
+        read = reader({"securities": SECURITIES, "eod_prices": bars, "corporate_actions": list(actions)})
         return [d for rows, _ in prices_daily.compute(read, window) for d in rows]
 
     def test_daily_incremental_equals_full_rebuild(self):
@@ -50,9 +50,13 @@ class PricesDaily(unittest.TestCase):
     def test_a_split_in_the_window_rewrites_history(self):
         w = SimpleNamespace(start=DAYS[30], end=DAYS[30], lookback_start=DAYS[20])
         split = {"security_id": "SEC_000001", "action_type": "split", "ex_date": DAYS[30], "split_ratio": 2.0}
-        rows = self.rows(w, [split])
+        # An unadjusted source: the close halves on the ex-date, so earlier bars get factor 0.5.
+        unadjusted = [{**b, "close": b["close"] * (2 if b["date"] < DAYS[30] else 1)} for b in BARS]
+        rows = self.rows(w, [split], unadjusted)
         self.assertEqual(len(rows), 31, "every bar up to the window end")
         self.assertEqual(rows[0]["adj_factor"], 0.5)
+        # Already-adjusted bars (FMP, #240): the same split leaves the factors at 1.
+        self.assertEqual({r["adj_factor"] for r in self.rows(w, [split])}, {1.0})
 
     def test_dq_flags_become_issues(self):
         bars = [dict(b) for b in BARS[:8]]
