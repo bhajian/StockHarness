@@ -5,7 +5,8 @@
 import { z } from 'zod';
 import { collection } from './db.js';
 import { agentSchema, workflowSchema, type Agent, type Workflow, type WorkflowNode } from './schema.js';
-import { evaluatorSettings, latestPriceDate } from './evaluations.js';
+import { evaluations, evaluatorSettings, latestPriceDate } from './evaluations.js';
+import { strategyPluginVersions, strategyPlugins } from './strategyPlugins.js';
 import { activeGates } from './gates.js';
 import { theories, type Theory } from './theories.js';
 import type { ResearchRole } from './lifecycleTools.js';
@@ -114,6 +115,80 @@ const sentBack = (t: Theory) => {
   return h ? { by: h.actor.role, reasoning: h.reasoning.slice(0, 2000) } : undefined;
 };
 
+/**
+ * What the Coder does next with a queued theory (#280). A theory left in coding by an earlier cycle may already have
+ * passing code; without this the Coder would start it over and run out of turns before evaluating it.
+ */
+export type CoderStep = 'evaluate' | 'wait' | 'fix' | 'revise' | 'write' | 'done';
+export async function coderStep(
+  t: Theory,
+): Promise<{ next_step: CoderStep; instruction: string; [k: string]: unknown }> {
+  const ref = `T-${t.number}`;
+  if (t.status === 'revise_code')
+    return {
+      next_step: 'revise',
+      instruction: `Change the code exactly as the feedback says, then submit_code(theory_id="${ref}") and evaluate_strategy once it passes.`,
+    };
+  if (t.status === 'code_error') {
+    const err = [...(t.history ?? [])].reverse().find((h) => h.to === 'code_error');
+    return {
+      next_step: 'fix',
+      last_error: err?.reasoning.slice(0, 1500) ?? 'unknown',
+      instruction: `Fix only what the error points at and call submit_code(theory_id="${ref}") again; evaluate_strategy once it passes.`,
+    };
+  }
+  if (t.status === 'coding' && t.plugin?.name) {
+    const p = await strategyPlugins().findOne({ ownerId: t.ownerId, name: t.plugin.name });
+    const latest = p
+      ? await strategyPluginVersions()
+          .find({ ownerId: t.ownerId, pluginId: p._id })
+          .sort({ version: -1 })
+          .limit(1)
+          .next()
+      : null;
+    if (latest) {
+      const evals = await evaluations()
+        .find(
+          { ownerId: t.ownerId, theoryId: t._id, pluginVersion: latest.version },
+          { projection: { status: 1 } },
+        )
+        .toArray();
+      if (evals.some((e) => e.status === 'running'))
+        return {
+          next_step: 'wait',
+          plugin_version: latest.version,
+          instruction: 'An evaluation is running; skip this theory.',
+        };
+      // Forward-only theories are never backtested: with passing code they wait for paper tracking (Layer 5).
+      if (latest.tested === 'passed' && t.forwardOnly)
+        return {
+          next_step: 'done',
+          plugin_version: latest.version,
+          instruction: 'Forward only: nothing to do.',
+        };
+      if (latest.tested === 'passed' && !evals.some((e) => e.status === 'succeeded'))
+        return {
+          next_step: 'evaluate',
+          plugin_version: latest.version,
+          instruction: `v${latest.version} already passed its test. Call evaluate_strategy(theory_id="${ref}", params=evaluation_params) now; do not rewrite the code or re-read the data.`,
+        };
+    }
+  }
+  return {
+    next_step: 'write',
+    instruction: `get_theory("${ref}"), describe each collection it needs once, write the plugin and call submit_code; then evaluate_strategy once it passes.`,
+  };
+}
+const STEP_ORDER: Record<CoderStep, number> = { evaluate: 0, fix: 1, revise: 2, write: 3, wait: 4, done: 5 };
+
+/** The queue lines; the Coder's carry the next step, ready-to-evaluate theories first. */
+async function coderQueue(queue: Theory[], role: ResearchRole | undefined) {
+  if (role !== 'coder') return queue.map(line);
+  const lines = await Promise.all(queue.map(async (t) => ({ ...line(t), ...(await coderStep(t)) })));
+  return lines
+    .filter((l) => l.next_step !== 'done')
+    .sort((a, b) => STEP_ORDER[a.next_step] - STEP_ORDER[b.next_step]);
+}
 /** get_research_brief: what this role should do now. */
 export async function researchBrief(
   ownerId: string,
@@ -156,9 +231,10 @@ export async function researchBrief(
     focus: s.focus || 'none set: any family from the strategy-library skill',
     steering: (s.steering ?? []).slice(-3).map((n) => ({ note: n.note, at: n.at })),
     counts,
-    queue: queue
-      .filter((t) => role !== 'coder' || !t.claim || t.claim.by === me || stale(t.claim.at))
-      .map(line),
+    queue: await coderQueue(
+      queue.filter((t) => role !== 'coder' || !t.claim || t.claim.by === me || stale(t.claim.at)),
+      role,
+    ),
     recent_theories: recent.map((t) => ({
       theory_id: `T-${t.number}`,
       title: t.title,
@@ -218,7 +294,13 @@ const PROMPTS = {
     'End with a one-line summary of your decisions.',
   coder:
     'You are the Coder in the StockHarness research loop. Follow the write-a-strategy-plugin skill.\n' +
-    'Call get_research_brief. Your queue holds every theory that needs code: approved_for_code, revise_code, code_error, and coding (one an earlier cycle left unfinished). If it is empty, reply DONE at once. For each theory in your queue (oldest first): get_theory, check the fields with describe_collection, write the plugin, and call submit_code(theory_id, code). Read the error or warnings and fix only what they point at, calling submit_code again until it passes. Then call evaluate_strategy(theory_id, params) once, with the evaluation_params from the brief.\n' +
+    'Call get_research_brief. Your queue holds every theory that needs code, in the order to work on them; each item has a next_step and an instruction. If the queue is empty, reply DONE at once.\n' +
+    "Do each item's next_step, one theory at a time, finishing it before the next:\n" +
+    '- evaluate: the code already passed its test. Call evaluate_strategy(theory_id, params) right away with the evaluation_params from the brief. Do not rewrite the code or read the data again.\n' +
+    '- write: get_theory, describe each collection it needs once (never twice), write the plugin and call submit_code(theory_id, code).\n' +
+    '- fix / revise: change only what the last_error or the feedback points at and call submit_code again.\n' +
+    '- wait: an evaluation is running; skip it.\n' +
+    'After submit_code passes, call evaluate_strategy(theory_id, params) once, with the evaluation_params from the brief.\n' +
     'Never tune the code to the metrics. When no theory is left in your queue, reply DONE.',
   judge_post:
     'You are the Judge (post-result review) in the StockHarness research loop. Follow the judge-checklist skill.\n' +
