@@ -1,5 +1,6 @@
 // #116 Research Lab: after a real (fixture-model) research cycle, the page shows the KPIs, the board with today's
-// verdicts, the live activity feed, a theory's debate, steering, pause / resume and the settings drawer.
+// verdicts, the live activity feed, steering, pause / resume and the settings drawer. Then (#119–#123) a board card
+// opens the idea page and its tabs, the Ideas table and cards, compare, and a person's send-back.
 import { readFileSync } from 'node:fs';
 import { test, expect, type Page } from '@playwright/test';
 
@@ -127,10 +128,6 @@ test('the Research Lab shows a cycle: KPIs, board, activity, debate, steering, p
       .getByText(/pre_review → approved_for_code/)
       .first(),
   ).toBeVisible();
-  await verdicts.first().click();
-  await expect(page.getByRole('heading', { name: 'Debate' })).toBeVisible();
-  await expect(page.getByText(/judge: post_review → failed/)).toBeVisible();
-  await page.keyboard.press('Escape');
   await page.getByLabel('Steering note').fill('Look at low-volatility names next.');
   await page.getByRole('button', { name: 'Send to the Theorists' }).click();
   await expect
@@ -148,5 +145,81 @@ test('the Research Lab shows a cycle: KPIs, board, activity, debate, steering, p
   await page.keyboard.press('Escape');
   if (process.env.SCREENSHOT)
     await page.screenshot({ path: 'test-results/research-page.png', fullPage: true });
+
+  // #119–#123, #269: a board card opens the idea's own page; its tabs are URLs; back to the master table.
+  await verdicts.first().click();
+  await expect(page).toHaveURL(/\/ideas\/T-\d+$/);
+  const ref = new URL(page.url()).pathname.split('/')[2]!;
+  const idea = page.locator('.idea-page');
+  await expect(idea.getByRole('heading', { name: 'Gates' })).toBeVisible();
+  await expect(idea.locator('.gate-checklist tbody tr').first()).toBeVisible();
+  await expect(idea.getByRole('heading', { name: 'Judge' })).toBeVisible();
+  await expect(page.getByRole('tab', { name: 'Overview' })).toHaveAttribute('aria-selected', 'true');
+  await expect(idea.getByText('Hypothesis', { exact: true })).toBeVisible();
+  await page.getByRole('tab', { name: 'Review' }).click();
+  await expect(page).toHaveURL(new RegExp(`/ideas/${ref}/review$`));
+  await expect(
+    idea.locator('.debate-turn.role-judge').filter({ hasText: 'Post-review → Failed' }),
+  ).toBeVisible();
+  await expect(idea.locator('.debate-turn.role-theorist').first()).toBeVisible();
+  await page.getByRole('tab', { name: 'Code' }).click();
+  await expect(page).toHaveURL(new RegExp(`/ideas/${ref}/code$`));
+  await expect(page.getByLabel('Versions').getByRole('button', { name: /^v1/ })).toBeVisible();
+  await page.getByRole('tab', { name: 'Runs' }).click();
+  const runs = page.getByRole('table', { name: 'Evaluations' }).locator('tbody tr');
+  await expect(runs.first()).toBeVisible();
+  await page.getByRole('tab', { name: 'Results' }).click();
+  await expect(idea.locator('.evaluation-report')).toBeVisible();
+  if (process.env.SCREENSHOT)
+    await page.screenshot({ path: 'test-results/idea-results.png', fullPage: true });
+  // A reload keeps the tab (the URL is the state).
+  await page.reload();
+  await expect(page.getByRole('tab', { name: 'Results' })).toHaveAttribute('aria-selected', 'true');
+
+  await page.getByLabel('Breadcrumbs').getByRole('button', { name: 'Ideas' }).click();
+  await expect(page).toHaveURL(/\/ideas$/);
+  // Both verdicts failed, so the default view (successful and approved) is empty and says so.
+  await expect(page.getByText('No ideas match.')).toBeVisible();
+  await expect(page.getByLabel('Idea KPIs').getByText('Failed')).toBeVisible();
+  await page.getByRole('button', { name: 'Show every idea' }).click();
+  await expect(page).toHaveURL(/show=all/);
+  const table = page.getByRole('table', { name: 'Ideas' });
+  await expect(table.getByRole('row', { name: new RegExp(ref) })).toBeVisible();
+  const failedRows = table.locator('tbody tr').filter({ hasText: 'Failed' });
+  await expect(failedRows).toHaveCount(2);
+  await page.getByRole('radio', { name: 'Card view' }).click();
+  await expect(page).toHaveURL(/view=cards/);
+  await expect(page.locator('.idea-card').filter({ hasText: 'Failed' })).toHaveCount(2);
+  for (const box of await page
+    .locator('.idea-card')
+    .filter({ hasText: 'Failed' })
+    .getByRole('checkbox')
+    .all())
+    await box.check();
+  await page.getByRole('button', { name: 'Compare (2)' }).click();
+  await expect(page).toHaveURL(/\/ideas\/compare\?ids=T-\d+,T-\d+/);
+  await expect(page.getByRole('heading', { name: 'Compare 2 ideas' })).toBeVisible();
+  await expect(
+    page
+      .getByRole('table', { name: 'Metrics' })
+      .getByRole('row', { name: /Sharpe/ })
+      .first(),
+  ).toBeVisible();
+  await expect(page.getByRole('table', { name: 'Return correlation' })).toBeVisible();
+  if (process.env.SCREENSHOT)
+    await page.screenshot({ path: 'test-results/idea-compare.png', fullPage: true });
+
+  // A person sends a failed idea back to the Theorist with a comment (#122).
+  await page.goto(`/ideas/${ref}`);
+  await page.getByRole('button', { name: 'Send back…' }).click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog.getByRole('button', { name: 'Send back' })).toBeDisabled();
+  await dialog.getByRole('textbox').fill('Try a longer lookback and fewer names.');
+  await dialog.getByRole('button', { name: 'Send back' }).click();
+  await expect(idea.locator('.idea-meta').getByText('Revising')).toBeVisible();
+  await page.getByRole('tab', { name: 'Review' }).click();
+  await expect(
+    idea.locator('.debate-turn.role-human').filter({ hasText: 'Try a longer lookback' }),
+  ).toBeVisible();
   expect(errors).toEqual([]);
 });
