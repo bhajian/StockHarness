@@ -221,9 +221,11 @@ def build_securities_docs(profiles, stock_list, delisted, existing, first_seen, 
         if p.get("industry"):
             _history(doc, "industry", p["industry"], today, seen)
         # Delisted names have no profile: their exchange comes from the delisted list (needed by universe_daily).
+        # Exchanges follow the same backfill rule as sectors (H5): without it, universe_daily finds no exchange
+        # before the first run and the historical universe is empty.
         exch = p.get("exchange") or p.get("exchangeShortName") or d.get("exchange")
         if exch:
-            doc["exchange_history"] = upsert_interval(_normalized(doc.get("exchange_history")), exch, doc.get("exchange_history") and today or seen)
+            _history(doc, "exchange", exch, today, seen)
         if d.get("delistedDate"):
             doc["delisted_date"] = iso_bound(d["delistedDate"])
             doc["is_active"] = False
