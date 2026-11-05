@@ -31,6 +31,13 @@ theoriesRouter.get('/theories', async (req, res) => {
   });
   res.json({ caps: await lifecycleCaps(req.principal!.tenantId), items: list.map(pub) });
 });
+// Theory memory (#111): the closest theories to a text, any status.
+theoriesRouter.get('/theories/search', async (req, res) => {
+  const q = typeof req.query.q === 'string' ? req.query.q : '';
+  if (q.trim().length < 3) throw new HttpError(400, 'q is required');
+  const { searchTheories } = await import('../../../packages/core/src/theoryMemory.js');
+  res.json(await searchTheories(req.principal!.tenantId, q, Math.min(50, Number(req.query.limit) || 10)));
+});
 theoriesRouter.get('/theories/:id', async (req, res) => {
   res.json(pub(await getTheory(req.principal!.tenantId, String(req.params.id))));
 });

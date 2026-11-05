@@ -162,3 +162,49 @@ test(
     assert.match((await planObjectImport(who(D), edited, 'merge')).errors[0].message, /not overwritten/);
   },
 );
+
+test(
+  'theory memory (lexical fallback): a re-submission is refused unless it says what differs',
+  { skip: skipReason },
+  async () => {
+    const M = await import('../../packages/core/src/theoryMemory.js');
+    const O = `th-mem-${randomUUID()}`;
+    const a = await T.createTheory(O, CONTENT, theorist, { submit: true });
+    // Failed theories stay in memory.
+    await collection<any>('theories').updateOne({ _id: a._id }, { $set: { status: 'failed' } });
+    await assert.rejects(
+      T.createTheory(O, { ...CONTENT, title: CONTENT.title + ' (again)' }, theorist, { submit: true }),
+      /near-duplicate of T-1 "Post-earnings drift in quality names" \(failed, similarity 0\.9\d+ ≥ 0\.9, lexical\)/,
+    );
+    const b = await T.createTheory(
+      O,
+      {
+        ...CONTENT,
+        title: CONTENT.title + ' (again)',
+        differsFrom: 'Uses only Q4 reports, where the drift is strongest.',
+      },
+      theorist,
+      { submit: true },
+    );
+    assert.equal(b.status, 'pre_review');
+    const closest = b.history.at(-1)!.data!.closest as any;
+    assert.equal(closest.ref, 'T-1');
+    const found = await M.searchTheories(O, 'quality companies drifting after earnings reports');
+    assert.equal(found.method, 'lexical');
+    assert.deepEqual(
+      found.matches
+        .slice(0, 2)
+        .map((m) => m.ref)
+        .sort(),
+      ['T-1', 'T-2'],
+    );
+    assert.equal(
+      await collection<any>('theories').countDocuments({ ownerId: O }),
+      2,
+      'the refused submission created nothing',
+    );
+    await collection<any>('theories').deleteMany({ ownerId: O });
+    await collection<any>('theory_embeddings').deleteMany({ ownerId: O });
+    await collection<any>('theory_counters').deleteMany({ _id: O });
+  },
+);

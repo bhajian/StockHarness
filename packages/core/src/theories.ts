@@ -98,6 +98,11 @@ export async function lifecycleCaps(ownerId: string): Promise<LifecycleCaps> {
 }
 
 const ref = (t: Pick<Theory, 'number'>) => `T-${t.number}`;
+/** Keep the theory's embedding current (#111); memory never blocks a write it did not check. */
+async function remember(t: Theory) {
+  const { rememberTheory } = await import('./theoryMemory.js');
+  await rememberTheory(t).catch((e) => console.warn(`Theory ${t._id} not embedded: ${e?.message ?? e}`));
+}
 /** A theory by id or by T-<number>. */
 export async function getTheory(ownerId: string, idOrRef: string) {
   const m = /^T-(\d+)$/i.exec(idOrRef.trim());
@@ -115,6 +120,11 @@ export async function createTheory(
   const content = theoryContent.parse(input);
   if (!['theorist', 'human'].includes(actor.role))
     throw new HttpError(403, 'Only the Theorist (or a human) creates theories');
+  // A submission that is a near-duplicate is refused before anything is created (#111).
+  if (opts.submit) {
+    const { assertNotDuplicate } = await import('./theoryMemory.js');
+    await assertNotDuplicate({ ...content, _id: 'new', ownerId, number: 0 } as Theory);
+  }
   const n = await counters().findOneAndUpdate(
     { _id: ownerId },
     { $inc: { n: 1 } },
@@ -136,6 +146,7 @@ export async function createTheory(
     updatedAt: now,
   };
   await theories().insertOne(doc);
+  await remember(doc);
   return opts.submit
     ? transitionTheory(ownerId, doc._id, 'pre_review', actor, opts.reasoning ?? 'Submitted')
     : doc;
@@ -188,6 +199,7 @@ export async function editTheory(
     { returnDocument: 'after' },
   );
   if (!r) throw new HttpError(409, `${ref(t)} changed meanwhile; read it again`);
+  await remember(r);
   return r;
 }
 
@@ -210,6 +222,13 @@ export async function transitionTheory(
   const caps = await lifecycleCaps(ownerId);
   const problem = transitionProblem(t.status, to, actor.role, t, caps);
   if (problem) throw new HttpError(409, `${ref(t)}: ${problem}`);
+  // Submitting for review: a near-duplicate of any earlier theory is refused unless it says what differs (#111).
+  let similar: Awaited<ReturnType<typeof import('./theoryMemory.js').assertNotDuplicate>> | undefined;
+  if (to === 'pre_review') {
+    const memory = await import('./theoryMemory.js');
+    similar = await memory.assertNotDuplicate(t);
+  }
+  if (similar) data = { ...(data ?? {}), closest: similar };
   const counts = countsAfter(t.status, to, t);
   const r = await theories().findOneAndUpdate(
     { _id: t._id, ownerId, status: t.status },
