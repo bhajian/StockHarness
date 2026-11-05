@@ -13,6 +13,9 @@ DEFAULTS = {
     "trading_days_per_year": 252,
     "sizing": {"gross_limit": 1.0},
     "walk_forward": {"fold": "year", "min_days": 20},
+    # Long-short factors for the exposure regression (#106): name -> features_ranked field.
+    "factors": {"momentum": "mom_12_1_pct", "value": "value_score", "quality": "quality_score", "low_vol": "low_vol_score"},
+    "benchmark_max_names": 600,
 }
 _PATH = Path(__file__).resolve().parent.parent / "config" / "backtest.yaml"
 
@@ -28,8 +31,8 @@ def load_config(overrides: dict | None = None) -> dict:
         loaded = {}
     for src in (loaded, overrides or {}):
         for k, v in src.items():
-            if k in ("sizing", "walk_forward") and isinstance(v, dict):
+            if k in ("sizing", "walk_forward", "factors") and isinstance(v, dict):
                 cfg[k] = {**cfg[k], **v}
-            elif k in DEFAULTS:
+            elif k in DEFAULTS or k == "benchmark_max_names":
                 cfg[k] = v
     return cfg

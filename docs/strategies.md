@@ -85,3 +85,22 @@ Run one with `POST /api/evaluations` `{ plugin, version?, params }` (202; poll `
   theory (or plugin) and code version. The claim is recorded before the run starts, so a second attempt is refused
   (409) even if the first one failed. A new code version is a new shot. The holdout length can change only until
   the first holdout run.
+
+## Metrics (#106)
+
+`pipeline/strategy/metrics.py` (numpy only; checked against empyrical and the published deflated-Sharpe example):
+
+- **summary:** total return, CAGR, volatility, Sharpe, Sortino, max drawdown, Calmar, daily hit rate, turnover per
+  rebalance and per year, costs and borrow paid.
+- **excess:** against the S&P 500 and against a sector benchmark (the same weights earning their sector's
+  equal-weight return): excess CAGR, tracking error, information ratio.
+- **by year** (`folds`) and **by regime:** trend (S&P 500 above / below its 200-day average) and volatility
+  (VIX ≥ 25).
+- **factors:** the daily returns regressed on the market and long-short factors built from `features_ranked`
+  (`factors` in `backtest.yaml`): betas, Newey-West t-stats, alpha (annualized like empyrical) and its t-stat.
+- **by sector** contributions, **trade stats** (each holding from entry to exit: count, win rate, mean,
+  median, histogram).
+- **series:** equity, S&P 500 equity, drawdown, rolling 126-day Sharpe, returns, gross, turnover.
+- **trial_context:** the deflated Sharpe ratio (Bailey & López de Prado) against the expected maximum Sharpe of
+  all trials the workspace has run (the global trial count and the variance of their Sharpe ratios). It changes
+  as the swarm runs more trials, so it sits outside `record_hash`.

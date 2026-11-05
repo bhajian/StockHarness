@@ -158,6 +158,9 @@ test('an evaluation runs in the executor and is reproducible', async () => {
   const b = await evaluate(body);
   assert.equal(b.record.record_hash, r.record_hash, 'same inputs, identical record');
   assert.ok(b.trial > a.trial, 'every evaluation is a trial');
+  assert.equal(b.record.trial_context.trials, b.trial, 'the deflated Sharpe uses the global trial count');
+  assert.ok(b.record.trial_context.sr_variance > 0 || a.trial === 1);
+  assert.ok(b.record.excess.spx && b.record.factors.betas.market !== undefined);
   const list = await ok('/evaluations');
   assert.ok(list.trials >= 2 && list.items.length >= 2 && !list.items[0].record?.series);
 });

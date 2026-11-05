@@ -142,6 +142,7 @@ def evaluate(code: str, *, source, policies: dict, params: dict, config: dict | 
 
     # Pass 1: signals on rebalance dates -> target books, executed `lag` sessions later.
     targets: dict[str, dict] = {}
+    eligible_at: dict[str, tuple[str, list[str]]] = {}  # exec day -> (signal date, eligible names)
     rebalances = []
     for d in rebalance_dates(days, meta["rebalance"]):
         i = days.index(d)
@@ -157,50 +158,74 @@ def evaluate(code: str, *, source, policies: dict, params: dict, config: dict | 
         book = build_book(scores, eligible, meta["side"], int(meta["top_n"]), gross)
         exec_day = days[i + lag]
         targets[exec_day] = book
+        eligible_at[exec_day] = (d, sorted(eligible))
         rebalances.append({"date": d, "exec_date": exec_day, "scored": len(scores), "eligible": len(eligible),
                            "long": sum(1 for w in book.values() if w > 0), "short": sum(1 for w in book.values() if w < 0)})
     if not rebalances:
         raise EvaluationError("no rebalance date leaves room to execute before the end date")
 
-    # Pass 2: daily total returns of every security the book ever holds.
+    # Pass 2: daily total returns of every name held (and, at small scale, of the whole eligible universe, for
+    # the sector benchmark and the factor returns).
     held = sorted({s for b in targets.values() for s in b})
+    universe_all = sorted({s for _, names in eligible_at.values() for s in names} | set(held))
+    benchmarks = len(universe_all) <= int(cfg.get("benchmark_max_names", 600))
+    load = universe_all if benchmarks else held
     first_exec = min(targets)
     rets: dict[str, dict[str, float]] = {}
     last_price: dict[str, str] = {}
-    for r in source.find("prices_daily", {"security_id": {"$in": held}, "date": {"$gte": first_exec}},
-                         ["security_id", "date", "tr_1d", "ret_1d"]) if held else []:
+    for r in source.find("prices_daily", {"security_id": {"$in": load}, "date": {"$gte": first_exec, "$lte": end}},
+                         ["security_id", "date", "tr_1d", "ret_1d"]) if load else []:
         v = r.get("tr_1d") if r.get("tr_1d") is not None else r.get("ret_1d")
         s, d = r["security_id"], r["date"]
         last_price[s] = max(last_price.get(s, d), d)
         if isinstance(v, (int, float)) and math.isfinite(v):
             rets.setdefault(d, {})[s] = float(v)
-    inactive = {r["security_id"] for r in source.find("securities", {"security_id": {"$in": held}}, ["security_id", "is_active"])
-                if r.get("is_active") is False} if held else set()
-    spx = {r["date"]: r.get("spx_ret_1d") for r in source.find("macro_daily", {"date": {"$gte": first_exec, "$lte": end}}, ["date", "spx_ret_1d"])}
+    sec_rows = source.find("securities", {"security_id": {"$in": load}}, ["security_id", "is_active", "sector_history"]) if load else []
+    inactive = {r["security_id"] for r in sec_rows if r.get("is_active") is False}
+    sector = {r["security_id"]: _current(r.get("sector_history")) or "Unknown" for r in sec_rows}
+    macro = {r["date"]: r for r in source.find(
+        "macro_daily", {"date": {"$gte": (date.fromisoformat(first_exec) - timedelta(days=420)).isoformat(), "$lte": end}},
+        ["date", "spx_ret_1d", "spx_close", "vix"])}
 
     comm = (float(cfg["commission_bps"]) + float(cfg["slippage_bps"])) / 1e4
-    borrow_daily = float(cfg["borrow_cost_bps_default"]) / 1e4 / int(cfg["trading_days_per_year"])
+    periods = int(cfg["trading_days_per_year"])
+    borrow_daily = float(cfg["borrow_cost_bps_default"]) / 1e4 / periods
     delist_ret = float(cfg["delisting_return"])
     w: dict[str, float] = {}
     delisted: set[str] = set()
-    out_dates, out_ret, out_spx, out_gross, out_turn = [], [], [], [], []
+    out_dates, out_ret, out_spx, out_gross, out_turn, out_sector_bench = [], [], [], [], [], []
     costs_paid = borrow_paid = 0.0
     trades = 0
     extreme = []  # held names with a daily return beyond ±50% (data problems or real events worth a look)
+    contrib: dict[str, float] = {}  # sector -> summed daily contribution
+    exposure: dict[str, float] = {}  # sector -> summed |weight| (for the average)
+    open_trades: dict[str, list] = {}  # security -> [side, growth]
+    trade_returns: list[float] = []
     for d in days[days.index(first_exec):]:
         day = rets.get(d, {})
         extreme += [(d, s, day[s]) for s in w if s in day and abs(day[s]) > 0.5]
-        port = 0.0
+        sector_ew = _sector_means(day, sector, universe_all) if benchmarks else {}
+        port = bench = 0.0
         moved = {}
         for s, wt in w.items():
             r = day.get(s)
             if r is None and s in inactive and s not in delisted and last_price.get(s, d) < d:
                 r = delist_ret  # prices stopped and the company is gone: take the delisting return once
                 delisted.add(s)
-            moved[s] = wt * (1 + (r or 0.0))
-            port += wt * (r or 0.0)
+            r = r or 0.0
+            moved[s] = wt * (1 + r)
+            port += wt * r
+            sec = sector.get(s, "Unknown")
+            contrib[sec] = contrib.get(sec, 0.0) + wt * r
+            exposure[sec] = exposure.get(sec, 0.0) + abs(wt)
+            bench += wt * sector_ew.get(sec, r)
+            if s in open_trades:
+                open_trades[s][1] *= 1 + r
         borrow = sum(-wt for wt in w.values() if wt < 0) * borrow_daily
         w = {s: v / (1 + port) for s, v in moved.items() if s not in delisted} if 1 + port > 0 else {}
+        for s in [s for s in open_trades if s in delisted]:
+            side, growth = open_trades.pop(s)
+            trade_returns.append(side * (growth - 1))
         ret = port - borrow
         turnover = 0.0
         if d in targets:
@@ -211,53 +236,177 @@ def evaluate(code: str, *, source, policies: dict, params: dict, config: dict | 
             trades += sum(1 for s in names if abs(tgt.get(s, 0.0) - w.get(s, 0.0)) > 1e-12)
             ret = (1 + ret) * (1 - turnover * comm) - 1
             costs_paid += turnover * comm
+            for s in names:  # a trade is a holding from entry to exit (or a side flip)
+                old_side = (open_trades.get(s) or [0])[0]
+                new_side = (tgt.get(s, 0.0) > 0) - (tgt.get(s, 0.0) < 0)
+                if old_side and old_side != new_side:
+                    side, growth = open_trades.pop(s)
+                    trade_returns.append(side * (growth - 1))
+                if new_side and s not in open_trades:
+                    open_trades[s] = [new_side, 1.0]
             w = dict(tgt)
         borrow_paid += borrow
         out_dates.append(d)
         out_ret.append(ret)
-        out_spx.append(spx.get(d))
+        out_spx.append((macro.get(d) or {}).get("spx_ret_1d"))
+        out_sector_bench.append(bench - borrow if benchmarks else None)
         out_gross.append(sum(abs(v) for v in w.values()))
         out_turn.append(turnover)
+    open_at_end = len(open_trades)
+    trade_returns += [side * (growth - 1) for side, growth in open_trades.values()]  # marked to market
 
-    summary = metrics.summary(out_ret, int(cfg["trading_days_per_year"]))
+    summary = metrics.summary(out_ret, periods)
     spx_clean = [x if isinstance(x, (int, float)) else 0.0 for x in out_spx]
-    nav = 1.0
-    nav_s = []
-    for r in out_ret:
-        nav *= 1 + r
-        nav_s.append(_round(nav))
-    bnav = 1.0
-    bnav_s = []
-    for r in spx_clean:
-        bnav *= 1 + r
-        bnav_s.append(_round(bnav))
+    factor_rets = _factor_returns(source, policies, cfg, targets, eligible_at, rets, out_dates, readable_end or end,
+                                  start) if benchmarks else None
+    regressors = {"market": spx_clean, **(factor_rets or {})}
+    n_days = max(1, len(out_dates))
     record = {
         "evaluator_version": EVALUATOR_VERSION,
         "plugin": {**(plugin_ref or {}), "hash": plugin.hash, "evaluator_major": EVALUATOR_MAJOR, "meta": meta},
-        "params": {k: params[k] for k in sorted(params) if k != "code"},
+        "params": {k: params[k] for k in sorted(params) if k not in ("code", "trials")},
         "costs": {k: cfg[k] for k in ("execution_lag_days", "commission_bps", "slippage_bps", "borrow_cost_bps_default", "delisting_return")}
         | {"gross_limit": gross},
         "period": {"start": start, "end": end, "first_trade": first_exec, "days": len(out_dates),
                    "readable_end": readable_end or end},
         "data_snapshot": _snapshot(source, end),
-        "summary": {k: _round(v) if isinstance(v, float) else v for k, v in summary.items()}
+        "summary": _rounded({**summary, "sortino": metrics.sortino(out_ret, periods),
+                             "calmar": metrics.calmar(out_ret, periods), "hit_rate": metrics.hit_rate(out_ret)})
         | {"spx_total_return": _round(metrics.total_return(spx_clean)), "trades": trades,
-           "avg_turnover": _round(sum(out_turn) / max(1, len(rebalances))), "costs_paid": _round(costs_paid),
+           "avg_turnover": _round(sum(out_turn) / max(1, len(rebalances))),
+           "annual_turnover": _round(sum(out_turn) / n_days * periods), "costs_paid": _round(costs_paid),
            "borrow_paid": _round(borrow_paid), "delisted": sorted(delisted), "rebalances": len(rebalances)},
+        "excess": {
+            "spx": _rounded(metrics.excess(out_ret, spx_clean, periods)),
+            "sector": _rounded(metrics.excess(out_ret, out_sector_bench, periods)) if benchmarks else None,
+        },
+        "by_regime": _by_regime(out_dates, out_ret, macro, periods),
+        "factors": {**_rounded(metrics.ols(out_ret, regressors, periods=periods)),
+                    "factors": sorted(regressors), "note": None if factor_rets else "market only (no features_ranked or a large universe)"},
+        "by_sector": [{"sector": k, "contribution": _round(contrib[k]), "avg_weight": _round(exposure[k] / n_days, 6)}
+                      for k in sorted(contrib, key=lambda k: (-abs(contrib[k]), k))],
+        "trade_stats": _trade_stats(trade_returns, open_at_end),
         "series": {"dates": out_dates, "series": {
-            "returns": [_round(x) for x in out_ret], "equity": nav_s, "spx_equity": bnav_s,
+            "returns": [_round(x) for x in out_ret], "equity": _equity(out_ret), "spx_equity": _equity(spx_clean),
+            "drawdown": [_round(x) for x in metrics.drawdown_series(out_ret)],
+            "rolling_sharpe_126": [_round(x, 6) if x is not None else None for x in metrics.rolling_sharpe(out_ret, 126, periods)],
             "spx_returns": [_round(x) if isinstance(x, (int, float)) else None for x in out_spx],
             "gross": [_round(x, 6) for x in out_gross], "turnover": [_round(x, 6) for x in out_turn]}},
-        "folds": [{k: _round(v) if isinstance(v, float) else v for k, v in f.items()}
-                  for f in metrics.folds(out_dates, out_ret, int(cfg["walk_forward"].get("min_days", 20)),
-                                         int(cfg["trading_days_per_year"]))],
+        "folds": [_rounded(f) for f in metrics.folds(out_dates, out_ret, int(cfg["walk_forward"].get("min_days", 20)), periods)],
         "warnings": _warnings(rebalances, extreme),
         "rebalances": rebalances,
         "holdings": {"date": max(targets), "weights": {s: _round(v, 8) for s, v in sorted(targets[max(targets)].items())}},
         "reader": dict(reader.stats),
     }
     record["record_hash"] = record_hash(record)
+    # The deflated Sharpe depends on how many trials the whole swarm has run, so it lives outside the hash.
+    trials = params.get("trials") or {}
+    record["trial_context"] = _rounded(metrics.deflated_sharpe(out_ret, int(trials.get("count") or 1), trials.get("sharpe_variance")))
     return record
+
+
+def _rounded(d: dict) -> dict:
+    return {k: (_round(v) if isinstance(v, float) else _rounded(v) if isinstance(v, dict) else v) for k, v in d.items()}
+
+
+def _equity(returns) -> list:
+    nav, out = 1.0, []
+    for r in returns:
+        nav *= 1 + r
+        out.append(_round(nav))
+    return out
+
+
+def _current(history) -> str | None:
+    """The open interval's value of a *_history list (else the latest)."""
+    if not history:
+        return None
+    for h in history:
+        if h.get("valid_to") is None:
+            return h.get("value")
+    return sorted(history, key=lambda h: h.get("valid_from") or "")[-1].get("value")
+
+
+def _sector_means(day: dict, sector: dict, names: list[str]) -> dict:
+    sums: dict[str, list[float]] = {}
+    for s in names:
+        if s in day:
+            sums.setdefault(sector.get(s, "Unknown"), []).append(day[s])
+    return {k: sum(v) / len(v) for k, v in sums.items()}
+
+
+def _by_regime(dates, returns, macro, periods) -> dict:
+    """Returns split by market trend (S&P 500 above / below its 200-day average) and by VIX (>= 25 = high)."""
+    closes = sorted((d, r["spx_close"]) for d, r in macro.items() if isinstance(r.get("spx_close"), (int, float)))
+    sma, window = {}, []
+    for d, c in closes:
+        window.append(c)
+        if len(window) > 200:
+            window.pop(0)
+        if len(window) == 200:
+            sma[d] = (c, sum(window) / 200)
+    groups: dict[str, dict[str, list[float]]] = {"trend": {}, "volatility": {}}
+    for d, r in zip(dates, returns):
+        if d in sma:
+            groups["trend"].setdefault("up" if sma[d][0] >= sma[d][1] else "down", []).append(r)
+        vix = (macro.get(d) or {}).get("vix")
+        if isinstance(vix, (int, float)):
+            groups["volatility"].setdefault("high" if vix >= 25 else "normal", []).append(r)
+    return {g: {k: _rounded({"days": len(v), "total_return": metrics.total_return(v),
+                             "ann_return": sum(v) / len(v) * periods, "sharpe": metrics.sharpe(v, periods)})
+                for k, v in sorted(groups[g].items())} for g in groups}
+
+
+def _trade_stats(trade_returns: list[float], open_at_end: int) -> dict:
+    import statistics
+
+    if not trade_returns:
+        return {"count": 0, "open_at_end": open_at_end}
+    edges = [-1.0, -0.5, -0.3, -0.2, -0.1, -0.05, 0.0, 0.05, 0.1, 0.2, 0.3, 0.5, 1.0, 5.0]
+    return {"count": len(trade_returns), "open_at_end": open_at_end,
+            "win_rate": _round(sum(1 for r in trade_returns if r > 0) / len(trade_returns)),
+            "mean": _round(statistics.fmean(trade_returns)), "median": _round(statistics.median(trade_returns)),
+            "histogram": metrics.histogram(trade_returns, edges)}
+
+
+def _factor_returns(source, policies, cfg, targets, eligible_at, rets, out_dates, readable_end, start) -> dict | None:
+    """Long-short factor returns over the eligible universe: top third minus bottom third by each factor field of
+    features_ranked on the signal date, equal weight, held to the next execution (#106). None without the data."""
+    fields = cfg.get("factors") or {}
+    if "features_ranked" not in policies or not fields:
+        return None
+    reader = PitReader(source, policies, end=readable_end, start=start)
+    legs: dict[str, dict[str, tuple[list, list]]] = {f: {} for f in fields}
+    for exec_day, (signal_day, names) in eligible_at.items():
+        try:
+            frame = reader.read_df("features_ranked", {"security_id": {"$in": names}}, ["security_id", *fields.values()],
+                                   as_of=signal_day, lookback_days=7)
+        except Exception:  # noqa: BLE001 - factors are optional context
+            return None
+        if frame.empty:
+            continue
+        last = frame.sort_values("as_of_date").groupby("security_id").tail(1)
+        for name, col in fields.items():
+            vals = last[["security_id", col]].dropna().sort_values([col, "security_id"])
+            k = len(vals) // 3
+            if k:
+                legs[name][exec_day] = (list(vals.security_id[-k:]), list(vals.security_id[:k]))
+    out = {}
+    for name, by_day in legs.items():
+        if not by_day:
+            continue
+        series, cur = [], None
+        for d in out_dates:
+            day = rets.get(d, {})
+            if cur:
+                top = [day[s] for s in cur[0] if s in day]
+                bot = [day[s] for s in cur[1] if s in day]
+                series.append(sum(top) / len(top) - sum(bot) / len(bot) if top and bot else 0.0)
+            else:
+                series.append(0.0)
+            cur = by_day.get(d, cur)  # formed at this close, earns from the next day
+        out[name] = series
+    return out or None
 
 
 def _warnings(rebalances: list[dict], extreme: list[tuple]) -> list[dict]:

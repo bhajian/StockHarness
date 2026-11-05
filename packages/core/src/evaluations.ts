@@ -70,6 +70,22 @@ async function nextTrial(ownerId: string) {
   );
   return r!.count;
 }
+/**
+ * Variance of the per-period (daily) Sharpe ratios of every finished evaluation in the workspace: the spread of
+ * the swarm's trials, for the deflated Sharpe ratio (#106). Undefined until two exist.
+ */
+export async function sharpeVariance(ownerId: string) {
+  const rows = await evaluations()
+    .find(
+      { ownerId, status: 'succeeded', 'record.summary.sharpe': { $type: 'number' } },
+      { projection: { 'record.summary.sharpe': 1 } },
+    )
+    .toArray();
+  const xs = rows.map((r) => (r.record!.summary.sharpe as number) / Math.sqrt(252));
+  if (xs.length < 2) return undefined;
+  const mean = xs.reduce((a, b) => a + b, 0) / xs.length;
+  return xs.reduce((a, b) => a + (b - mean) ** 2, 0) / (xs.length - 1);
+}
 export async function trialCount(ownerId: string) {
   return (await trials().findOne({ _id: ownerId }))?.count ?? 0;
 }
@@ -214,6 +230,7 @@ async function finish(doc: Evaluation, code: string, execute: Execute, readableE
   };
   try {
     const policies = await pitPolicies(doc.ownerId);
+    const trials = { count: doc.trial, sharpe_variance: await sharpeVariance(doc.ownerId) };
     outcome = await execute(
       {
         ownerId: doc.ownerId,
@@ -226,7 +243,7 @@ async function finish(doc: Evaluation, code: string, execute: Execute, readableE
         params: {
           action: 'evaluate',
           code,
-          params: doc.params,
+          params: { ...doc.params, trials },
           policies,
           ...(readableEnd ? { readable_end: readableEnd } : {}),
           // No trial number here: the record must be identical for identical inputs.

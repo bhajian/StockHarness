@@ -14,6 +14,16 @@ capacity_aum: 100000000 # assumed AUM for capacity estimates
 holdout_months: 18 # the last N months of price history; one shot per theory + code version (#105).
 # The API applies it per workspace (evaluator settings) and keeps the boundary fixed once set.
 
+# Factor exposures (#106): long-short top-minus-bottom-third factors from features_ranked, regressed with the
+# market (S&P 500) on the strategy's daily returns (Newey-West t-stats). Benchmarks and factors are computed
+# when the eligible universe has at most benchmark_max_names names.
+factors:
+  momentum: mom_12_1_pct
+  value: value_score
+  quality: quality_score
+  low_vol: low_vol_score
+benchmark_max_names: 600
+
 # Walk-forward folds (#105): results are recorded per calendar year of the evaluation window.
 walk_forward:
   fold: year
