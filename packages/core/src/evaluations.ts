@@ -61,7 +61,7 @@ export type Evaluation = {
 export const evaluations = () => collection<Evaluation>('evaluations');
 const trials = () => collection<{ _id: string; count: number }>('evaluation_trials');
 export const EVALUATION_TIMEOUT_SECONDS = 3600;
-const JOB_CODE = 'from pipeline.strategy.job import main\n\nmain()\n';
+export const JOB_CODE = 'from pipeline.strategy.job import main\n\nmain()\n';
 
 /** The next trial number (atomic, per workspace). */
 async function nextTrial(ownerId: string) {

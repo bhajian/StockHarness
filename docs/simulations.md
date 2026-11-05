@@ -92,3 +92,56 @@ evaluations.
 
 The executor job is `pipeline.strategy.job` with `action: "simulate"`. Its tests are in
 `pipeline/tests/test_paper_broker.py`.
+
+## Simulation runs and the API (#125)
+
+A **SimulationConfig** is a named, saved definition. A **run** freezes its config and starts the executor job.
+
+When you save a config, each idea's plugin version is pinned (its latest version that passed its test). If no
+symbols are given, the research settings' evaluation symbols are used. So a re-run, or a re-import, runs the same
+code on the same scope, and the same config gives the same ledger (`ledger_hash`).
+
+The period may not reach into the locked holdout unless `period.allowHoldout` is set. A run that does is marked
+`usesHoldout`.
+
+| Method and path                        | What it does                                                                                                                        |
+| -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `POST /simulations/estimate`           | the resolved config (pinned versions, symbols) and the runtime estimate, from each plugin's measured evaluation speed               |
+| `POST /simulations` (admin)            | save the config by name and start a run (202 with the id and estimate)                                                              |
+| `GET /simulations`                     | runs, newest first: name, ideas, period, status, CAGR, Sharpe, max drawdown, final NAV, created, by                                 |
+| `GET /simulations/configs`             | saved configs                                                                                                                       |
+| `GET /simulations/:id`                 | the run: frozen config, status, result (summary, excess, series, monthly returns, attribution, reconciliation, counts, ledger hash) |
+| `GET /simulations/:id/series?metric=`  | one series: `equity`, `nav`, `drawdown`, `rolling_sharpe_126`, `gross`, `net`, `long`, `short`, `cash`, `returns`, `spx_equity`     |
+| `GET /simulations/:id/trades`          | the blotter (`idea`, `reason`, `side`, `security`, `sort=recent\|oldest\|pnl\|worst\|return`, `limit`, `offset`)                    |
+| `GET /simulations/:id/trades/:n`       | one trade with its fills and the prices around it                                                                                   |
+| `GET /simulations/:id/orders`          | the fills (`idea`, `security`, `date`)                                                                                              |
+| `GET /simulations/:id/positions?date=` | the book at the close of the last session on or before `date`                                                                       |
+| `GET /simulations/:id/export`          | the run and its config as YAML                                                                                                      |
+| `DELETE /simulations/:id` (admin)      | the run and its ledger                                                                                                              |
+
+A config, as sent to `POST /simulations`:
+
+```yaml
+name: Momentum + reversal
+ideas: [{ idea: T-1 }, { idea: T-2 }] # plugin and version are pinned when saved
+period: { start: 2016-01-04, end: 2025-12-31, allowHoldout: false }
+capital: 1000000
+allocation: risk_parity # equal | risk_parity | custom (ideas[].weight)
+sizing: { mode: quarter_kelly, kellyFraction: 0.25 } # or equal
+constraints: { positionCap: 0.05, sectorCap: 0.3, gross: 1, net: null }
+exits: { stop: 0.15, takeProfit: p90, horizon: true, review: true }
+costs: { commissionBps: 1, slippageBps: 5, borrowBps: 50, executionLagDays: 1 }
+hardToBorrow: []
+seed: 0
+```
+
+### YAML
+
+- **`SimulationConfig`** is configuration. Its spec is the definition: ideas by `T-n` with plugin name and version,
+  plus period, capital, allocation, sizing, constraints, exits, costs, hard-to-borrow and seed. It round-trips, and
+  it is part of the config backup (`simulation-configs.yaml`).
+- **`SimulationRun`** is a record: the config by value, the status and the result, restored as it was and never
+  re-run. The ledger rows are not part of the export; re-running the config rebuilds them identically.
+
+Both are covered by the round-trip test in `tests/integration/simulations.test.ts` (export, import into an empty
+workspace, export again, identical YAML).

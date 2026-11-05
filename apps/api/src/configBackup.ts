@@ -23,6 +23,7 @@ export const BACKUP_FILES: Partial<Record<ObjectKind, string>> = {
   StrategyPlugin: 'strategy-plugins.yaml',
   Gates: 'research-gates.yaml',
   ResearchSettings: 'research-settings.yaml',
+  SimulationConfig: 'simulation-configs.yaml',
 };
 /** Older export files, removed from the repo once the new files are written. */
 export const LEGACY_FILES = ['workflows.yaml', 'dataset-syncs.json'];
