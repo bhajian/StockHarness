@@ -11,7 +11,7 @@ resources:
 images:
   - name: openharness
     newName: 491085405405.dkr.ecr.us-east-1.amazonaws.com/openharness/app
-    newTag: fbf5b8eb30d6
+    newTag: 6d1967174664
   - name: openharness-gateway
     newName: 491085405405.dkr.ecr.us-east-1.amazonaws.com/openharness/gateway
     newTag: c6f90af9dacf
