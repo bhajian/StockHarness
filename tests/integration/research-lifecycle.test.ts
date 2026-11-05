@@ -206,10 +206,19 @@ test('the full lifecycle through the tools, with both revision paths', async () 
   assert.equal(broken.status, 'code_error');
   assert.equal(broken.passed, false);
   assert.equal(broken.attempts_left, 5);
+  // #280: the brief tells the Coder the next step for each theory.
+  const coderBrief = async () => (await coder.call('get_research_brief', {})).queue;
+  const afterError = (await coderBrief()).find((q: any) => q.theory_id === 'T-1');
+  assert.equal(afterError.next_step, 'fix');
+  assert.match(afterError.last_error, /tr_1dd/);
   const fixed = await coder.call('submit_code', { theory_id: 'T-1', code: GOOD, note: 'Fixed the column' });
   assert.equal(fixed.passed, true, JSON.stringify(fixed));
   assert.equal(fixed.status, 'coding');
   assert.deepEqual(fixed.plugin, { name: 't1_forty_day_trend_followers', versions: [1, 2] });
+  // Left in coding with passing code (a cycle that ran out of turns): the next cycle evaluates, not rewrites.
+  const ready = (await coderBrief()).find((q: any) => q.theory_id === 'T-1');
+  assert.deepEqual([ready.status, ready.next_step, ready.plugin_version], ['coding', 'evaluate', 2]);
+  assert.match(ready.instruction, /do not rewrite the code or re-read the data/);
   const ev = await coder.call('evaluate_strategy', { theory_id: 'T-1', params });
   assert.equal(ev.status, 'succeeded', JSON.stringify(ev));
   assert.equal(ev.theory.status, 'post_review');
@@ -384,4 +393,47 @@ test('strict gates: the Judge cannot upgrade a failing theory; forward_only theo
     (await coder.call('evaluate_strategy', { theory_id: fwd.theory_id, params })).error,
     /forward_only/,
   );
+  // #280: with passing code a forward-only theory leaves the Coder's queue (it is never backtested).
+  const fwdQueue = (await coder.call('get_research_brief', {})).queue;
+  assert.ok(!fwdQueue.some((q: any) => q.theory_id === fwd.theory_id), JSON.stringify(fwdQueue));
+});
+
+test('the Coder works ready-to-evaluate theories first (#280)', async () => {
+  const { theorist, judge, coder } = clients;
+  const submit = async (title: string, hypothesis: string, signal_logic: string) => {
+    const t = await theorist.call('submit_theory', {
+      title,
+      hypothesis,
+      signal_logic,
+      falsification: 'No excess over the S&P 500.',
+      data_needed: ['prices_daily.tr_1d'],
+      reasoning: 'Queue order test',
+    });
+    await judge.call('review_theory', { theory_id: t.theory_id, decision: 'approve', reasoning: 'Testable' });
+    return t.theory_id as string;
+  };
+  const older = await submit(
+    'Quiet names drift upward',
+    'Securities with the smallest absolute daily moves over sixty sessions earn more than the index afterwards.',
+    'Rank by the mean of |tr_1d| over 60 days ascending; hold the five calmest, rebalanced every 21 days.',
+  );
+  const newer = await submit(
+    'Ten-day breakout continuation',
+    'A security closing a ten-session run with the largest cumulative gain continues to outperform next fortnight.',
+    'Rank by compounded tr_1d over 10 days; long the top 2, rebalanced on Fridays.',
+  );
+  assert.equal(
+    (
+      await coder.call('submit_code', {
+        theory_id: newer,
+        code: GOOD.replace('lookback_days=40', 'lookback_days=10'),
+      })
+    ).passed,
+    true,
+  );
+  const queue = (await coder.call('get_research_brief', {})).queue;
+  const order = queue.map((q: any) => `${q.theory_id}:${q.next_step}`);
+  assert.equal(order[0], `${newer}:evaluate`, order.join(' '));
+  assert.ok(order.includes(`${older}:write`), order.join(' '));
+  assert.ok(order.indexOf(`${older}:write`) > 0);
 });

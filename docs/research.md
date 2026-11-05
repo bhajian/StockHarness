@@ -134,6 +134,21 @@ Start → Theorists (Parallel, N agent cards) → Judge (pre-code) → Coder (lo
 The Coder always runs: with an empty queue (no theory approved, sent back, failing or left in `coding`) it replies
 at once, so no theory is skipped because of how the Judge worded its reply (#273).
 
+Each item in the Coder's queue carries a `next_step` and an `instruction` (#280), worked out from the theory and its
+plugin versions:
+
+| `next_step` | When                                                           | What the Coder does                                      |
+| ----------- | -------------------------------------------------------------- | -------------------------------------------------------- |
+| `evaluate`  | in `coding`, the latest version passed its test, no evaluation | `evaluate_strategy` at once; no rewrite, no data reading |
+| `fix`       | `code_error` (the `last_error` is included)                    | fix only what the error points at, `submit_code`         |
+| `revise`    | `revise_code` (the feedback is included)                       | apply the feedback, `submit_code`                        |
+| `write`     | `approved_for_code`, or `coding` without passing code          | read the theory and the data once, write, `submit_code`  |
+| `wait`      | an evaluation of the latest version is running                 | skip                                                     |
+
+Ready-to-evaluate theories come first. A forward-only theory with passing code leaves the queue (it is never
+backtested; it waits for paper tracking). A cycle that runs out of turns after `submit_code` therefore costs the next
+cycle one call, not a fresh start.
+
 - **Agents:** each agent works its role's queue and starts with `get_research_brief`. The brief has its queue, the
   focus, the latest human steering notes, recent theories (to stay novel), the evaluation window (`start`,
   `end` before the holdout, `symbols`) and the active gates.
