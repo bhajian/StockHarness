@@ -3,8 +3,10 @@
     from pipeline.strategy.job import main
     main()
 
-with oh.params = {action, code, params, policies, readable_end?, plugin_ref?, config?}. The database handle stays
-here; the plugin only gets ctx. Failures come back as a structured error with the plugin's own line numbers.
+with oh.params = {action, code, params, policies, readable_end?, plugin_ref?, config?}; for action "simulate"
+(#124) {ideas: [{id, ref, code, plugin_ref}], params, policies, readable_end?, config?, simulation_id}, which writes
+the ledger (sim_orders, sim_trades, sim_portfolio_daily, sim_positions) to the workspace database. The database
+handle stays here; the plugin only gets ctx. Failures come back as a structured error with the plugin's own line numbers.
 """
 from __future__ import annotations
 
@@ -33,12 +35,19 @@ def plugin_error(exc: BaseException, code: str | None = None) -> dict:
     return out
 
 
-def run(params: dict, source) -> dict:
+def run(params: dict, source, db=None) -> dict:
     from . import engine
 
     action = params.get("action", "evaluate")
-    code = params["code"]
+    code = params.get("code") or ""
     try:
+        if action == "simulate":
+            from .simulate import ListSink, MongoSink, simulate
+
+            sink = MongoSink(db, params["simulation_id"]) if db is not None else ListSink()
+            result = simulate(params["ideas"], source=source, policies=params["policies"], params=params["params"],
+                              config=params.get("config"), readable_end=params.get("readable_end"), sink=sink)
+            return {"ok": True, "simulation": result}
         if action == "evaluate":
             record = engine.evaluate(code, source=source, policies=params["policies"], params=params["params"],
                                      config=params.get("config"), readable_end=params.get("readable_end"),
@@ -51,6 +60,10 @@ def run(params: dict, source) -> dict:
                                                    params=params.get("params"), readable_end=params.get("readable_end"))}
         raise ValueError(f"unknown action {action}")
     except Exception as exc:  # noqa: BLE001 - reported to the caller as a structured error
+        if action == "simulate":  # the frames are the failing idea's plugin lines
+            failing = getattr(exc, "idea_id", None)
+            code = next((i["code"] for i in params.get("ideas") or [] if i["id"] == failing), "")
+            return {"ok": False, "error": {**plugin_error(exc, code), **({"idea_id": failing} if failing else {})}}
         return {"ok": False, "error": plugin_error(exc, code)}
 
 
@@ -60,4 +73,4 @@ def main() -> None:
 
     db = oh._db()
     os.environ.pop("MONGODB_URI", None)  # the plugin never needs it
-    oh.result(run(dict(oh.params), MongoSource(db)))
+    oh.result(run(dict(oh.params), MongoSource(db), db))

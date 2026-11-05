@@ -14,6 +14,9 @@ A plugin is a short Python module that agents write and the trusted evaluator ru
         last = f.sort_values("as_of_date").groupby("security_id").tail(1)
         return dict(zip(last.security_id, last.mom_12_1_pct))
 
+    def review(ctx, held) -> dict[str, str]:  # optional (simulations, #124): exits for held names at ctx.date
+        return {}                             # {security_id: "invalidation" | "p_outperform"}
+
 The plugin only sees data through `ctx.read_df`, which applies the point-in-time rule of each collection.
 `validate(source)` checks a plugin statically; `load(source)` validates, then executes it with restricted
 builtins and an import allow-list. This keeps honest mistakes and casual bypasses out; the hard boundary is the
@@ -108,6 +111,9 @@ def validate(source: str) -> list[str]:
         f = funcs.get(name)
         if f is not None and (isinstance(f, ast.AsyncFunctionDef) or len(f.args.args) != 1):
             problems.append(f"line {f.lineno}: {name} must be a plain function taking one argument (ctx)")
+    f = funcs.get("review")  # optional, for the paper broker's daily exits (#124)
+    if f is not None and (isinstance(f, ast.AsyncFunctionDef) or len(f.args.args) != 2):
+        problems.append(f"line {f.lineno}: review must be a plain function taking two arguments (ctx, held)")
     meta = [n for n in tree.body if isinstance(n, ast.Assign) and any(getattr(t, "id", None) == "META" for t in n.targets)]
     if not meta:
         problems.append("the plugin must define META = {...}")
@@ -153,6 +159,7 @@ def load(source: str) -> SimpleNamespace:
     return SimpleNamespace(
         signal=env["signal"],
         universe=env.get("universe") if callable(env.get("universe")) else None,
+        review=env.get("review") if callable(env.get("review")) else None,
         META=meta,
         params={**(meta.get("params") or {})},
         hash=code_hash(source),
