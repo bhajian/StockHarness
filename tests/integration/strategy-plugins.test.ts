@@ -117,3 +117,74 @@ test('a tampered hash or a contract violation is refused on import', { skip: ski
   const stillV2 = await plugins.strategyPlugins().findOne({ ownerId: T, name: 'mom_12_1' });
   assert.equal(stillV2!.code, V2, 'nothing written');
 });
+
+test('Evaluation records round-trip verbatim and stay immutable', { skip: skipReason }, async () => {
+  const { evaluations } = await import('../../packages/core/src/evaluations.js');
+  const hash = plugins.codeHash(V2);
+  const id = randomUUID();
+  await evaluations().insertOne({
+    _id: id,
+    ownerId: S,
+    pluginId: 'x',
+    pluginName: 'mom_12_1',
+    pluginVersion: 2,
+    codeHash: hash,
+    theoryId: 'T-7',
+    mode: 'explore',
+    params: { start: '2023-01-03', end: '2024-12-31', symbols: ['AAPL', 'MSFT'] },
+    trial: 3,
+    status: 'succeeded',
+    record: {
+      evaluator_version: '1.0.0',
+      plugin: { hash, name: 'mom_12_1', version: 2 },
+      summary: { sharpe: 1.2345678901, cagr: 0.1, max_drawdown: -0.25, delisted: [] },
+      series: {
+        dates: ['2023-01-04', '2023-01-05'],
+        series: { equity: [0.9994, 1.0101], drawdown: [0, -0.001] },
+      },
+      record_hash: 'sha256:' + 'a'.repeat(64),
+      trial_context: { dsr: 0.61, trials: 3 },
+    },
+    durationMs: 42000,
+    createdAt: new Date('2026-11-05T03:00:00.000Z'),
+    finishedAt: new Date('2026-11-05T03:00:42.000Z'),
+  } as any);
+  await evaluations().insertOne({
+    _id: randomUUID(),
+    ownerId: S,
+    pluginId: 'x',
+    pluginName: 'mom_12_1',
+    pluginVersion: 2,
+    codeHash: hash,
+    mode: 'explore',
+    params: { start: '2023-01-03', end: '2023-02-01' },
+    trial: 4,
+    status: 'running',
+    createdAt: new Date(),
+  } as any);
+  const { yaml } = await exportObjects(S, ['Evaluation']);
+  assert.match(yaml, /kind: Evaluation/);
+  assert.equal((yaml.match(/kind: Evaluation/g) ?? []).length, 1, 'running evaluations are not exported');
+  assert.ok(!SECRET_FIELD_PATTERN.test(yaml) && !/ownerId|pluginId/.test(yaml));
+  const r = await applyObjectImport(who(T), yaml, 'merge');
+  assert.equal(r.applied, true, JSON.stringify(r));
+  const copy = await evaluations().findOne({ ownerId: T, sourceId: id } as any);
+  assert.equal(copy!.record!.summary.sharpe, 1.2345678901, 'the record is restored, never re-run');
+  assert.equal(
+    copy!.pluginId,
+    (await plugins.strategyPlugins().findOne({ ownerId: T, name: 'mom_12_1' }))!._id,
+  );
+  assert.equal((await exportObjects(T, ['Evaluation'])).yaml, yaml, 'identical round trip');
+  assert.deepEqual(
+    (await planObjectImport(who(T), yaml, 'merge')).items.map((i) => i.action),
+    ['unchanged'],
+  );
+  const edited = yaml.replace('sharpe: 1.2345678901', 'sharpe: 9.9');
+  assert.match((await planObjectImport(who(T), edited, 'merge')).errors[0].message, /immutable/);
+  const forged = yaml.replace(/codeHash: sha256:[0-9a-f]+/, `codeHash: sha256:${'b'.repeat(64)}`);
+  assert.match(
+    (await planObjectImport(who(T), forged.replace(id, randomUUID()), 'merge')).errors[0].message,
+    /does not match codeHash/,
+  );
+  await evaluations().deleteMany({ ownerId: { $in: [S, T] } });
+});

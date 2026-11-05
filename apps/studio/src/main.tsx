@@ -34,6 +34,7 @@ import { KnowledgePage } from './components/KnowledgePage';
 import { MongoCollections } from './components/MongoCollections';
 import { SkillsPage } from './components/SkillsPage';
 import { DatasetsPage } from './components/DatasetsPage';
+import { EvaluationsPage } from './components/EvaluationsPage';
 import { DataFreshness } from './components/HealthTab';
 import { EmbedChat, Playground, playgroundTargets } from './components/Playground';
 import { IntegrationsPage, SettingsPage } from './components/Settings';
@@ -465,7 +466,10 @@ function App() {
                 </select>
               </>
             ) : (
-              <strong>{nav.find((n) => n.id === page)?.label ?? 'Harnesses'}</strong>
+              <strong>
+                {nav.find((n) => n.id === page)?.label ??
+                  (page === 'evaluations' ? 'Evaluations' : 'Harnesses')}
+              </strong>
             )}
             {page === 'knowledge' && (
               <div className="tabs compact topbar-tabs" role="tablist" aria-label="Knowledge views">
@@ -554,6 +558,8 @@ function App() {
               <IntegrationsPage data={data} act={act} isAdmin={user.role === 'admin'} />
             ) : page === 'settings' ? (
               <SettingsPage {...props} user={user} setUser={setUser} />
+            ) : page === 'evaluations' ? (
+              <EvaluationsPage />
             ) : (
               <WorkflowsPage {...props} />
             )}

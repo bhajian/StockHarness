@@ -2929,3 +2929,57 @@ textarea::placeholder {
   flex-direction: column;
   gap: 6px;
 }
+
+/* Evaluation pages (#109) */
+.evaluation-page {
+  display: grid;
+  gap: 16px;
+}
+.evaluation-page .section-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+.evaluation-page .section-heading h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+}
+.evaluation-page tr.clickable {
+  cursor: pointer;
+}
+.evaluation-page caption {
+  caption-side: top;
+  text-align: left;
+  padding: 0 0 8px;
+  color: var(--muted, #667085);
+  font-size: 0.85rem;
+}
+.evaluation-page .error-notice {
+  border-color: #f0b4ad;
+  background: #fdf1ef;
+}
+.evaluation-page .provenance pre {
+  max-height: 320px;
+  overflow: auto;
+  font-size: 0.8rem;
+}
+.evaluation-page,
+.evaluation-page > * {
+  min-width: 0;
+}
+.evaluation-page .eval-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+  gap: 16px;
+}
+.evaluation-page .eval-grid > * {
+  min-width: 0;
+}
+.evaluation-page .kpi-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 12px;
+}

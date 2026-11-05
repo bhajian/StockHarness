@@ -1,6 +1,7 @@
 // "Everything is a YAML object" (#152): export and import every object kind through one envelope.
 // Writes go through saveResource/deleteResource (the same validation as the REST routes) or the dataset-sync
 // import, so an import can never create something the UI could not.
+import { randomUUID } from 'node:crypto';
 import { Router } from 'express';
 import { stringify } from 'yaml';
 import { z } from 'zod';
@@ -72,6 +73,42 @@ import {
   updateStrategyPlugin,
   type StrategyPluginHistoryEntry,
 } from '../../../packages/core/src/strategyPlugins.js';
+import { evaluations, type Evaluation } from '../../../packages/core/src/evaluations.js';
+
+/** An Evaluation record's spec: provenance, params, outcome and the evaluator's record, verbatim. */
+function evaluationSpec(e: Evaluation) {
+  return {
+    plugin: e.pluginName,
+    pluginVersion: e.pluginVersion,
+    codeHash: e.codeHash,
+    ...(e.theoryId ? { theoryId: e.theoryId } : {}),
+    mode: e.mode,
+    trial: e.trial,
+    status: e.status,
+    params: e.params,
+    ...(e.error ? { error: e.error } : {}),
+    ...(e.record ? { record: e.record } : {}),
+    ...(e.durationMs !== undefined ? { durationMs: e.durationMs } : {}),
+    createdAt: e.createdAt.toISOString(),
+    ...(e.finishedAt ? { finishedAt: e.finishedAt.toISOString() } : {}),
+  };
+}
+function evaluationSpecProblems(spec: Record<string, any>) {
+  const problems: string[] = [];
+  if (typeof spec.plugin !== 'string' || !spec.plugin) problems.push('spec.plugin is required');
+  if (!Number.isInteger(spec.pluginVersion)) problems.push('spec.pluginVersion must be an integer');
+  if (typeof spec.codeHash !== 'string' || !/^sha256:[0-9a-f]{64}$/.test(spec.codeHash))
+    problems.push('spec.codeHash must be a sha256: hash');
+  if (!['explore', 'holdout'].includes(spec.mode)) problems.push('spec.mode must be explore or holdout');
+  if (!['succeeded', 'failed'].includes(spec.status))
+    problems.push('spec.status must be succeeded or failed');
+  if (!spec.params || typeof spec.params !== 'object') problems.push('spec.params is required');
+  if (Number.isNaN(Date.parse(spec.createdAt))) problems.push('spec.createdAt must be a date');
+  // Provenance must agree with itself: the record ran the code the evaluation names.
+  if (spec.record && spec.record.plugin?.hash !== spec.codeHash)
+    problems.push('record.plugin.hash does not match codeHash');
+  return problems;
+}
 
 /** Kinds stored through the generic resource routes (the others have dedicated importers). */
 const isResourceKind = (k: ObjectKind): k is 'Skill' | 'Agent' | 'Harness' => k in RESOURCE_KIND;
@@ -215,6 +252,17 @@ export async function exportObjects(
           metadata: { name: p.name, version: String(p.version) },
           spec: history.length ? { ...spec, history } : spec,
         });
+      }
+      continue;
+    }
+    if (kind === 'Evaluation') {
+      for (const e of await evaluations()
+        .find({ ownerId, status: { $ne: 'running' } })
+        .sort({ createdAt: 1 })
+        .toArray()) {
+        const name = (e as Evaluation & { sourceId?: string }).sourceId ?? e._id;
+        if (!wanted(name)) continue;
+        docs.push({ apiVersion: API_VERSION, kind, metadata: { name }, spec: evaluationSpec(e) });
       }
       continue;
     }
@@ -480,6 +528,30 @@ async function plan(
       }
   }
 
+  // Evaluations (#109): audit records, restored with their provenance and never re-run; immutable once stored.
+  for (const doc of docs.filter((d) => d.kind === 'Evaluation')) {
+    const name = doc.metadata.name;
+    const problems = evaluationSpecProblems(doc.spec);
+    if (problems.length) {
+      result.errors.push({ kind: 'Evaluation', name, message: problems.join('; ') });
+      continue;
+    }
+    const current = await evaluations().findOne({
+      ownerId,
+      $or: [{ _id: name }, { sourceId: name }],
+    } as Record<string, unknown>);
+    if (current && stableJson(evaluationSpec(current)) !== stableJson(doc.spec)) {
+      result.errors.push({
+        kind: 'Evaluation',
+        name,
+        message: 'Evaluations are immutable; this one differs',
+      });
+      continue;
+    }
+    prepared.push({ doc, action: current ? 'unchanged' : 'create' });
+    result.items.push({ kind: 'Evaluation', name, action: current ? 'unchanged' : 'create' });
+  }
+
   // Catalog docs: curated descriptions only, matched by collection name (merge semantics in both modes).
   for (const doc of docs.filter((d) => d.kind === 'CatalogEntry')) {
     const name = doc.metadata.name;
@@ -700,6 +772,36 @@ export async function applyObjectImport(
           );
       }
       done.push({ kind: 'StrategyPlugin', name: p.doc.metadata.name, action: p.action });
+    }
+    for (const p of prepared.filter((x) => x.doc.kind === 'Evaluation' && x.action === 'create')) {
+      const sp = p.doc.spec as ReturnType<typeof evaluationSpec>;
+      const plugin = await strategyPlugins().findOne(
+        { ownerId, name: sp.plugin },
+        { projection: { _id: 1 } },
+      );
+      // Ids are global: a record imported from another workspace keeps its name as sourceId.
+      const taken = await evaluations().findOne({ _id: p.doc.metadata.name }, { projection: { _id: 1 } });
+      await evaluations().insertOne({
+        _id: taken ? randomUUID() : p.doc.metadata.name,
+        ...(taken ? { sourceId: p.doc.metadata.name } : {}),
+        ownerId,
+        pluginId: plugin?._id ?? '',
+        pluginName: sp.plugin,
+        pluginVersion: sp.pluginVersion,
+        codeHash: sp.codeHash,
+        ...(sp.theoryId ? { theoryId: sp.theoryId } : {}),
+        mode: sp.mode,
+        params: sp.params as Evaluation['params'],
+        trial: sp.trial,
+        status: sp.status,
+        ...(sp.error ? { error: sp.error } : {}),
+        ...(sp.record ? { record: sp.record } : {}),
+        ...(sp.durationMs !== undefined ? { durationMs: sp.durationMs } : {}),
+        createdAt: new Date(sp.createdAt),
+        ...(sp.finishedAt ? { finishedAt: new Date(sp.finishedAt) } : {}),
+        importedAt: new Date(),
+      } as Evaluation);
+      done.push({ kind: 'Evaluation', name: p.doc.metadata.name, action: 'create' });
     }
     // Removals last and in reverse dependency order, so harnesses go before the skills/agents they use.
     for (const kind of [...OBJECT_KINDS].reverse()) {
