@@ -106,7 +106,13 @@ const line = (t: Theory) => ({
   status: t.status,
   family: t.family,
   ...(t.claim ? { claimed_by: t.claim.by } : {}),
+  // A theory sent back: what to change, from the Judge or a person (#122).
+  ...(t.status === 'revise' || t.status === 'revise_code' ? { feedback: sentBack(t) } : {}),
 });
+const sentBack = (t: Theory) => {
+  const h = [...(t.history ?? [])].reverse().find((x) => x.type === 'transition' && x.to === t.status);
+  return h ? { by: h.actor.role, reasoning: h.reasoning.slice(0, 2000) } : undefined;
+};
 
 /** get_research_brief: what this role should do now. */
 export async function researchBrief(
@@ -127,7 +133,7 @@ export async function researchBrief(
   );
   const queue = role
     ? await theories()
-        .find({ ownerId, status: { $in: QUEUES[role] } }, { projection: { history: 0 } })
+        .find({ ownerId, status: { $in: QUEUES[role] } })
         .sort({ number: 1 })
         .limit(50)
         .toArray()

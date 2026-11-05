@@ -55,6 +55,8 @@ export type Evaluation = {
   createdAt: Date;
   finishedAt?: Date;
   createdBy?: string;
+  /** A re-run of another evaluation (#118): not a new trial; `match` is set when it finishes. */
+  reproduces?: { of: string; match?: boolean; originalHash?: string; hash?: string };
 };
 export const evaluations = () => collection<Evaluation>('evaluations');
 const trials = () => collection<{ _id: string; count: number }>('evaluation_trials');
@@ -186,7 +188,14 @@ type Execute = typeof runCodeJob;
 export async function startEvaluation(
   ownerId: string,
   input: unknown,
-  opts: { userId?: string; execute?: Execute; mode?: Evaluation['mode']; readableEnd?: string } = {},
+  opts: {
+    userId?: string;
+    execute?: Execute;
+    mode?: Evaluation['mode'];
+    readableEnd?: string;
+    /** Re-run this evaluation (same plugin version and params): it keeps the original's trial number. */
+    reproduces?: Evaluation;
+  } = {},
 ) {
   const body = evaluationInput.parse(input);
   const mode = opts.mode ?? 'explore';
@@ -212,7 +221,10 @@ export async function startEvaluation(
     ...(body.theoryId ? { theoryId: body.theoryId } : {}),
     mode,
     params: body.params,
-    trial: await nextTrial(ownerId),
+    trial: opts.reproduces ? opts.reproduces.trial : await nextTrial(ownerId),
+    ...(opts.reproduces
+      ? { reproduces: { of: opts.reproduces._id, originalHash: opts.reproduces.record?.record_hash } }
+      : {}),
     status: 'running',
     createdAt: now,
     ...(opts.userId ? { createdBy: opts.userId } : {}),
@@ -269,7 +281,20 @@ async function finish(doc: Evaluation, code: string, execute: Execute, readableE
       },
     });
   if (!result.ok) return set({ ...base, status: 'failed', error: result.error });
-  return set({ ...base, status: 'succeeded', record: result.record });
+  return set({
+    ...base,
+    status: 'succeeded',
+    record: result.record,
+    ...(doc.reproduces
+      ? {
+          reproduces: {
+            ...doc.reproduces,
+            hash: result.record.record_hash,
+            match: result.record.record_hash === doc.reproduces.originalHash,
+          },
+        }
+      : {}),
+  });
 }
 
 export async function getEvaluation(ownerId: string, id: string) {
