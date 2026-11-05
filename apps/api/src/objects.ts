@@ -276,6 +276,10 @@ async function plan(
           '',
       )
       .filter(Boolean),
+    // The universe sync also writes the delisted-companies list (as syncTargets() knows).
+    ...(docs.some((d) => d.kind === 'DatasetSync' && d.spec.dataset === 'universe')
+      ? ['delisted_companies']
+      : []),
   ]);
   for (const doc of transformDocs) {
     const name = doc.metadata.name;

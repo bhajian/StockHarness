@@ -4,7 +4,7 @@ apiVersion: stockharness/v1
 kind: Transform
 metadata:
   name: corporate_actions
-  version: "1"
+  version: "2"
 spec:
   description: "Splits and dividends keyed to security_id: the rolling calendars merged with the full per-symbol histories; dividends classified cash or special."
   code: |
@@ -234,7 +234,7 @@ apiVersion: stockharness/v1
 kind: Transform
 metadata:
   name: macro_daily
-  version: "1"
+  version: "2"
 spec:
   description: "One row per date: the treasury curve (3m, 2y, 10y, 30y and spreads), VIX, S&P 500 and Nasdaq levels with the S&P daily return, and sector returns."
   code: |
@@ -312,7 +312,7 @@ apiVersion: stockharness/v1
 kind: Transform
 metadata:
   name: prices_daily
-  version: "1"
+  version: "2"
 spec:
   description: Split- and dividend-adjusted point-in-time daily prices per security, with 1-day price and total returns and DQ flags. Daily runs load a 10-trading-day lookback and write only the window; a security with a new split gets its history rewritten.
   code: |
@@ -420,7 +420,7 @@ apiVersion: stockharness/v1
 kind: Transform
 metadata:
   name: securities
-  version: "1"
+  version: "3"
 spec:
   description: "The securities master: one row per security with an immutable security_id, matched by CIK, then CUSIP, then ticker + name. Tickers, sectors, industries and exchanges are validity intervals (ISO dates)."
   code: |
@@ -432,7 +432,6 @@ spec:
     oh.output("securities").upsert(docs)
   inputs:
     - company_profiles
-    - stock_list
     - delisted_companies
     - eod_prices
   outputs:
@@ -492,7 +491,7 @@ apiVersion: stockharness/v1
 kind: Transform
 metadata:
   name: trading_calendar
-  version: "1"
+  version: "2"
 spec:
   description: NYSE trading sessions from 1990 through the end of next year (open and close in UTC, early closes, previous and next session). Re-built monthly so it always reaches at least 11 months ahead.
   code: |

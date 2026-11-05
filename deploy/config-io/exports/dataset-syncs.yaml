@@ -26,9 +26,9 @@ metadata:
 spec:
   dataset: eod_prices
   connection: FMP
-  enabled: false
+  enabled: true
   symbolsMode: universe
-  from: 2021-10-24
+  from: 2016-01-01
   schedule:
     enabled: true
     everyMinutes: 1440
@@ -60,7 +60,7 @@ metadata:
 spec:
   dataset: analyst_grades
   connection: FMP
-  enabled: false
+  enabled: true
   symbolsMode: universe
   schedule:
     enabled: true
@@ -78,6 +78,7 @@ spec:
   connection: FMP
   enabled: true
   symbolsMode: universe
+  historyPeriods: 40
   schedule:
     enabled: true
     everyMinutes: 10080
@@ -93,7 +94,7 @@ metadata:
 spec:
   dataset: biggest_gainers
   connection: FMP
-  enabled: false
+  enabled: true
   symbolsMode: universe
   schedule:
     enabled: true
@@ -111,6 +112,7 @@ spec:
   connection: FMP
   enabled: true
   symbolsMode: universe
+  historyPeriods: 40
   schedule:
     enabled: true
     everyMinutes: 10080
@@ -143,7 +145,7 @@ metadata:
 spec:
   dataset: congress_house
   connection: FMP
-  enabled: false
+  enabled: true
   symbolsMode: universe
   schedule:
     enabled: true
@@ -159,7 +161,7 @@ metadata:
 spec:
   dataset: congress_senate
   connection: FMP
-  enabled: false
+  enabled: true
   symbolsMode: universe
   schedule:
     enabled: true
@@ -175,7 +177,7 @@ metadata:
 spec:
   dataset: dividends_calendar
   connection: FMP
-  enabled: false
+  enabled: true
   symbolsMode: universe
   schedule:
     enabled: true
@@ -208,7 +210,7 @@ metadata:
 spec:
   dataset: earnings_calendar
   connection: FMP
-  enabled: false
+  enabled: true
   symbolsMode: universe
   schedule:
     enabled: true
@@ -294,6 +296,7 @@ spec:
   connection: FMP
   enabled: true
   symbolsMode: universe
+  historyPeriods: 40
   schedule:
     enabled: true
     everyMinutes: 10080
@@ -379,6 +382,7 @@ spec:
   connection: FMP
   enabled: true
   symbolsMode: universe
+  historyPeriods: 40
   schedule:
     enabled: true
     everyMinutes: 10080
@@ -394,9 +398,9 @@ metadata:
 spec:
   dataset: eod_index
   connection: FMP
-  enabled: false
+  enabled: true
   symbolsMode: universe
-  from: 2021-10-24
+  from: 2016-01-01
   schedule:
     enabled: true
     everyMinutes: 1440
@@ -411,7 +415,7 @@ metadata:
 spec:
   dataset: insider_trades
   connection: FMP
-  enabled: false
+  enabled: true
   symbolsMode: universe
   schedule:
     enabled: true
@@ -461,7 +465,7 @@ metadata:
 spec:
   dataset: most_actives
   connection: FMP
-  enabled: false
+  enabled: true
   symbolsMode: universe
   schedule:
     enabled: true
@@ -494,7 +498,7 @@ metadata:
 spec:
   dataset: price_target_changes
   connection: FMP
-  enabled: false
+  enabled: true
   symbolsMode: universe
   schedule:
     enabled: true
@@ -578,7 +582,7 @@ metadata:
 spec:
   dataset: sector_performance
   connection: FMP
-  enabled: false
+  enabled: true
   symbolsMode: universe
   schedule:
     enabled: true
@@ -611,7 +615,7 @@ metadata:
 spec:
   dataset: splits_calendar
   connection: FMP
-  enabled: false
+  enabled: true
   symbolsMode: universe
   schedule:
     enabled: true
@@ -644,7 +648,7 @@ metadata:
 spec:
   dataset: news_stocks
   connection: FMP
-  enabled: false
+  enabled: true
   symbolsMode: universe
   schedule:
     enabled: true
