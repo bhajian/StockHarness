@@ -54,6 +54,11 @@ export const connectionSchema = z.object({
     .string()
     .regex(/^\d{4}-\d{2}-\d{2}$/)
     .optional(),
+  /**
+   * Research connections (#112): the research-loop role this connection's tools act as. The Judge reviews and gives
+   * verdicts, the Coder submits code, the Theorist submits theories; without a role only the data tools are served.
+   */
+  role: z.enum(['theorist', 'judge', 'coder']).optional(),
   /** MongoDB connections: the database every tool call uses. The built-in server uses the workspace database. */
   database: mongoDatabaseName.optional(),
   /** MongoDB connections: use this installation's MongoDB MCP server instead of `url` and its credentials. */

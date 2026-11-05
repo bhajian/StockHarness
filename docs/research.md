@@ -56,3 +56,22 @@ stay in memory, and they still count as trials.
   embedding model). Without one, a local **lexical** vector (hashed words and word pairs) is used and labelled as
   such: it catches re-submissions and light rewording, not real paraphrases. Add an embedding model (for example
   Gemini `gemini-embedding-001`) for semantic duplicates.
+
+## Lifecycle tools (#112)
+
+A research connection can have a **role** (Connections → StockHarness research data → Research role). The role
+decides what agents bound to that connection may do. It is enforced by the server, since the connection's token
+proves the connection:
+
+| Tool                                                                | Role     | What it does                                                                                                                                                                                   |
+| ------------------------------------------------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `search_theories(text)`                                             | all      | closest theories, any status                                                                                                                                                                   |
+| `get_theory(theory_id)`                                             | all      | content, status, counts, plugin versions, evaluation summaries, recent debate                                                                                                                  |
+| `submit_theory(...)`                                                | Theorist | a new theory for review, or a revised one (`theory_id` + changed fields)                                                                                                                       |
+| `review_theory(theory_id, approve \| revise \| reject, reasoning)`  | Judge    | pre-code review                                                                                                                                                                                |
+| `submit_code(theory_id, code)`                                      | Coder    | saves the next plugin version and dry-runs it (`test_strategy`). Failing code moves the theory to `code_error` with the attempts left; after the last one, the next call hands it to the Judge |
+| `evaluate_strategy(theory_id, params)`                              | Coder    | runs the theory's plugin once per coding round, links the evaluation (a trial) and moves the theory to `post_review`                                                                           |
+| `set_verdict(theory_id, successful \| failed \| revise, reasoning)` | Judge    | post-result review                                                                                                                                                                             |
+
+Every write is a legal transition (#110) with its reasoning. The runtime tells research connections, and only
+them, which agent, run and model is calling. That is recorded as the actor of each step of the debate.
