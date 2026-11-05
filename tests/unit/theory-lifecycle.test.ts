@@ -47,9 +47,21 @@ test('illegal transitions are refused with the legal next states', () => {
   );
   assert.match(transitionProblem('pre_review', 'successful', 'judge', zero)!, /cannot move/);
   assert.match(transitionProblem('coding', 'successful', 'judge', zero)!, /cannot move/);
+  // Terminal for the agents; a human can only send them back to the Theorist (#122).
   for (const s of TERMINAL_STATES.filter((s) => s !== 'approved'))
     for (const to of THEORY_STATES)
-      assert.match(transitionProblem(s, to, 'human', zero)!, /it is final|cannot move/);
+      if (to === 'revise') assert.equal(transitionProblem(s, to, 'human', zero), undefined, `${s} → revise`);
+      else assert.match(transitionProblem(s, to, 'human', zero)!, /cannot move/, `${s} → ${to}`);
+  for (const s of TERMINAL_STATES)
+    for (const role of ['theorist', 'judge', 'coder', 'evaluator'] as const)
+      for (const to of THEORY_STATES)
+        assert.ok(transitionProblem(s, to, role, zero), `${role}: ${s} → ${to}`);
+  assert.equal(transitionProblem('successful', 'failed', 'human', zero), undefined, 'a human can reject');
+  assert.equal(
+    transitionProblem('failed', 'revise', 'human', { revisions: 9, codeAttempts: 0 }),
+    undefined,
+    'a human send-back is not capped',
+  );
   assert.match(transitionProblem('draft', 'nonsense' as TheoryState, 'theorist', zero)!, /Unknown state/);
 });
 

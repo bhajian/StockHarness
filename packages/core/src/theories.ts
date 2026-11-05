@@ -47,8 +47,8 @@ export type TheoryActor = {
   runId?: string;
 };
 export type TheoryEvent = {
-  /** A transition, or `edit` when the Theorist changed the content in draft / revise. */
-  type: 'create' | 'transition' | 'edit' | 'link';
+  /** A transition, `edit` when the Theorist changed the content in draft / revise, `comment` from a person (#122). */
+  type: 'create' | 'transition' | 'edit' | 'link' | 'comment';
   from?: TheoryState;
   to?: TheoryState;
   actor: TheoryActor;
@@ -364,7 +364,7 @@ export const theorySpecSchema = theoryContent.extend({
   forwardOnly: z.boolean().optional(),
   history: z.array(
     z.object({
-      type: z.enum(['create', 'transition', 'edit', 'link']),
+      type: z.enum(['create', 'transition', 'edit', 'link', 'comment']),
       from: z.enum(THEORY_STATES).optional(),
       to: z.enum(THEORY_STATES).optional(),
       actor: actorSchema,

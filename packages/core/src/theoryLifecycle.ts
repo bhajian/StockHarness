@@ -38,18 +38,19 @@ export const TRANSITIONS: Record<TheoryState, Partial<Record<TheoryState, Theory
     approved_for_code: ['judge'],
   },
   revise: { pre_review: ['theorist', 'human'] },
-  rejected_untestable: {},
+  // Humans may send any reviewed theory back to the Theorist with a comment (#122), and reject a successful one.
+  rejected_untestable: { revise: ['human'] },
   approved_for_code: { coding: ['coder'] },
   coding: { code_error: ['coder', 'evaluator'], evaluated: ['evaluator', 'coder'] },
   // After the code-attempt cap, the theory goes to the Judge with the failure (#153).
   code_error: { coding: ['coder'], post_review: ['coder', 'judge', 'evaluator'] },
   evaluated: { post_review: ['evaluator', 'coder', 'judge'] },
-  post_review: { revise_code: ['judge'], failed: ['judge'], successful: ['judge'] },
+  post_review: { revise_code: ['judge'], failed: ['judge'], successful: ['judge'], revise: ['human'] },
   revise_code: { coding: ['coder'] },
-  failed: {},
-  successful: { approved: ['human'], parked: ['human'] },
-  approved: { parked: ['human'] },
-  parked: {},
+  failed: { revise: ['human'] },
+  successful: { approved: ['human'], parked: ['human'], failed: ['human'], revise: ['human'] },
+  approved: { parked: ['human'], failed: ['human'], revise: ['human'] },
+  parked: { revise: ['human'] },
 };
 
 export type LifecycleCaps = { maxRevisions: number; maxCodeAttempts: number };
@@ -71,7 +72,8 @@ export function transitionProblem(
     return `A theory in ${from} cannot move to ${to}${next.length ? ` (it can move to: ${next.join(', ')})` : ' (it is final)'}`;
   }
   if (!roles.includes(role)) return `Only the ${roles.join(' or ')} can move a theory from ${from} to ${to}`;
-  if ((to === 'revise' || to === 'revise_code') && counts.revisions >= caps.maxRevisions)
+  // A human sending a theory back is not capped: the caps bound the agents.
+  if ((to === 'revise' || to === 'revise_code') && role !== 'human' && counts.revisions >= caps.maxRevisions)
     return `This theory has used all ${caps.maxRevisions} revisions; decide instead (${to === 'revise' ? 'rejected_untestable or approved_for_code' : 'failed or successful'})`;
   if (from === 'code_error' && to === 'coding' && counts.codeAttempts >= caps.maxCodeAttempts)
     return `${caps.maxCodeAttempts} code attempts failed; hand the theory to the Judge (post_review)`;
