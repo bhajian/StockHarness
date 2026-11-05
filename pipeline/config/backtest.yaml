@@ -1,5 +1,6 @@
 # Backtest, paper broker, and replay configuration (spec §7, docs/replay.md).
-# Planning stub: values are defaults to implement against, not yet wired to code.
+# The trusted evaluator (pipeline/strategy, docs/strategies.md) reads the execution, cost, holdout and
+# sizing.gross_limit values; the rest are defaults for the paper broker and replay (M6).
 
 # Execution and costs (shared by run_backtest, the paper broker, and replay).
 execution_lag_days: 1

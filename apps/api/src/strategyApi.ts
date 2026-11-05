@@ -8,6 +8,12 @@ import {
   strategyPlugins,
   updateStrategyPlugin,
 } from '../../../packages/core/src/strategyPlugins.js';
+import {
+  getEvaluation,
+  listEvaluations,
+  startEvaluation,
+  trialCount,
+} from '../../../packages/core/src/evaluations.js';
 
 export const strategyRouter = Router();
 const adminOnly = (role: string) => {
@@ -52,4 +58,25 @@ strategyRouter.delete('/strategy-plugins/:id', async (req, res) => {
 strategyRouter.get('/strategy-plugins/:id/versions', async (req, res) => {
   const rows = await listStrategyPluginVersions(req.principal!.tenantId, String(req.params.id));
   res.json(rows.map(pub));
+});
+
+// Evaluations (#104): start one (202, poll GET /evaluations/:id), list them, read one record.
+strategyRouter.post('/evaluations', async (req, res) => {
+  adminOnly(req.principal!.user.role);
+  const { evaluation, done } = await startEvaluation(req.principal!.tenantId, req.body, {
+    userId: req.principal!.user._id,
+  });
+  done.catch(() => undefined); // failures are recorded on the evaluation
+  res.status(202).json(pub(evaluation));
+});
+strategyRouter.get('/evaluations', async (req, res) => {
+  const ownerId = req.principal!.tenantId;
+  const list = await listEvaluations(ownerId, {
+    plugin: typeof req.query.plugin === 'string' ? req.query.plugin : undefined,
+    theoryId: typeof req.query.theoryId === 'string' ? req.query.theoryId : undefined,
+  });
+  res.json({ trials: await trialCount(ownerId), items: list.map(pub) });
+});
+strategyRouter.get('/evaluations/:id', async (req, res) => {
+  res.json(pub(await getEvaluation(req.principal!.tenantId, String(req.params.id))));
 });

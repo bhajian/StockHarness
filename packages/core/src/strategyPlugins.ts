@@ -31,7 +31,7 @@ const ALLOWED_IMPORTS = new Set([
 export const strategyPluginInput = z.object({
   name: z.string().regex(/^[a-z][a-z0-9_]{0,62}$/, 'lowercase letters, digits and _, starting with a letter'),
   description: z.string().max(2000).optional(),
-  code: z.string().min(1).max(200_000),
+  code: z.string().min(1).max(100_000), // passed to the executor in its params
   evaluatorVersion: z.string().regex(/^\d+$/).default(EVALUATOR_MAJOR),
 });
 export type StrategyPluginInput = z.infer<typeof strategyPluginInput>;

@@ -50,3 +50,24 @@ Plugins are stored as versioned `StrategyPlugin` objects (`/api/strategy-plugins
 version, and the `sha256:` hash of the code pins what an evaluation ran. YAML export keeps the code verbatim
 with its hash, optionally with the full version history (`?history=1`); import refuses a spec whose hash does not
 match its code.
+
+## The trusted evaluator (#104)
+
+`pipeline/strategy/engine.py` is fixed, versioned platform code (`EVALUATOR_VERSION`). For a plugin version and
+`params` (`start`, `end`, optional `symbols` scope, `side`/`top_n`/`rebalance` overrides, `plugin_params`):
+
+1. It walks the rebalance dates (`daily`, the first session of each week, or of each month) and calls
+   `signal(ctx)` with data cut at that date. The default universe is `universe_daily.in_universe` that day.
+2. The book is equal weight: the `top_n` highest scores (long), the lowest (short) or both (`long_short`, half
+   the gross each side). Gross is `sizing.gross_limit`.
+3. Trades execute at the close `execution_lag_days` sessions later (the next day's close), paying
+   `commission_bps + slippage_bps` on the traded weight. Only names with a price that day are traded.
+4. Weights drift on daily total returns (`prices_daily.tr_1d`); shorts pay `borrow_cost_bps_default` a year; a
+   held name whose prices stop and that is no longer active takes `delisting_return` once.
+
+Costs come from `pipeline/config/backtest.yaml`. The result is an `evaluations` record: the plugin hash and
+version, params, costs, data snapshot, evaluator version, summary numbers, series in the standard
+`{ dates, series }` chart format, rebalances and the final holdings. `record_hash` covers all of it, so the same
+inputs give an identical record. Every evaluation increments the workspace's global trial count.
+
+Run one with `POST /api/evaluations` `{ plugin, version?, params }` (202; poll `GET /api/evaluations/:id`).
