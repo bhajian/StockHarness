@@ -250,3 +250,45 @@ test('research data tools over MCP: discovered by the platform, capped at the ho
   const denied = await fetch(`${base}/mcp/research`, { method: 'POST', body: '{}' });
   assert.equal(denied.status, 401);
 });
+
+test('the run-test-fix loop: a scripted Coder fixes three seeded bugs with test_strategy', async () => {
+  const conn = (await ok('/connections')).find((c: any) => c.kind === 'research');
+  await ok(`/connections/${conn.id}/discover`, {});
+  const provider = await ok('/providers', {
+    name: 'Coder fixture',
+    kind: 'openai-compatible',
+    baseUrl: 'http://fixtures:9090/v1',
+    model: 'test-coder',
+    contextWindow: 200000,
+    maxOutputTokens: 1024,
+  });
+  const agent = await ok('/agents', {
+    name: 'Coder',
+    providerId: provider.id,
+    systemPrompt: 'Write strategy plugins, test them with test_strategy and fix them until they pass.',
+    connections: [{ connectionId: conn.id, tools: ['test_strategy'] }],
+    maxTurns: 10,
+  });
+  let run = await ok('/runs', { agentId: agent.id, input: 'strategy fix loop' });
+  for (let i = 0; i < 180 && ['queued', 'running'].includes(run.status); i++) {
+    await new Promise((r) => setTimeout(r, 1000));
+    run = await ok(`/runs/${run.id}`);
+  }
+  assert.equal(run.status, 'succeeded', run.error);
+  assert.match(run.output, /LOOP-DONE after 4 attempts/);
+  const plugin = (await ok('/strategy-plugins')).find((p: any) => p.name === 'coder_fixed');
+  const versions = await ok(`/strategy-plugins/${plugin.id}/versions`);
+  assert.deepEqual(
+    versions.map((v: any) => [v.version, (v.error ?? 'passed').split(':')[0]]),
+    [
+      [4, 'passed'],
+      [3, 'PluginError'],
+      [2, 'warnings'],
+      [1, 'KeyError'],
+    ],
+    'every attempt is a version with its outcome',
+  );
+  assert.equal(versions[0].tested, 'passed');
+  const list = await ok('/evaluations');
+  assert.ok(!list.items.some((e: any) => e.pluginName === 'coder_fixed'), 'testing is never a trial');
+});

@@ -33,6 +33,7 @@ import {
   pythonNote,
   pythonToolDefinition,
   summarizeJob,
+  withFieldHints,
   type PythonToolArguments,
 } from './pythonTool.js';
 import { collection } from './db.js';
@@ -1859,7 +1860,9 @@ async function runAgentUnchecked(stored: Agent, input: string, history: Run['his
                   ),
                 );
                 toolCalls++;
-                const summaries = outcomes.map(summarizeJob);
+                const summaries = await Promise.all(
+                  outcomes.map((o) => withFieldHints(ctx.ownerId, summarizeJob(o, args.code), o)),
+                );
                 text = JSON.stringify(variants.length > 1 ? summaries : summaries[0]);
                 isError = outcomes.every((o) => o.status !== 'succeeded');
               } catch (error) {
@@ -2807,7 +2810,7 @@ export async function executeRun(run: Run, signal: AbortSignal, onDelta?: DeltaW
             secrets: node.secrets,
           },
         );
-        const summary = summarizeJob(outcome);
+        const summary = summarizeJob(outcome, node.code);
         await event({
           type: outcome.status === 'succeeded' ? 'tool_completed' : 'tool_error',
           message: `${node.name} / python`,

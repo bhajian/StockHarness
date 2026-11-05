@@ -1,8 +1,23 @@
 // evaluate_strategy / get_evaluation (#109): research MCP tools that run the trusted evaluator on a saved
 // StrategyPlugin version. Every call is a trial (#104/#106). The agent gets a compact summary; the full record is
 // stored and rendered on the evaluation page. Exploration only: the holdout run is not an agent tool (#105).
+import { randomUUID } from 'node:crypto';
 import { HttpError } from './security.js';
-import { getEvaluation, startEvaluation, type Evaluation } from './evaluations.js';
+import {
+  evaluatorSettings,
+  getEvaluation,
+  latestPriceDate,
+  startEvaluation,
+  type Evaluation,
+} from './evaluations.js';
+import { runCodeJob } from './codeJobs.js';
+import { pitPolicies } from './pitPolicy.js';
+import {
+  createStrategyPlugin,
+  strategyPlugins,
+  strategyPluginVersions,
+  updateStrategyPlugin,
+} from './strategyPlugins.js';
 
 const WAIT_MAX_SECONDS = 50; // MCP clients time out a call after about a minute
 
@@ -90,6 +105,24 @@ export const STRATEGY_TOOLS = [
     },
   },
   {
+    name: 'test_strategy',
+    description:
+      "Dry-run strategy plugin code on about 20 symbols and a few dates before the holdout. Returns the error (type, message, your code's line numbers, and the real columns for a missing one) or a sanity summary (names scored per date, NaNs, warnings for an empty signal or a blocked lookahead). It never returns performance numbers and is not a trial. Pass plugin to save the code as that plugin's next version; the response says how many fix attempts are left.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        code: { type: 'string', description: 'The whole plugin: META, signal(ctx), optional universe(ctx)' },
+        plugin: { type: 'string', description: 'Save as the next version of this plugin (created if new)' },
+        note: { type: 'string', maxLength: 500 },
+        symbols: { type: 'array', items: { type: 'string' }, maxItems: 50 },
+        dates: { type: 'array', items: { type: 'string' }, maxItems: 6 },
+        plugin_params: { type: 'object' },
+      },
+      required: ['code'],
+      additionalProperties: false,
+    },
+  },
+  {
     name: 'get_evaluation',
     description: 'The status and metrics of an evaluation started with evaluate_strategy.',
     inputSchema: {
@@ -101,6 +134,120 @@ export const STRATEGY_TOOLS = [
   },
 ] as const;
 
+// --- test_strategy (#153) -----------------------------------------------------------------------------------
+/** Fix attempts per plugin before the Coder hands it to the Judge (a failing gate is not a bug). */
+export const MAX_FIX_ATTEMPTS = 5;
+const JOB_CODE = 'from pipeline.strategy.job import main\n\nmain()\n';
+
+type TestArgs = {
+  code: string;
+  plugin?: string;
+  note?: string;
+  symbols?: string[];
+  dates?: string[];
+  plugin_params?: Record<string, unknown>;
+};
+/**
+ * Dry-run a plugin on ~20 symbols × a few dates before the holdout: the error with the plugin's line numbers, or
+ * a sanity summary. Never metrics, and never a trial. With `plugin`, the code is saved as that plugin's next
+ * version and the outcome recorded on it, so every attempt is in the version history.
+ */
+export async function testStrategy(ownerId: string, args: TestArgs, execute: typeof runCodeJob = runCodeJob) {
+  if (typeof args?.code !== 'string' || !args.code.trim()) throw new HttpError(400, 'code is required');
+  const readableEnd = (await evaluatorSettings(ownerId)).readableEnd ?? (await latestPriceDate(ownerId));
+  if (!readableEnd) throw new HttpError(400, 'No price data yet');
+  let saved: { id: string; name: string; version: number } | undefined;
+  if (args.plugin) {
+    const existing = await strategyPlugins().findOne({ ownerId, name: args.plugin });
+    const body = {
+      name: args.plugin,
+      code: args.code,
+      ...(existing?.description ? { description: existing.description } : {}),
+    };
+    const note = { note: args.note ?? 'test_strategy attempt' };
+    try {
+      const p = existing
+        ? await updateStrategyPlugin(ownerId, existing._id, body, 'agent', note)
+        : await createStrategyPlugin(ownerId, body, 'agent', note);
+      saved = { id: p._id, name: p.name, version: p.version };
+    } catch (e) {
+      // A save-time contract problem (no signal, forbidden import): report it like a test failure.
+      if (!(e instanceof HttpError) || e.status !== 400) throw e;
+      return {
+        passed: false,
+        error: { type: 'PluginError', message: e.message, problems: e.message.split('; ') },
+        next: 'Fix the code and call test_strategy again.',
+      };
+    }
+  }
+  const outcome = await execute(
+    { ownerId, runId: `strategy-test-${randomUUID()}`, key: '1', signal: AbortSignal.timeout(300_000) },
+    {
+      code: JOB_CODE,
+      params: {
+        action: 'test',
+        code: args.code,
+        policies: await pitPolicies(ownerId),
+        readable_end: readableEnd,
+        params: {
+          ...(args.symbols ? { symbols: args.symbols } : {}),
+          ...(args.dates ? { dates: args.dates } : {}),
+          ...(args.plugin_params ? { plugin_params: args.plugin_params } : {}),
+        },
+      },
+      timeoutSeconds: 240,
+      purpose: `Test strategy${saved ? ` ${saved.name} v${saved.version}` : ''}`,
+    },
+  );
+  const result = outcome.result as { ok: boolean; test?: any; error?: any } | undefined;
+  const error =
+    outcome.status !== 'succeeded' || !result
+      ? {
+          type: 'ExecutorError',
+          message: outcome.error ?? `The test ${outcome.status}`,
+          stderr: outcome.stderr.slice(-3000),
+        }
+      : result.ok
+        ? undefined
+        : result.error;
+  const passed = !error && Boolean(result?.test?.ok);
+  let attempts: { used: number; left: number } | undefined;
+  if (saved) {
+    const problem = error
+      ? `${error.type}: ${error.message}`.slice(0, 2000)
+      : passed
+        ? undefined
+        : `warnings: ${(result!.test.warnings ?? []).map((w: { code: string }) => w.code).join(', ')}`;
+    await strategyPluginVersions().updateOne(
+      { _id: `${saved.id}:${saved.version}`, ownerId },
+      problem ? { $set: { error: problem } } : { $set: { tested: 'passed' as const } },
+    );
+    // Consecutive failing attempts since the last passing (or untested) version.
+    const recent = await strategyPluginVersions()
+      .find({ ownerId, pluginId: saved.id }, { projection: { error: 1 } })
+      .sort({ version: -1 })
+      .limit(MAX_FIX_ATTEMPTS + 1)
+      .toArray();
+    let used = 0;
+    for (const v of recent) {
+      if (!v.error) break;
+      used++;
+    }
+    attempts = { used, left: Math.max(0, MAX_FIX_ATTEMPTS - used) };
+  }
+  return {
+    passed,
+    ...(saved ? { plugin: saved.name, version: saved.version } : {}),
+    ...(error ? { error } : { summary: result!.test }),
+    ...(attempts ? { attempts } : {}),
+    next: passed
+      ? 'Passed: evaluate it with evaluate_strategy (each evaluation is a trial).'
+      : attempts && attempts.left === 0
+        ? `Stop: ${MAX_FIX_ATTEMPTS} attempts in a row failed. Hand it to the Judge with a one-line summary of the problem.`
+        : 'Fix the code (see the error and its line numbers, or the warnings) and call test_strategy again.',
+  };
+}
+
 export async function callStrategyTool(
   ownerId: string,
   name: string,
@@ -109,6 +256,7 @@ export async function callStrategyTool(
 ) {
   if (name === 'get_evaluation')
     return agentSummary(await getEvaluation(ownerId, String(args.evaluation_id ?? '')));
+  if (name === 'test_strategy') return testStrategy(ownerId, args as unknown as TestArgs);
   if (name !== 'evaluate_strategy') throw new HttpError(404, `Unknown tool ${name}`);
   const { evaluation, done } = await startEvaluation(ownerId, {
     plugin: args.plugin,

@@ -25,6 +25,9 @@ def plugin_error(exc: BaseException, code: str | None = None) -> dict:
     out = {"type": type(exc).__name__, "message": str(exc)[:2000], "frames": frames[-8:]}
     if isinstance(exc, PluginError):
         out["problems"] = exc.problems
+    if isinstance(exc, (KeyError, AttributeError)) and getattr(exc, "columns_seen", None):
+        out["hint"] = "a name the code used is not a column; the collections read so far have these columns"
+        out["columns"] = exc.columns_seen
     if isinstance(exc, SyntaxError) and exc.lineno:
         out["frames"] = [{"line": exc.lineno, "function": "<module>", "code": exc.text.strip() if exc.text else ""}]
     return out
@@ -41,6 +44,11 @@ def run(params: dict, source) -> dict:
                                      config=params.get("config"), readable_end=params.get("readable_end"),
                                      plugin_ref=params.get("plugin_ref"))
             return {"ok": True, "record": record}
+        if action == "test":
+            from .testing import test_plugin
+
+            return {"ok": True, "test": test_plugin(code, source=source, policies=params["policies"],
+                                                   params=params.get("params"), readable_end=params.get("readable_end"))}
         raise ValueError(f"unknown action {action}")
     except Exception as exc:  # noqa: BLE001 - reported to the caller as a structured error
         return {"ok": False, "error": plugin_error(exc, code)}

@@ -125,6 +125,7 @@ test('an evaluation record renders on the dev evaluation page', async ({ page })
   await expect(page.locator('canvas').first()).toBeVisible();
   await page.getByText('Provenance').click();
   await expect(page.getByText(e.record.record_hash)).toBeVisible();
-  if (process.env.SCREENSHOT) await page.screenshot({ path: 'test-results/evaluation-page.png', fullPage: true });
+  if (process.env.SCREENSHOT)
+    await page.screenshot({ path: 'test-results/evaluation-page.png', fullPage: true });
   expect(errors).toEqual([]);
 });

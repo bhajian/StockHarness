@@ -596,6 +596,57 @@ function answer(messages, tools) {
     cycleVisits.set(token, visits);
     return { content: visits >= Number(target) ? `Visit ${visits}: DONE` : `Visit ${visits}: continue` };
   }
+  if (String(input).includes('strategy fix loop')) {
+    // #153: write -> test_strategy -> read the error -> fix, through the research MCP connection. Three seeded
+    // bugs (a column typo, the wrong date field, a syntax error), each checked for a clear error, then the fix.
+    const tool = tools?.find((t) => t.function.description?.includes('/ test_strategy:'))?.function.name;
+    if (!tool) return { content: 'NO TEST_STRATEGY TOOL' };
+    const good = [
+      'import numpy as np',
+      'META = {"side": "long", "horizon_days": 20, "rebalance": "weekly", "top_n": 3}',
+      '',
+      'def signal(ctx):',
+      '    f = ctx.read_df("prices_daily", columns=["security_id", "tr_1d"], lookback_days=40)',
+      '    return {s: float(np.prod(1 + g.tr_1d) - 1) for s, g in f.groupby("security_id")}',
+      '',
+    ].join('\n');
+    const steps = [
+      {
+        code: good.replace('float(np.prod(1 + g.tr_1d) - 1)', 'float(g["tr_1dd"].sum())'),
+        expect: ['"type":"KeyError"', '"line":6', '"tr_1d"'],
+      },
+      {
+        code: good.replace(
+          'columns=["security_id", "tr_1d"], lookback_days=40',
+          'filter={"date": {"$gt": ctx.date}}, columns=["security_id", "tr_1d"]',
+        ),
+        expect: ['empty_signal', 'lookahead_blocked'],
+      },
+      { code: good.replace('def signal(ctx):', 'def signal(ctx)'), expect: ['line 4: syntax error'] },
+      { code: good, expect: ['"passed":true'] },
+    ];
+    const done = messages.filter((m) => m.role === 'tool').length;
+    if (done) {
+      const step = steps[done - 1];
+      // MCP results reach the model as their content JSON: read the text the tool returned.
+      let text = String(last.content);
+      try {
+        text =
+          JSON.parse(text)
+            .content?.map((c) => c.text)
+            .join('\n') ?? text;
+      } catch {
+        text = text.replace(/\\+"/g, '"'); // a truncated result: just unescape it
+      }
+      const missing = step.expect.filter((e) => !text.includes(e));
+      if (missing.length)
+        return {
+          content: `LOOP-FAILED at attempt ${done}: missing ${missing.join(', ')} in ${text.slice(0, 600)}`,
+        };
+      if (done === steps.length) return { content: `LOOP-DONE after ${done} attempts` };
+    }
+    return memoryCall(tool, { code: steps[done].code, plugin: 'coder_fixed', note: `attempt ${done + 1}` });
+  }
   if (String(input).includes('python roundtrip')) {
     // run_python: a script that reads params, writes a collection and reports; then the agent summarises it.
     if (lastToolName === 'run_python') return { content: `Python said: ${last.content}` };
