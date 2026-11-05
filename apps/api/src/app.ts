@@ -66,6 +66,7 @@ import { catalogRouter } from './catalog.js';
 import { transformsRouter } from './transformsApi.js';
 import { pipelinesRouter } from './pipelinesApi.js';
 import { strategyRouter } from './strategyApi.js';
+import { theoriesRouter } from './theoriesApi.js';
 import { researchMcpRouter } from './researchMcp.js';
 import { openshell } from './openshell.js';
 import { tenantView, type Tenant } from './tenant.js';
@@ -690,6 +691,7 @@ app.use('/api', requireSession, catalogRouter);
 app.use('/api', requireSession, transformsRouter);
 app.use('/api', requireSession, pipelinesRouter);
 app.use('/api', requireSession, strategyRouter);
+app.use('/api', requireSession, theoriesRouter);
 app.use('/api', requireSession, resources);
 app.use('/api', (_req, _res, next) => next(new HttpError(404, 'API endpoint not found')));
 
