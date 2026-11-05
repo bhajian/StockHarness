@@ -213,3 +213,40 @@ test('exploration stops before the holdout; the holdout is one shot', async () =
     ['2024'],
   );
 });
+
+test('research data tools over MCP: discovered by the platform, capped at the holdout', async () => {
+  const conn = await ok('/connections', { name: 'Research data', kind: 'research', url: '' });
+  assert.equal(conn.builtIn, true);
+  const discovered = await ok(`/connections/${conn.id}/discover`, {});
+  const names = (discovered.tools ?? discovered).map((t: any) => t.name).sort();
+  for (const n of ['describe_collection', 'list_collections', 'query_collection', 'sample_collection'])
+    assert.ok(names.includes(n), `${n} in ${names}`);
+  // Call it like any MCP client: the token names the connection and is signed for its workspace.
+  const env = await readFile('.env', 'utf8');
+  process.env.ENCRYPTION_KEY = env
+    .split('\n')
+    .find((l) => l.startsWith('ENCRYPTION_KEY='))!
+    .slice(15);
+  process.env.SETUP_TOKEN ??= 'unit-test-setup-token'.repeat(3);
+  const { researchToken } = await import('../../packages/core/src/dataTools.js');
+  const { Client } = await import('@modelcontextprotocol/sdk/client/index.js');
+  const { StreamableHTTPClientTransport } =
+    await import('@modelcontextprotocol/sdk/client/streamableHttp.js');
+  const me = await ok('/auth/me');
+  const client = new Client({ name: 'test', version: '1' });
+  await client.connect(
+    new StreamableHTTPClientTransport(new URL(`${base}/mcp/research`), {
+      requestInit: { headers: { Authorization: `Bearer ${researchToken(me.tenantId, conn.id)}` } },
+    }),
+  );
+  const r: any = await client.callTool({
+    name: 'query_collection',
+    arguments: { collection: 'prices_daily', sort: { date: -1 }, limit: 3, as_of: '2030-01-01' },
+  });
+  const body = JSON.parse(r.content[0].text);
+  assert.equal(body.as_of, '2024-07-08', 'the holdout caps the session; as_of cannot move later');
+  assert.ok(body.rows.every((row: any) => row.as_of_date <= '2024-07-08'));
+  await client.close();
+  const denied = await fetch(`${base}/mcp/research`, { method: 'POST', body: '{}' });
+  assert.equal(denied.status, 401);
+});

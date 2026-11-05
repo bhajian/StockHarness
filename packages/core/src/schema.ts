@@ -42,9 +42,18 @@ export const connectionSchema = z.object({
   authType: z.enum(['none', 'token', 'oauth']).default('none'),
   /**
    * `device` connections are managed by the Machines page through the gateway; `mongodb` connections are MongoDB MCP
-   * servers whose tools OpenHarness pins to one database; `mcp` are ordinary servers.
+   * servers whose tools OpenHarness pins to one database; `research` is the built-in research data server (#108);
+   * `mcp` are ordinary servers.
    */
-  kind: z.enum(['mcp', 'device', 'mongodb']).default('mcp'),
+  kind: z.enum(['mcp', 'device', 'mongodb', 'research']).default('mcp'),
+  /**
+   * Research connections (#108): the built-in research data tools. `asOf` fixes the session date (default: the
+   * latest trading date); reads never pass it, or the locked holdout.
+   */
+  asOf: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional(),
   /** MongoDB connections: the database every tool call uses. The built-in server uses the workspace database. */
   database: mongoDatabaseName.optional(),
   /** MongoDB connections: use this installation's MongoDB MCP server instead of `url` and its credentials. */

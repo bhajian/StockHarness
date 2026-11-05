@@ -104,3 +104,22 @@ Run one with `POST /api/evaluations` `{ plugin, version?, params }` (202; poll `
 - **trial_context:** the deflated Sharpe ratio (Bailey & López de Prado) against the expected maximum Sharpe of
   all trials the workspace has run (the global trial count and the variance of their Sharpe ratios). It changes
   as the swarm runs more trials, so it sits outside `record_hash`.
+
+## Research data tools over MCP (#108)
+
+Add **Connections → Connect an MCP server → StockHarness research data (built in)**. The installation serves it at
+`/mcp/research` (Streamable HTTP); the runtime authenticates with a token that names the connection and is signed
+for its workspace. Tools:
+
+- `list_collections`: collections with layer, size, point-in-time status and whether they are readable.
+- `describe_collection`: the Schema Catalog agent view (the same text as Catalog → Agent view).
+- `sample_collection`: the latest rows known by the session as_of.
+- `query_collection(collection, filter, fields, sort, limit, as_of)`: at most 500 rows and 256 KB. Every row
+  carries its `as_of_date`.
+
+The **session as_of** is the connection's fixed date (optional), else the latest trading date, and never later than
+the day before the locked holdout. It is applied on the server: a call may pass an earlier `as_of`, never a later
+one. Collections are cut by the same policy as `ctx.read_df`, so Layer 1 collections are served directly with
+their known-at rule. Current-only and undocumented collections are refused (current-only only opens when the session
+is at the latest date and there is no holdout). `$where`, `$function` and `$accumulator` are refused. The fuzz
+test (`tests/integration/data-tools.test.ts`) checks that no tool returns a row known after the session as_of.

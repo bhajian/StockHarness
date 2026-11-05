@@ -466,7 +466,9 @@ export function ConnectionEditor({ value, onClose, onSaved }: Props) {
   const update = (key: string, v: unknown) => set((f: any) => ({ ...f, [key]: v }));
   const callback = `${publicUrl.replace(/\/$/, '')}/api/mcp/oauth/callback`;
   const mongo = form.kind === 'mongodb';
-  const builtIn = mongo && Boolean(form.builtIn);
+  // The built-in research data tools (#108): served by this installation, no URL or credentials.
+  const research = form.kind === 'research';
+  const builtIn = (mongo && Boolean(form.builtIn)) || research;
   return (
     <Modal title={existing ? 'Edit MCP connection' : 'Connect an MCP server'} onClose={onClose} wide>
       <SaveForm
@@ -481,7 +483,7 @@ export function ConnectionEditor({ value, onClose, onSaved }: Props) {
         onSave={async () => {
           const created = await send(
             `/connections${existing ? `/${existing.id}` : ''}`,
-            builtIn ? { ...form, url: '' } : form,
+            builtIn ? { ...form, url: '', ...(research && !form.asOf ? { asOf: undefined } : {}) } : form,
             existing ? 'PUT' : 'POST',
           );
           // Agents choose from discovered tools; OAuth servers discover once authorized.
@@ -494,27 +496,30 @@ export function ConnectionEditor({ value, onClose, onSaved }: Props) {
         <div className="notice">
           {mongo ? <Database size={18} /> : <Plug size={18} />}
           <span>
-            {mongo
-              ? 'A MongoDB MCP server. Its collections appear under Knowledge → Collections, and agents read and write them with its tools. Every call is pinned to one database.'
-              : 'Any remote MCP server: no auth, an API key, or OAuth. Tools are discovered after saving.'}
+            {research
+              ? 'This installation’s research data tools: list, describe, sample and query the workspace’s collections point-in-time. Every read is cut at the session as-of date (and never reaches the locked holdout).'
+              : mongo
+                ? 'A MongoDB MCP server. Its collections appear under Knowledge → Collections, and agents read and write them with its tools. Every call is pinned to one database.'
+                : 'Any remote MCP server: no auth, an API key, or OAuth. Tools are discovered after saving.'}
           </span>
         </div>
         {form.kind !== 'device' && (
           <Field label="Server type">
             <select
               aria-label="MCP server type"
-              value={mongo ? 'mongodb' : 'mcp'}
+              value={research ? 'research' : mongo ? 'mongodb' : 'mcp'}
               onChange={(e) => update('kind', e.target.value)}
             >
               <option value="mcp">MCP server</option>
               <option value="mongodb">MongoDB (MongoDB MCP server)</option>
+              <option value="research">StockHarness research data (built in)</option>
             </select>
           </Field>
         )}
         <Field label="Connection name">
           <input
             aria-label="Connection name"
-            placeholder={mongo ? 'MongoDB' : 'Finnhub, GitHub, internal tools…'}
+            placeholder={research ? 'Research data' : mongo ? 'MongoDB' : 'Finnhub, GitHub, internal tools…'}
             required
             value={form.name}
             onChange={(e) => update('name', e.target.value)}
@@ -537,6 +542,19 @@ export function ConnectionEditor({ value, onClose, onSaved }: Props) {
               {(builtInMongo || builtIn) && <option value="builtin">This installation’s MongoDB</option>}
               <option value="external">Another MongoDB MCP server</option>
             </select>
+          </Field>
+        )}
+        {research && (
+          <Field
+            label="As of (optional)"
+            hint="Fix the session date for every read. Empty: the latest trading date, capped before the holdout."
+          >
+            <input
+              aria-label="Research as of"
+              type="date"
+              value={form.asOf ?? ''}
+              onChange={(e) => update('asOf', e.target.value || undefined)}
+            />
           </Field>
         )}
         {mongo && !builtIn && (

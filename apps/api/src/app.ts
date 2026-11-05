@@ -66,6 +66,7 @@ import { catalogRouter } from './catalog.js';
 import { transformsRouter } from './transformsApi.js';
 import { pipelinesRouter } from './pipelinesApi.js';
 import { strategyRouter } from './strategyApi.js';
+import { researchMcpRouter } from './researchMcp.js';
 import { openshell } from './openshell.js';
 import { tenantView, type Tenant } from './tenant.js';
 import { openHarnessApi, openHarnessErrors } from './openharness/index.js';
@@ -105,6 +106,8 @@ app.use(
 // JSON documents inserted into MongoDB collections; the API splits them into MCP calls.
 app.use('/api/mongodb', express.json({ limit: '16mb' }));
 app.use(express.json({ limit: '1mb' }));
+// The research data MCP server (#108): bearer-token authenticated, outside the session-cookie API.
+app.use(researchMcpRouter);
 app.use('/api', (req, res, next) => {
   res.setHeader('Cache-Control', 'no-store');
   const origin = req.headers.origin;

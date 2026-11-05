@@ -86,6 +86,16 @@ function gatewayHost() {
     return undefined;
   }
 }
+/** The API itself (EXECUTOR_CALLBACK_URL): the built-in research MCP server is served there (#108). */
+function apiHost() {
+  try {
+    return config.EXECUTOR_CALLBACK_URL
+      ? new URL(config.EXECUTOR_CALLBACK_URL).hostname.toLowerCase()
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
 /** The installation's own Python executor service is trusted like the gateway. */
 function executorHost() {
   try {
@@ -117,7 +127,8 @@ export async function validateRemoteUrl(value: string) {
       .includes(host) ||
     gatewayHost() === host ||
     mongoMcpHost() === host ||
-    executorHost() === host
+    executorHost() === host ||
+    apiHost() === host
   )
     return;
   const addresses = isIP(host) ? [{ address: host }] : await lookup(host, { all: true });
@@ -140,7 +151,8 @@ export function privateHostAllowed(host: string) {
       .includes(host.toLowerCase()) ||
     gatewayHost() === host.toLowerCase() ||
     mongoMcpHost() === host.toLowerCase() ||
-    executorHost() === host.toLowerCase()
+    executorHost() === host.toLowerCase() ||
+    apiHost() === host.toLowerCase()
   );
 }
 // Validate the addresses used by the socket itself, closing the DNS-rebinding gap

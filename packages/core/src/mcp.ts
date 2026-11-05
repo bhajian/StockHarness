@@ -1,4 +1,5 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { researchMcpUrl, researchToken } from './dataTools.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
 import { auth, type OAuthClientProvider } from '@modelcontextprotocol/sdk/client/auth.js';
@@ -164,10 +165,13 @@ export async function connectMcp(connection: ConnectionRecord, signal?: AbortSig
   const builtIn = pins?.builtIn;
   if (builtIn && (!config.MONGODB_MCP_URL || !config.MONGODB_MCP_TOKEN))
     throw new HttpError(503, 'This installation has no MongoDB MCP server');
-  const url = builtIn ? config.MONGODB_MCP_URL : connection.url;
+  const research = connection.kind === 'research';
+  const url = builtIn ? config.MONGODB_MCP_URL : research ? researchMcpUrl() : connection.url;
   await validateRemoteUrl(url);
   const headers: Record<string, string> = {};
   if (builtIn) headers.Authorization = `Bearer ${config.MONGODB_MCP_TOKEN}`;
+  // The research data server (#108): a token naming this connection, signed for its workspace.
+  else if (research) headers.Authorization = `Bearer ${researchToken(connection.ownerId, connection._id)}`;
   else if (connection.authType === 'token') {
     const token = decrypt(connection.tokenEncrypted);
     if (!token) throw new HttpError(400, 'An MCP access token is required');
@@ -175,7 +179,9 @@ export async function connectMcp(connection: ConnectionRecord, signal?: AbortSig
       connection.tokenHeader.toLowerCase() === 'authorization' ? `Bearer ${token}` : token;
   }
   const authProvider =
-    !builtIn && connection.authType === 'oauth' ? new StoredOAuthProvider(connection) : undefined;
+    !builtIn && !research && connection.authType === 'oauth'
+      ? new StoredOAuthProvider(connection)
+      : undefined;
   const guardedFetch: typeof fetch = (input, init) =>
     safeFetch(input, {
       ...init,
