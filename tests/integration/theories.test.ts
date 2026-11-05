@@ -208,3 +208,40 @@ test(
     await collection<any>('theory_counters').deleteMany({ _id: O });
   },
 );
+
+test(
+  'Gates YAML: versions round-trip, locked stays locked, a clashing number is renumbered',
+  { skip: skipReason },
+  async () => {
+    const G = await import('../../packages/core/src/gates.js');
+    const A = `gates-a-${randomUUID()}`;
+    const B = `gates-b-${randomUUID()}`;
+    assert.equal((await G.activeGates(A)).version, 1);
+    const v2 = await G.createGatesVersion(A, { minSharpe: 0.7 }, 'u', 'Stricter Sharpe');
+    await G.lockGates(v2);
+    const { yaml } = await exportObjects(A, ['Gates']);
+    assert.match(
+      yaml,
+      /kind: Gates\nmetadata:\n  name: v2\n  version: "2"\nspec:\n  gates:\n    minSharpe: 0.7/,
+    );
+    assert.match(yaml, /note: Stricter Sharpe\n  locked: true/);
+    const r = await applyObjectImport(who(B), yaml, 'merge');
+    assert.equal(r.applied, true, JSON.stringify(r));
+    assert.equal((await exportObjects(B, ['Gates'])).yaml, yaml, 'identical round trip');
+    assert.ok(
+      (await G.gatesVersions().findOne({ ownerId: B, version: 2 }))!.lockedAt,
+      'locked imports read-only',
+    );
+    const other = yaml.replace('minSharpe: 0.7', 'minSharpe: 0.9');
+    const plan = await planObjectImport(who(B), other, 'merge');
+    assert.deepEqual(
+      plan.items.map((i) => `${i.name}:${i.action}`),
+      ['v1:unchanged', 'v3:create'],
+      'new thresholds under a taken number become a new version',
+    );
+    for (const o of [A, B]) {
+      await G.gatesVersions().deleteMany({ ownerId: o });
+      await collection<any>('research_settings').deleteMany({ _id: o });
+    }
+  },
+);

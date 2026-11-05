@@ -238,16 +238,40 @@ test('the full lifecycle through the tools, with both revision paths', async () 
     (await coder.call('evaluate_strategy', { theory_id: 'T-1', params })).theory.status,
     'post_review',
   );
+  // The synthetic market is too small for the default gates; a lenient version makes the verdict mechanical-pass.
+  const lenient = await ok('/research/gates', {
+    minSharpe: -10,
+    minDeflatedSharpe: 0,
+    minPositiveExcessYears: 0,
+    minTrades: 1,
+    minHoldings: 1,
+    minAlphaT: -100,
+    minHoldoutExcess: -10,
+    minHoldoutSharpe: -100,
+    note: 'test: lenient',
+  });
+  assert.equal(lenient.version, 2);
   const verdict = await judge.call('set_verdict', {
     theory_id: 'T-1',
     verdict: 'successful',
     reasoning: 'Sharpe and excess hold on both runs.',
   });
-  assert.equal(verdict.status, 'successful');
+  assert.equal(verdict.status, 'successful', JSON.stringify(verdict));
+  assert.equal(verdict.mechanical, 'successful');
+  assert.equal(verdict.gates_version, 2);
+  assert.ok(
+    verdict.gates.some((g: any) => g.gate === 'holdout_sharpe'),
+    'the one-shot holdout ran',
+  );
+  const gatesNow = await ok('/research/gates');
+  assert.ok(
+    gatesNow.versions.find((v: any) => v.version === 2).lockedAt,
+    'a verdict locks its gates version',
+  );
 
   const view = await coder.call('get_theory', { theory_id: 'T-1' });
   assert.equal(view.revisions, 2);
-  assert.equal(view.trials, 2);
+  assert.equal(view.trials, 3, 'two explorations and the holdout');
   assert.equal(view.evaluations.length, 2);
   const path = view.debate.filter((d: any) => d.type === 'transition').map((d: any) => `${d.to}:${d.by}`);
   assert.deepEqual(
@@ -303,5 +327,61 @@ test('the revision cap closes the way back; the Judge must decide', async () => 
       })
     ).status,
     'rejected_untestable',
+  );
+});
+
+test('strict gates: the Judge cannot upgrade a failing theory; forward_only theories are not backtested', async () => {
+  const { theorist, judge, coder } = clients;
+  const strict = await ok('/research/gates', { minSharpe: 50, note: 'test: unreachable Sharpe' });
+  assert.equal(strict.version, 3);
+  const t = await theorist.call('submit_theory', {
+    title: 'Twenty-day losers bounce back',
+    hypothesis: 'The worst 20-day performers mean-revert over the following two weeks in liquid names.',
+    signal_logic: 'Rank by 20-day compounded tr_1d ascending; long the bottom 3, rebalanced weekly.',
+    falsification: 'No excess over the S&P 500.',
+    reasoning: 'Short-term reversal',
+  });
+  await judge.call('review_theory', { theory_id: t.theory_id, decision: 'approve', reasoning: 'Testable' });
+  const reversal = GOOD.replace(
+    'float(np.prod(1 + g.tr_1d) - 1)',
+    '-float(np.prod(1 + g.tr_1d) - 1)',
+  ).replace('lookback_days=40', 'lookback_days=20');
+  assert.equal((await coder.call('submit_code', { theory_id: t.theory_id, code: reversal })).passed, true);
+  assert.equal(
+    (await coder.call('evaluate_strategy', { theory_id: t.theory_id, params })).theory.status,
+    'post_review',
+  );
+  const upgrade = await judge.call('set_verdict', {
+    theory_id: t.theory_id,
+    verdict: 'successful',
+    reasoning: 'I like it',
+  });
+  assert.match(upgrade.error, /never upgrade a failing one\. Gates v3: sharpe .* \(needs 50\)/);
+  const failed = await judge.call('set_verdict', {
+    theory_id: t.theory_id,
+    verdict: 'failed',
+    reasoning: 'Below the Sharpe gate',
+  });
+  assert.deepEqual([failed.status, failed.mechanical], ['failed', 'failed']);
+
+  const fwd = await theorist.call('submit_theory', {
+    title: 'Estimate revisions lead returns',
+    hypothesis:
+      'Names whose consensus EPS estimate rose most over four weeks outperform over the next quarter.',
+    signal_logic: 'Rank by the 4-week change in analyst_estimates.epsAvg; long the top 10 monthly.',
+    data_needed: ['analyst_estimates.epsAvg'],
+    falsification: 'No excess over the sector benchmark.',
+    reasoning: 'Classic revisions signal',
+  });
+  assert.equal((await ok(`/theories/${fwd.theory_id}`)).forwardOnly, true);
+  await judge.call('review_theory', {
+    theory_id: fwd.theory_id,
+    decision: 'approve',
+    reasoning: 'For paper tracking',
+  });
+  await coder.call('submit_code', { theory_id: fwd.theory_id, code: GOOD });
+  assert.match(
+    (await coder.call('evaluate_strategy', { theory_id: fwd.theory_id, params })).error,
+    /forward_only/,
   );
 });

@@ -233,6 +233,7 @@ export type ObjectKind =
   | 'Pipeline'
   | 'StrategyPlugin'
   | 'Evaluation'
+  | 'Gates'
   | 'Theory';
 export type ObjectImportPlan = {
   mode: 'merge' | 'replace';

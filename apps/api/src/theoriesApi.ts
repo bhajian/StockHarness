@@ -65,3 +65,30 @@ theoriesRouter.post('/theories/:id/transition', async (req, res) => {
     pub(await transitionTheory(req.principal!.tenantId, String(req.params.id), to, human(req), reasoning)),
   );
 });
+
+// Success gates (#113): the active version, history, and a new version (locked versions never change).
+theoriesRouter.get('/research/gates', async (req, res) => {
+  const { activeGates, gatesVersions } = await import('../../../packages/core/src/gates.js');
+  const ownerId = req.principal!.tenantId;
+  const active = await activeGates(ownerId);
+  const versions = await gatesVersions().find({ ownerId }).sort({ version: -1 }).toArray();
+  res.json({ active: active.version, versions: versions.map(({ _id, ownerId: _o, ...v }) => v) });
+});
+theoriesRouter.get('/research/gates/:version', async (req, res) => {
+  const { gatesVersions } = await import('../../../packages/core/src/gates.js');
+  const v = await gatesVersions().findOne({
+    ownerId: req.principal!.tenantId,
+    version: Number(req.params.version),
+  });
+  if (!v) throw new HttpError(404, 'No such gates version');
+  const { _id, ownerId: _o, ...rest } = v;
+  res.json(rest);
+});
+theoriesRouter.post('/research/gates', async (req, res) => {
+  adminOnly(req.principal!.user.role);
+  const { createGatesVersion } = await import('../../../packages/core/src/gates.js');
+  const { note, ...gates } = req.body ?? {};
+  const v = await createGatesVersion(req.principal!.tenantId, gates, req.principal!.user._id, note);
+  const { _id, ownerId: _o, ...rest } = v;
+  res.status(201).json(rest);
+});

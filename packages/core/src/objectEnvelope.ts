@@ -15,6 +15,7 @@ export const OBJECT_KINDS = [
   'Pipeline',
   'StrategyPlugin',
   'Evaluation',
+  'Gates',
   'Theory',
 ] as const;
 export type ObjectKind = (typeof OBJECT_KINDS)[number];
@@ -32,6 +33,7 @@ export const REF_TYPE_BY_KIND: Record<ObjectKind, string> = {
   Pipeline: 'pipelines',
   StrategyPlugin: 'strategyPlugins',
   Evaluation: 'evaluations',
+  Gates: 'gates',
   Theory: 'theories',
 };
 /** Referenceable types that are never exported (they hold secrets); they must already exist on the target. */

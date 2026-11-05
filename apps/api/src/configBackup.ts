@@ -21,6 +21,7 @@ export const BACKUP_FILES: Partial<Record<ObjectKind, string>> = {
   CatalogEntry: 'catalog.yaml',
   Pipeline: 'pipelines.yaml',
   StrategyPlugin: 'strategy-plugins.yaml',
+  Gates: 'research-gates.yaml',
 };
 /** Older export files, removed from the repo once the new files are written. */
 export const LEGACY_FILES = ['workflows.yaml', 'dataset-syncs.json'];
