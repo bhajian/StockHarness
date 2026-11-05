@@ -108,6 +108,43 @@ def build_book(scores: dict, eligible: set[str] | None, side: str, top_n: int, g
     return book
 
 
+def plan_books(plugin, meta: dict, *, source, reader, days: list[str], scope, lag: int, gross: float,
+               plugin_params: dict) -> dict:
+    """Pass 1 of the evaluator, shared with the paper broker (#124): signals on the rebalance dates -> target
+    books, each executed `lag` sessions later. Returns targets {exec day: book}, eligible_at {exec day: (signal
+    day, eligible names)}, rebalances (the record's list) and signals {exec day: {security: (score, rank, of)}}
+    for the names in the book (what an order links back to)."""
+    targets: dict[str, dict] = {}
+    eligible_at: dict[str, tuple[str, list[str]]] = {}
+    signals: dict[str, dict[str, tuple[float, int, int]]] = {}
+    rebalances = []
+    for d in rebalance_dates(days, meta["rebalance"]):
+        i = days.index(d)
+        if i + lag >= len(days):
+            break
+        uni = _universe_on(source, d, scope, days)
+        ctx = StrategyContext(d, reader, plugin_params, uni)
+        chosen = plugin.universe(ctx) if plugin.universe else uni
+        eligible = set(chosen) & set(uni) if plugin.universe and uni else set(chosen)
+        scores = plugin.signal(ctx)
+        if not isinstance(scores, dict):
+            raise EvaluationError(f"signal(ctx) returned {type(scores).__name__} on {d}; it must return a dict")
+        book = build_book(scores, eligible, meta["side"], int(meta["top_n"]), gross)
+        exec_day = days[i + lag]
+        targets[exec_day] = book
+        eligible_at[exec_day] = (d, sorted(eligible))
+        if book:
+            ranked = sorted(((s, float(v)) for s, v in scores.items() if s in eligible and isinstance(v, (int, float))
+                             and not isinstance(v, bool) and math.isfinite(v)), key=lambda x: (-x[1], x[0]))
+            pos = {s: k + 1 for k, (s, _) in enumerate(ranked)}
+            signals[exec_day] = {s: (float(scores[s]), pos.get(s, 0), len(ranked)) for s in book}
+        rebalances.append({"date": d, "exec_date": exec_day, "scored": len(scores), "eligible": len(eligible),
+                           "long": sum(1 for w in book.values() if w > 0), "short": sum(1 for w in book.values() if w < 0)})
+    if not rebalances:
+        raise EvaluationError("no rebalance date leaves room to execute before the end date")
+    return {"targets": targets, "eligible_at": eligible_at, "rebalances": rebalances, "signals": signals}
+
+
 def _round(x, nd=10):
     return None if x is None or not math.isfinite(x) else round(float(x), nd)
 
@@ -138,31 +175,9 @@ def evaluate(code: str, *, source, policies: dict, params: dict, config: dict | 
     reader = PitReader(source, policies, end=readable_end or end, start=start, scope_ids=scope, scope_tickers=tickers)
     lag = int(cfg["execution_lag_days"])
     gross = float(cfg["sizing"].get("gross_limit", 1.0))
-    plugin_params = {**plugin.params, **(params.get("plugin_params") or {})}
-
-    # Pass 1: signals on rebalance dates -> target books, executed `lag` sessions later.
-    targets: dict[str, dict] = {}
-    eligible_at: dict[str, tuple[str, list[str]]] = {}  # exec day -> (signal date, eligible names)
-    rebalances = []
-    for d in rebalance_dates(days, meta["rebalance"]):
-        i = days.index(d)
-        if i + lag >= len(days):
-            break
-        uni = _universe_on(source, d, scope, days)
-        ctx = StrategyContext(d, reader, plugin_params, uni)
-        chosen = plugin.universe(ctx) if plugin.universe else uni
-        eligible = set(chosen) & set(uni) if plugin.universe and uni else set(chosen)
-        scores = plugin.signal(ctx)
-        if not isinstance(scores, dict):
-            raise EvaluationError(f"signal(ctx) returned {type(scores).__name__} on {d}; it must return a dict")
-        book = build_book(scores, eligible, meta["side"], int(meta["top_n"]), gross)
-        exec_day = days[i + lag]
-        targets[exec_day] = book
-        eligible_at[exec_day] = (d, sorted(eligible))
-        rebalances.append({"date": d, "exec_date": exec_day, "scored": len(scores), "eligible": len(eligible),
-                           "long": sum(1 for w in book.values() if w > 0), "short": sum(1 for w in book.values() if w < 0)})
-    if not rebalances:
-        raise EvaluationError("no rebalance date leaves room to execute before the end date")
+    plan = plan_books(plugin, meta, source=source, reader=reader, days=days, scope=scope, lag=lag, gross=gross,
+                      plugin_params={**plugin.params, **(params.get("plugin_params") or {})})
+    targets, eligible_at, rebalances = plan["targets"], plan["eligible_at"], plan["rebalances"]
 
     # Pass 2: daily total returns of every name held (and, at small scale, of the whole eligible universe, for
     # the sector benchmark and the factor returns).
