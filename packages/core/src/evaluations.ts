@@ -4,7 +4,8 @@
 // workspace's global `trials` counter feeds the deflated Sharpe ratio (#106).
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import { collection } from './db.js';
+import { collection, mongo } from './db.js';
+import { workspaceDatabase } from './mongoMcp.js';
 import { runCodeJob, type CodeJobOutcome } from './codeJobs.js';
 import { HttpError, safeError } from './security.js';
 import { pitPolicies } from './pitPolicy.js';
@@ -73,6 +74,95 @@ export async function trialCount(ownerId: string) {
   return (await trials().findOne({ _id: ownerId }))?.count ?? 0;
 }
 
+// --- Holdout (#105) ------------------------------------------------------------------------------------
+/** The last N months of price history are locked; pipeline/config/backtest.yaml holdout_months. */
+export const DEFAULT_HOLDOUT_MONTHS = 18;
+type EvaluatorSettings = {
+  _id: string; // ownerId
+  holdoutMonths: number;
+  /** First locked date. Fixed once set, so data never moves out of the holdout as new days arrive. */
+  holdoutStart?: string;
+  latestAtSet?: string;
+  setAt?: Date;
+};
+const settingsCol = () => collection<EvaluatorSettings>('evaluator_settings');
+export type HoldoutRun = {
+  _id: string; // `${ownerId}:${theoryKey}:${codeHash}`
+  ownerId: string;
+  theoryKey: string;
+  codeHash: string;
+  evaluationId: string;
+  createdAt: Date;
+};
+export const holdoutRuns = () => collection<HoldoutRun>('holdout_runs');
+
+const addDaysIso = (iso: string, n: number) =>
+  new Date(Date.parse(`${iso}T00:00:00Z`) + n * 86400000).toISOString().slice(0, 10);
+/** The same day-of-month N months earlier (clamped to the month's last day). */
+export function monthsBefore(iso: string, n: number) {
+  const [y, m, d] = iso.split('-').map(Number);
+  const total = y * 12 + (m - 1) - n;
+  const ny = Math.floor(total / 12);
+  const nm = total % 12;
+  const last = new Date(Date.UTC(ny, nm + 1, 0)).getUTCDate();
+  return `${ny}-${String(nm + 1).padStart(2, '0')}-${String(Math.min(d, last)).padStart(2, '0')}`;
+}
+/** The latest prices_daily as_of_date in the workspace (the data's "today"). */
+export async function latestPriceDate(ownerId: string) {
+  const row = await mongo
+    .db(workspaceDatabase(ownerId))
+    .collection('prices_daily')
+    .find({ as_of_date: { $type: 'string' } }, { projection: { as_of_date: 1 } })
+    .sort({ as_of_date: -1 })
+    .limit(1)
+    .next();
+  return (row?.as_of_date as string | undefined) ?? undefined;
+}
+/**
+ * The holdout boundary (set on first use from the latest price date) and the last date exploration may read.
+ * Without price data there is nothing to lock yet.
+ */
+export async function evaluatorSettings(ownerId: string) {
+  let s = await settingsCol().findOne({ _id: ownerId });
+  if (!s?.holdoutStart) {
+    const latest = await latestPriceDate(ownerId);
+    const months = s?.holdoutMonths ?? DEFAULT_HOLDOUT_MONTHS;
+    if (latest) {
+      const holdoutStart = monthsBefore(latest, months);
+      await settingsCol()
+        .updateOne(
+          { _id: ownerId, holdoutStart: { $exists: false } } as Record<string, unknown>,
+          { $set: { holdoutMonths: months, holdoutStart, latestAtSet: latest, setAt: new Date() } },
+          { upsert: true },
+        )
+        .catch(() => undefined); // a concurrent first use set it already
+      s = await settingsCol().findOne({ _id: ownerId });
+    }
+  }
+  const holdoutStart = s?.holdoutStart;
+  return {
+    holdoutMonths: s?.holdoutMonths ?? DEFAULT_HOLDOUT_MONTHS,
+    holdoutStart,
+    readableEnd: holdoutStart ? addDaysIso(holdoutStart, -1) : undefined,
+    latestAtSet: s?.latestAtSet,
+    setAt: s?.setAt,
+    holdoutRuns: await holdoutRuns().countDocuments({ ownerId }),
+  };
+}
+/** Change the holdout length; refused once a holdout run used the current boundary. */
+export async function setHoldoutMonths(ownerId: string, months: number) {
+  if (!Number.isInteger(months) || months < 1 || months > 120)
+    throw new HttpError(400, 'holdoutMonths must be a whole number of months between 1 and 120');
+  if (await holdoutRuns().countDocuments({ ownerId }))
+    throw new HttpError(409, 'Holdout runs exist: the holdout boundary is locked');
+  await settingsCol().updateOne(
+    { _id: ownerId },
+    { $set: { holdoutMonths: months }, $unset: { holdoutStart: '', latestAtSet: '', setAt: '' } },
+    { upsert: true },
+  );
+  return evaluatorSettings(ownerId);
+}
+
 type Execute = typeof runCodeJob;
 /**
  * Create the evaluation record and start the job. Returns the record at once and a promise for the finished one.
@@ -83,6 +173,17 @@ export async function startEvaluation(
   opts: { userId?: string; execute?: Execute; mode?: Evaluation['mode']; readableEnd?: string } = {},
 ) {
   const body = evaluationInput.parse(input);
+  const mode = opts.mode ?? 'explore';
+  let readableEnd = opts.readableEnd;
+  if (mode === 'explore') {
+    // Exploration never reaches the locked holdout (#105): neither the dates scored nor the data read.
+    readableEnd = (await evaluatorSettings(ownerId)).readableEnd;
+    if (readableEnd && body.params.end > readableEnd)
+      throw new HttpError(
+        400,
+        `end ${body.params.end} is inside the locked holdout (from ${addDaysIso(readableEnd, 1)}); evaluate up to ${readableEnd}, or use the one-shot holdout run`,
+      );
+  }
   const { plugin, code, hash, version } = await resolveStrategyPlugin(ownerId, body.plugin, body.version);
   const now = new Date();
   const doc: Evaluation = {
@@ -93,7 +194,7 @@ export async function startEvaluation(
     pluginVersion: version,
     codeHash: hash,
     ...(body.theoryId ? { theoryId: body.theoryId } : {}),
-    mode: opts.mode ?? 'explore',
+    mode,
     params: body.params,
     trial: await nextTrial(ownerId),
     status: 'running',
@@ -101,7 +202,7 @@ export async function startEvaluation(
     ...(opts.userId ? { createdBy: opts.userId } : {}),
   };
   await evaluations().insertOne(doc);
-  const done = finish(doc, code, opts.execute ?? runCodeJob, opts.readableEnd);
+  const done = finish(doc, code, opts.execute ?? runCodeJob, readableEnd);
   return { evaluation: doc, done };
 }
 
@@ -174,4 +275,66 @@ export async function listEvaluations(ownerId: string, filter: { plugin?: string
     .sort({ createdAt: -1 })
     .limit(200)
     .toArray();
+}
+
+export const holdoutInput = z.object({
+  plugin: z.string().min(1),
+  version: z.number().int().min(1).optional(),
+  theoryId: z.string().max(200).optional(),
+  params: z
+    .object({
+      symbols: z.array(z.string().min(1).max(20)).max(2000).optional(),
+      side: z.enum(['long', 'short', 'long_short']).optional(),
+      top_n: z.number().int().min(1).max(1000).optional(),
+      rebalance: z.enum(['daily', 'weekly', 'monthly']).optional(),
+      plugin_params: z.record(z.unknown()).optional(),
+    })
+    .default({}),
+});
+/**
+ * The one-shot holdout run (#105): the holdout period, once per theory (or plugin) and code version. The
+ * claim is recorded before anything runs, so a second attempt is refused even if the first one fails.
+ */
+export async function startHoldoutEvaluation(
+  ownerId: string,
+  input: unknown,
+  opts: { userId?: string; execute?: Execute } = {},
+) {
+  const body = holdoutInput.parse(input);
+  const settings = await evaluatorSettings(ownerId);
+  const latest = await latestPriceDate(ownerId);
+  if (!settings.holdoutStart || !latest) throw new HttpError(400, 'No price data yet: there is no holdout');
+  const { plugin, hash } = await resolveStrategyPlugin(ownerId, body.plugin, body.version);
+  const theoryKey = body.theoryId ? `theory:${body.theoryId}` : `plugin:${plugin._id}`;
+  const _id = `${ownerId}:${theoryKey}:${hash}`;
+  const placeholder = `pending-${randomUUID()}`;
+  try {
+    await holdoutRuns().insertOne({
+      _id,
+      ownerId,
+      theoryKey,
+      codeHash: hash,
+      evaluationId: placeholder,
+      createdAt: new Date(),
+    });
+  } catch (e) {
+    if ((e as { code?: number }).code !== 11000) throw e;
+    const prior = await holdoutRuns().findOne({ _id });
+    throw new HttpError(
+      409,
+      `The holdout was already used for this ${body.theoryId ? 'theory' : 'plugin'} and code version (evaluation ${prior?.evaluationId}); it is one shot`,
+    );
+  }
+  const started = await startEvaluation(
+    ownerId,
+    {
+      plugin: body.plugin,
+      version: body.version,
+      theoryId: body.theoryId,
+      params: { ...body.params, start: settings.holdoutStart, end: latest },
+    },
+    { ...opts, mode: 'holdout', readableEnd: latest },
+  );
+  await holdoutRuns().updateOne({ _id }, { $set: { evaluationId: started.evaluation._id } });
+  return started;
 }

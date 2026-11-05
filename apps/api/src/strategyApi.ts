@@ -9,9 +9,12 @@ import {
   updateStrategyPlugin,
 } from '../../../packages/core/src/strategyPlugins.js';
 import {
+  evaluatorSettings,
   getEvaluation,
   listEvaluations,
+  setHoldoutMonths,
   startEvaluation,
+  startHoldoutEvaluation,
   trialCount,
 } from '../../../packages/core/src/evaluations.js';
 
@@ -68,6 +71,23 @@ strategyRouter.post('/evaluations', async (req, res) => {
   });
   done.catch(() => undefined); // failures are recorded on the evaluation
   res.status(202).json(pub(evaluation));
+});
+// The one-shot holdout run (#105): 409 when this theory/plugin + code version already used it.
+strategyRouter.post('/evaluations/holdout', async (req, res) => {
+  adminOnly(req.principal!.user.role);
+  const { evaluation, done } = await startHoldoutEvaluation(req.principal!.tenantId, req.body, {
+    userId: req.principal!.user._id,
+  });
+  done.catch(() => undefined);
+  res.status(202).json(pub(evaluation));
+});
+// Holdout boundary and the last date exploration may read.
+strategyRouter.get('/evaluator/settings', async (req, res) => {
+  res.json(await evaluatorSettings(req.principal!.tenantId));
+});
+strategyRouter.put('/evaluator/settings', async (req, res) => {
+  adminOnly(req.principal!.user.role);
+  res.json(await setHoldoutMonths(req.principal!.tenantId, Number(req.body?.holdoutMonths)));
 });
 strategyRouter.get('/evaluations', async (req, res) => {
   const ownerId = req.principal!.tenantId;

@@ -186,8 +186,10 @@ def evaluate(code: str, *, source, policies: dict, params: dict, config: dict | 
     out_dates, out_ret, out_spx, out_gross, out_turn = [], [], [], [], []
     costs_paid = borrow_paid = 0.0
     trades = 0
+    extreme = []  # held names with a daily return beyond ±50% (data problems or real events worth a look)
     for d in days[days.index(first_exec):]:
         day = rets.get(d, {})
+        extreme += [(d, s, day[s]) for s in w if s in day and abs(day[s]) > 0.5]
         port = 0.0
         moved = {}
         for s, wt in w.items():
@@ -246,12 +248,30 @@ def evaluate(code: str, *, source, policies: dict, params: dict, config: dict | 
             "returns": [_round(x) for x in out_ret], "equity": nav_s, "spx_equity": bnav_s,
             "spx_returns": [_round(x) if isinstance(x, (int, float)) else None for x in out_spx],
             "gross": [_round(x, 6) for x in out_gross], "turnover": [_round(x, 6) for x in out_turn]}},
+        "folds": [{k: _round(v) if isinstance(v, float) else v for k, v in f.items()}
+                  for f in metrics.folds(out_dates, out_ret, int(cfg["walk_forward"].get("min_days", 20)),
+                                         int(cfg["trading_days_per_year"]))],
+        "warnings": _warnings(rebalances, extreme),
         "rebalances": rebalances,
         "holdings": {"date": max(targets), "weights": {s: _round(v, 8) for s, v in sorted(targets[max(targets)].items())}},
         "reader": dict(reader.stats),
     }
     record["record_hash"] = record_hash(record)
     return record
+
+
+def _warnings(rebalances: list[dict], extreme: list[tuple]) -> list[dict]:
+    """Structured warnings (codes and counts, no prose the record depends on)."""
+    out = []
+    empty = [r["date"] for r in rebalances if not r["long"] and not r["short"]]
+    if empty:
+        out.append({"code": "empty_book", "count": len(empty), "of": len(rebalances), "first": empty[0],
+                    "hint": "signal(ctx) returned no usable scores for eligible names (check column names and NaNs)"})
+    if extreme:
+        out.append({"code": "extreme_returns", "count": len(extreme),
+                    "examples": [{"date": d, "security_id": s, "return": _round(r, 6)} for d, s, r in extreme[:5]],
+                    "hint": "held names moved more than 50% in a day; check prices_daily dq_flags"})
+    return out
 
 
 def _snapshot(source, end: str) -> dict:

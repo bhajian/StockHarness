@@ -71,3 +71,17 @@ version, params, costs, data snapshot, evaluator version, summary numbers, serie
 inputs give an identical record. Every evaluation increments the workspace's global trial count.
 
 Run one with `POST /api/evaluations` `{ plugin, version?, params }` (202; poll `GET /api/evaluations/:id`).
+
+## Walk-forward folds and the locked holdout (#105)
+
+- **Folds:** every record has `folds`, the metrics of each calendar year of the evaluation window scored on its
+  own returns (`walk_forward` in `backtest.yaml`; short years are marked `partial`). Plugins are rules, not fitted
+  models, so a fold is an out-of-sample year rather than a refit.
+- **Holdout:** the last `holdout_months` (18) of price history are locked. The boundary is set per workspace on
+  first use from the latest `prices_daily` date and then stays fixed (`GET /api/evaluator/settings`), so data
+  never drifts out of the holdout. Exploration evaluations must end before it, and their reads are cut at the
+  day before it (fundamentals and every other collection included).
+- **One shot:** `POST /api/evaluations/holdout { plugin, version?, theoryId? }` scores the holdout period once per
+  theory (or plugin) and code version. The claim is recorded before the run starts, so a second attempt is refused
+  (409) even if the first one failed. A new code version is a new shot. The holdout length can change only until
+  the first holdout run.

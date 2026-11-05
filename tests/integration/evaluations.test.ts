@@ -126,6 +126,10 @@ before(async () => {
     DAYS.map((d) => ({ date: d, is_trading_day: true })),
   );
   await ok('/catalog/refresh', {});
+  // A short holdout for the 160-day synthetic history: locked from 2024-07-09 (last day 2024-08-09).
+  const settings = await ok('/evaluator/settings', { holdoutMonths: 1 }, 'PUT');
+  assert.equal(settings.holdoutStart, '2024-07-09');
+  assert.equal(settings.readableEnd, '2024-07-08');
   await ok('/strategy-plugins', { name: 'momentum_40d', code: MOMENTUM, description: '40-day momentum' });
 });
 
@@ -134,7 +138,7 @@ test('an evaluation runs in the executor and is reproducible', async () => {
     plugin: 'momentum_40d',
     params: {
       start: DAYS[45],
-      end: DAYS[159],
+      end: DAYS[130],
       symbols: ['T1', 'T2', 'SEC_000003', 'T4', 'T5', 'T6', 'T7', 'T8', 'T9', 'T10', 'T11'],
     },
   };
@@ -145,7 +149,7 @@ test('an evaluation runs in the executor and is reproducible', async () => {
   assert.equal(r.plugin.name, 'momentum_40d');
   assert.match(r.plugin.hash, /^sha256:[0-9a-f]{64}$/);
   assert.equal(r.period.first_trade, DAYS[46], 'executed at the next close');
-  assert.ok(r.summary.rebalances >= 20);
+  assert.ok(r.summary.rebalances >= 15, String(r.summary.rebalances));
   assert.ok(Number.isFinite(r.summary.sharpe));
   assert.ok(Object.keys(r.holdings.weights).length === 3);
   assert.ok(!('SEC_000000' in r.holdings.weights), 'scope applied');
@@ -169,5 +173,40 @@ test('a contract violation fails with its line', async () => {
   assert.ok(
     e.error.problems.some((p: string) => p.startsWith('line 2: eval')),
     JSON.stringify(e.error),
+  );
+});
+
+test('exploration stops before the holdout; the holdout is one shot', async () => {
+  const inside = await request('/evaluations', {
+    plugin: 'momentum_40d',
+    params: { start: DAYS[45], end: DAYS[150] },
+  });
+  assert.equal(inside.status, 400);
+  assert.match(inside.data.error, /inside the locked holdout \(from 2024-07-09\)/);
+  const h = await ok('/evaluations/holdout', { plugin: 'momentum_40d', theoryId: 'T-1' });
+  assert.equal(h.mode, 'holdout');
+  assert.deepEqual([h.params.start, h.params.end], ['2024-07-09', DAYS[159]]);
+  let done = h;
+  for (let i = 0; i < 240 && done.status === 'running'; i++) {
+    await new Promise((r) => setTimeout(r, 1000));
+    done = await ok(`/evaluations/${h.id}`);
+  }
+  assert.equal(done.status, 'succeeded', JSON.stringify(done.error));
+  assert.equal(done.record.period.readable_end, DAYS[159]);
+  const again = await request('/evaluations/holdout', { plugin: 'momentum_40d', theoryId: 'T-1' });
+  assert.equal(again.status, 409);
+  assert.match(again.data.error, /already used .* one shot/);
+  // A new code version is a new shot; the boundary can no longer move.
+  const plugin = (await ok('/strategy-plugins')).find((p: any) => p.name === 'momentum_40d');
+  await ok(`/strategy-plugins/${plugin.id}`, { code: MOMENTUM.replace('"top_n": 3', '"top_n": 4') }, 'PUT');
+  assert.equal(
+    (await request('/evaluations/holdout', { plugin: 'momentum_40d', theoryId: 'T-1' })).status,
+    202,
+  );
+  assert.equal((await request('/evaluator/settings', { holdoutMonths: 3 }, 'PUT')).status, 409);
+  const folds = done.record.folds;
+  assert.deepEqual(
+    folds.map((f: any) => f.fold),
+    ['2024'],
   );
 });

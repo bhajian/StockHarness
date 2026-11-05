@@ -11,7 +11,13 @@ delisting_return: -0.30 # applied when a position delists for bankruptcy
 capacity_aum: 100000000 # assumed AUM for capacity estimates
 
 # Holdout lock (spec §5.3). Rules-mode backtests may not touch it.
-holdout_months: 24
+holdout_months: 18 # the last N months of price history; one shot per theory + code version (#105).
+# The API applies it per workspace (evaluator settings) and keeps the boundary fixed once set.
+
+# Walk-forward folds (#105): results are recorded per calendar year of the evaluation window.
+walk_forward:
+  fold: year
+  min_days: 20 # shorter (partial) years are reported but marked partial
 
 # Position sizing and portfolio limits (paper broker, docs/replay.md §4b).
 sizing:
