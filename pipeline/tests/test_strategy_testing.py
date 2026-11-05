@@ -60,6 +60,14 @@ class TestStrategy(unittest.TestCase):
         self.assertFalse(t["ok"])
         self.assertEqual({w["code"] for w in t["warnings"]}, {"empty_signal", "lookahead_blocked"})
 
+    def test_a_missing_requested_column_is_named(self):
+        r, _ = run(GOOD.replace('"tr_1d"]', '"tr_1dd"]').replace("g.tr_1d", "g.tr_1dd"))
+        t = r["test"]
+        self.assertFalse(t["ok"])
+        w = next(w for w in t["warnings"] if w["code"] == "missing_columns")
+        self.assertEqual(w["columns"], {"prices_daily": ["tr_1dd"]})
+        self.assertIn("tr_1d", t["columns_seen"]["prices_daily"])
+
     def test_syntax_error_names_its_line(self):
         r, _ = run(SYNTAX)
         e = r["error"]

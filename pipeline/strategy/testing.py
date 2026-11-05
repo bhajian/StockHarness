@@ -88,10 +88,14 @@ def test_plugin(code: str, *, source, policies: dict, params: dict | None = None
         warnings.append({"code": "unknown_names", "hint": "scores must be keyed by security_id of names in ctx.universe_ids"})
     if any(p["usable"] and p["distinct_scores"] == 1 for p in per_date):
         warnings.append({"code": "constant_scores", "hint": "every name gets the same score, so ranking is arbitrary"})
+    if reader.missing_columns:
+        warnings.append({"code": "missing_columns", "columns": reader.missing_columns,
+                         "hint": "these requested columns are not in the collection (they come back empty); "
+                                 "columns_seen lists the real ones"})
     if reader.stats["lookahead_attempts"]:
         warnings.append({"code": "lookahead_blocked", "count": reader.stats["lookahead_attempts"],
                          "hint": "a read asked for dates after ctx.date; it returned nothing. Use data known by ctx.date"})
-    ok = not any(w["code"] in ("empty_signal", "lookahead_blocked", "unknown_names") for w in warnings)
+    ok = not any(w["code"] in ("empty_signal", "lookahead_blocked", "unknown_names", "missing_columns") for w in warnings)
     return {"ok": ok, "dates": per_date, "warnings": warnings, "symbols": len(scope), "meta": plugin.META,
             "reads": {"count": reader.stats["reads"], "rows": reader.stats["rows"]},
             "columns_seen": reader.columns_seen}

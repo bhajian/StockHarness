@@ -65,11 +65,15 @@ class MemorySource:
         out = []
         for r in self.collections.get(collection, []):
             if matches(r, flt):
-                out.append({k: r.get(k) for k in fields} if fields else dict(r))
+                out.append({k: r[k] for k in fields if k in r} if fields else dict(r))  # like a MongoDB projection
         return out
 
     def has_field(self, collection: str, field: str) -> bool:
         return any(field in r for r in self.collections.get(collection, [])[:50])
+
+    def sample_fields(self, collection: str) -> list[str]:
+        rows = self.collections.get(collection, [])
+        return sorted(rows[0]) if rows else []
 
 
 class MongoSource:
@@ -81,6 +85,10 @@ class MongoSource:
         proj = {f: 1 for f in fields} if fields else {}
         proj["_id"] = 0
         return list(self._db[collection].find(flt or {}, proj))
+
+    def sample_fields(self, collection: str) -> list[str]:
+        row = self._db[collection].find_one({}, {"_id": 0})
+        return sorted(row) if row else []
 
     def has_field(self, collection: str, field: str) -> bool:
         key = (collection, field)

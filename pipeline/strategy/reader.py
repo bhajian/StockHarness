@@ -67,6 +67,7 @@ class PitReader:
         self._cache: dict[str, tuple] = {}
         self.stats = {"reads": 0, "rows": 0, "lookahead_attempts": 0, "refused": 0}
         self.columns_seen: dict[str, list[str]] = {}  # collection -> columns its rows have (for clear errors)
+        self.missing_columns: dict[str, list[str]] = {}  # collection -> requested columns no row has (#251)
 
     def policy(self, collection: str) -> dict:
         p = self.policies.get(collection)
@@ -113,6 +114,14 @@ class PitReader:
                     kept.append(r)
             rows = sorted(kept, key=lambda r: r["as_of_date"])
         frame = pd.DataFrame(rows)
+        if columns and rows:
+            present = set().union(*(r.keys() for r in rows))
+            missing = [c for c in columns if c not in present]
+            if missing:
+                known = sorted(set(self.source.sample_fields(collection)) | present)
+                self.missing_columns[collection] = sorted(set(self.missing_columns.get(collection, [])) | set(missing))
+                if not self.columns_seen.get(collection) or len(known) > len(self.columns_seen[collection]):
+                    self.columns_seen[collection] = known
         if columns:
             want = list(dict.fromkeys([*columns, *(["as_of_date"] if rule else [])]))
             frame = frame.reindex(columns=want)
