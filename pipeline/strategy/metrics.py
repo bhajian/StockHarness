@@ -60,3 +60,18 @@ def summary(returns, periods: int = DAYS_PER_YEAR) -> dict:
         "max_drawdown": max_drawdown(returns),
         "days": int(len(_arr(returns))),
     }
+
+
+def folds(dates: list[str], returns, min_days: int = 20, periods: int = DAYS_PER_YEAR) -> list[dict]:
+    """Walk-forward results per calendar year (#105): each year is scored on its own returns only."""
+    by_year: dict[str, list[int]] = {}
+    for i, d in enumerate(dates):
+        by_year.setdefault(d[:4], []).append(i)
+    out = []
+    r = list(returns)
+    for year in sorted(by_year):
+        idx = by_year[year]
+        seg = [r[i] for i in idx]
+        out.append({"fold": year, "start": dates[idx[0]], "end": dates[idx[-1]], "partial": len(idx) < min_days,
+                    **summary(seg, periods)})
+    return out

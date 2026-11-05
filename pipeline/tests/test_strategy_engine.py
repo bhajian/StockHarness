@@ -88,5 +88,29 @@ class Engine(unittest.TestCase):
             run(MOMENTUM, src, days[20], days[10])
 
 
+class WalkForward(unittest.TestCase):
+    def test_folds_per_calendar_year_and_warnings(self):
+        src, days = synthetic.market(n_sec=20, n_days=600, seed=5, start="2021-06-01")
+        r = run(MOMENTUM, src, days[70], days[-1])
+        folds = r["folds"]
+        self.assertEqual([f["fold"] for f in folds], ["2021", "2022", "2023"])
+        self.assertEqual(sum(f["days"] for f in folds), r["summary"]["days"])
+        total = 1.0
+        for f in folds:
+            total *= 1 + f["total_return"]
+        self.assertAlmostEqual(total - 1, r["summary"]["total_return"], places=6)
+        self.assertEqual(r["warnings"], [])
+        empty = MOMENTUM.replace("return {s:", 'return {"NOT_A_SECURITY": 1.0} or {s:')
+        w = run(empty, src, days[70], days[200])["warnings"]
+        self.assertEqual(w[0]["code"], "empty_book")
+
+    def test_extreme_returns_are_flagged(self):
+        days = synthetic.weekdays("2020-01-01", 30)
+        src, _ = synthetic.market(n_sec=4, n_days=30, overrides={("SEC_000000", days[5]): 9.0})
+        w = run(constant(), src, days[0], days[9])["warnings"]
+        self.assertEqual(w[0]["code"], "extreme_returns")
+        self.assertEqual(w[0]["examples"][0], {"date": days[5], "security_id": "SEC_000000", "return": 9.0})
+
+
 if __name__ == "__main__":
     unittest.main()
