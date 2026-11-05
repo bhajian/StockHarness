@@ -117,5 +117,19 @@ class TestBuildSecurities(unittest.TestCase):
 class TestDelistedExchange(unittest.TestCase):
     def test_delisted_names_get_their_exchange(self):
         [doc] = s.build_securities_docs([], [], [{"symbol": "DDD", "companyName": "Delta", "exchange": "NYSE", "delistedDate": "2020-05-01"}], [], {"DDD": "2018-01-02"}, "2026-11-04")
-        self.assertEqual(doc["exchange_history"], [{"value": "NYSE", "valid_from": "2018-01-02", "valid_to": None}])
+        self.assertEqual(doc["exchange_history"], [{"value": "NYSE", "valid_from": "2018-01-02", "valid_to": None, "backfilled": True}])
         self.assertFalse(doc["is_active"])
+
+
+class TestExchangeRepair(unittest.TestCase):
+    def test_an_exchange_from_the_first_run_is_backfilled(self):
+        old = {
+            "security_id": "SEC_000009", "name": "Alpha Inc",
+            "identifiers": [{"type": "cik", "value": "1", "valid_from": "2016-01-04", "valid_to": None},
+                            {"type": "ticker", "value": "AAA", "valid_from": "2016-01-04", "valid_to": None}],
+            "exchange_history": [{"value": "NASDAQ", "valid_from": "2026-10-23", "valid_to": None}],
+        }
+        [doc] = s.build_securities_docs([{"symbol": "AAA", "companyName": "Alpha Inc", "cik": "1", "exchange": "NASDAQ"}], [], [], [old], {"AAA": "2016-01-04"}, "2026-11-05")
+        self.assertEqual(doc["exchange_history"], [{"value": "NASDAQ", "valid_from": "2016-01-04", "valid_to": None, "backfilled": True}])
+        self.assertTrue(doc["exchange_is_backfilled"])
+        self.assertEqual(doc["exchange_observed_from"], "2026-10-23")
