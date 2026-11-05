@@ -183,3 +183,17 @@ Bindings live on the agent's connection binding, so they are part of the run sna
 YAML (connections by name). Without bindings, a MongoDB connection keeps its database-wide grant, and the canvas
 warns about it. The **Data chatbot** template binds `prices_daily`, `features_daily`, `securities` and `signals`
 read-only (200 rows a read).
+
+## Sanity suite: the M3 exit gate (#107)
+
+`sh scripts/check-evaluator.sh` runs the evaluator's unit tests and `python3 -m pipeline.strategy.sanity`
+(`pipeline/strategy/sanity.py`):
+
+1. **Random signal:** a random long-short book over 20 seeds has a mean Sharpe within ±0.5, and no seed beyond ±2.5.
+2. **12-1 momentum shows the 2022 drawdown** (real data): `MOMENTUM_12_1` evaluated over 2021-07-01 → 2023-06-30
+   must lose money in 2022 with a drawdown of at least 10% (`sanity.momentum_2022(record)`).
+3. **Lookahead canary:** a plugin that asks for tomorrow's returns scores about 0 behind the reader. With the cut
+   switched off the same plugin scores a Sharpe far above 5, so the check has teeth.
+4. **Reproducibility:** re-running gives an identical record.
+
+Hosted CI stays off unless enabled (#33); run it locally.
