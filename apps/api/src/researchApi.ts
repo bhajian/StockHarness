@@ -32,7 +32,9 @@ researchRouter.put('/research/settings', async (req, res) => {
   const ownerId = req.principal!.tenantId;
   const next = await updateResearchSettings(ownerId, req.body ?? {});
   // Models, skills, the Theorists per cycle and the schedule live in the harness: rebuild it when it exists.
-  const touched = ['agents', 'schedule', 'theoristsPerCycle'].some((k) => k in (req.body ?? {}));
+  const touched = ['agents', 'schedule', 'theoristsPerCycle', 'agentEffort', 'agentMaxTurns'].some(
+    (k) => k in (req.body ?? {}),
+  );
   if (touched && (await researchHarness(ownerId)))
     await installResearchLoop(req.principal! as unknown as ResourcePrincipal);
   res.json(next);
@@ -127,6 +129,8 @@ export async function installResearchLoop(
         .map((r) => [r, s.agents[r]!.skillIds!]),
     ),
     theorists: o.theorists ?? s.theoristsPerCycle,
+    effort: s.agentEffort,
+    maxTurns: s.agentMaxTurns,
     scheduleMinutes: schedule,
   });
   const existing = await collection<any>('workflows').findOne({ ownerId, name }, { projection: { _id: 1 } });

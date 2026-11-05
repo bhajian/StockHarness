@@ -404,8 +404,34 @@ function SettingsDrawer({
             </select>
           </Field>
         ))}
+        <div className="two-columns">
+          <Field label="Agent effort">
+            <select
+              aria-label="Agent effort"
+              value={s.agentEffort}
+              onChange={(e) => setS({ ...s, agentEffort: e.target.value })}
+            >
+              {['light', 'medium', 'high', 'extra-high', 'max'].map((v) => (
+                <option key={v} value={v}>
+                  {v}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Turns per agent">
+            <input
+              aria-label="Turns per agent"
+              type="number"
+              min={3}
+              max={200}
+              value={s.agentMaxTurns}
+              onChange={(e) => setS({ ...s, agentMaxTurns: Number(e.target.value) })}
+            />
+          </Field>
+        </div>
         <p className="muted-line">
-          Skills per role default to the seed skills. Agents have no temperature setting here.
+          Skills per role default to the seed skills. Agents have no temperature setting here. For a quick
+          development check: 1 Theorist, medium effort, about 12 turns, about 10 symbols over 1 year.
         </p>
         <Field label="Focus">
           <textarea

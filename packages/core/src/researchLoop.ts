@@ -23,6 +23,9 @@ export const researchSettingsSchema = z.object({
   /** The evaluation scope the Coder uses: symbols and how many years before the holdout. */
   evaluationSymbols: z.array(z.string().min(1).max(20)).max(2000).default(DEFAULT_SYMBOLS),
   evaluationYears: z.number().int().min(1).max(15).default(3),
+  /** Effort and turns per research agent (#266): the defaults suit real runs; a dev smoke test uses medium / ~12. */
+  agentEffort: z.enum(['light', 'medium', 'high', 'extra-high', 'max']).default('high'),
+  agentMaxTurns: z.number().int().min(3).max(200).default(30),
   /** Paused: no scheduled cycles, and agents of a running cycle are told to stop (#116). */
   paused: z.boolean().default(false),
   /** Alerts only: never stops the loop. */
@@ -222,6 +225,8 @@ export type ResearchLoopInput = {
   /** Skills per role chosen in the research settings (replace the seed skills for that role). */
   roleSkills?: Partial<Record<ResearchRole, string[]>>;
   theorists: number;
+  effort?: 'light' | 'medium' | 'high' | 'extra-high' | 'max';
+  maxTurns?: number;
   scheduleMinutes?: number;
 };
 /** The research loop harness (ids resolved). */
@@ -244,12 +249,12 @@ export function makeResearchLoop(o: ResearchLoopInput): Workflow {
       systemPrompt,
       connections: [{ connectionId, tools }],
       skillIds,
-      maxTurns: 30,
+      maxTurns: o.maxTurns ?? 30,
       timeoutSeconds: 1800,
       // No token budget (#263): the research loop is bounded by the per-theory caps the tools enforce, and watched
       // by the Research Lab's budget alerts; the effort preset's budget stopped Theorists before they submitted.
       tokenBudget: 0,
-      effort: 'high',
+      effort: o.effort ?? 'high',
       ...extra,
     });
   const nodes: WorkflowNode[] = [
