@@ -159,6 +159,8 @@ export async function researchBrief(
       status: t.status,
       family: t.family,
     })),
+    // The Coder's real queue size, whatever the role asking (#273).
+    coder_queue: await theories().countDocuments({ ownerId, status: { $in: QUEUES.coder } }),
     evaluation_params: await evaluationParams(ownerId, s),
     gates: { version: gates.version, ...gates.gates },
   };
@@ -207,10 +209,10 @@ const PROMPTS = {
   judge_pre:
     'You are the Judge (pre-code review) in the StockHarness research loop. Follow the judge-checklist skill.\n' +
     'Call get_research_brief, then for every theory in your queue with status pre_review: get_theory, check testability, lookahead, novelty, plausibility and data, and call review_theory (approve, revise with exactly what to change, or reject). Leave post_review theories for the post-result review.\n' +
-    `End your reply with ${LOOP_DONE} if, after your reviews, no theory is approved_for_code, revise_code or code_error (nothing for the Coder).`,
+    'End with a one-line summary of your decisions.',
   coder:
     'You are the Coder in the StockHarness research loop. Follow the write-a-strategy-plugin skill.\n' +
-    'Call get_research_brief. For each theory in your queue (oldest first): get_theory, check the fields with describe_collection, write the plugin, and call submit_code(theory_id, code). Read the error or warnings and fix only what they point at, calling submit_code again until it passes. Then call evaluate_strategy(theory_id, params) once, with the evaluation_params from the brief.\n' +
+    'Call get_research_brief. Your queue holds every theory that needs code: approved_for_code, revise_code, code_error, and coding (one an earlier cycle left unfinished). If it is empty, reply DONE at once. For each theory in your queue (oldest first): get_theory, check the fields with describe_collection, write the plugin, and call submit_code(theory_id, code). Read the error or warnings and fix only what they point at, calling submit_code again until it passes. Then call evaluate_strategy(theory_id, params) once, with the evaluation_params from the brief.\n' +
     'Never tune the code to the metrics. When no theory is left in your queue, reply DONE.',
   judge_post:
     'You are the Judge (post-result review) in the StockHarness research loop. Follow the judge-checklist skill.\n' +
@@ -303,19 +305,10 @@ export function makeResearchLoop(o: ResearchLoopInput): Workflow {
         skillsFor('judge', o.skills.judge, o.skills.catalog, o.skills.library),
       ),
       prompt: 'Review the theories submitted this cycle.\n\nTheorists said:\n{{last}}',
-      next: 'anything_to_code',
+      // The Coder always runs: with an empty queue it replies DONE at once (#273), so no theory left in coding
+      // is skipped because of how the Judge worded its reply.
+      next: 'coder',
       position: { x: 520, y: 200 },
-    } as WorkflowNode,
-    {
-      id: 'anything_to_code',
-      name: 'Anything to code?',
-      type: 'condition',
-      value: '{{last}}',
-      operator: 'contains',
-      compare: LOOP_DONE,
-      onTrue: 'judge_post',
-      onFalse: 'coder',
-      position: { x: 740, y: 200 },
     } as WorkflowNode,
     {
       id: 'coder',

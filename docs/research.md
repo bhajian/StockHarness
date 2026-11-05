@@ -128,9 +128,11 @@ the **Research loop** harness. It creates the three role connections (`Research 
 `Research — Coder`) if missing, and attaches the seed skills by name.
 
 ```
-Start → Theorists (Parallel, N agent cards) → Judge (pre-code) → Anything to code? ─┬→ Coder (loop) → Judge (post-result) → Finish
-                                                                                    └→ Judge (post-result)  (NOTHING_TO_CODE)
+Start → Theorists (Parallel, N agent cards) → Judge (pre-code) → Coder (loop) → Judge (post-result) → Finish
 ```
+
+The Coder always runs: with an empty queue (no theory approved, sent back, failing or left in `coding`) it replies
+at once, so no theory is skipped because of how the Judge worded its reply (#273).
 
 - **Agents:** each agent works its role's queue and starts with `get_research_brief`. The brief has its queue, the
   focus, the latest human steering notes, recent theories (to stay novel), the evaluation window (`start`,
