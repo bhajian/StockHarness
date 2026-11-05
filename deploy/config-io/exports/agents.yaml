@@ -1,2 +1,36 @@
 # StockHarness objects (apiVersion stockharness/v1). Import from Settings -> Configuration or the
 # object list pages. References are by name; secrets and data rows are never included.
+apiVersion: stockharness/v1
+kind: Agent
+metadata:
+  name: M3 Coder check
+spec:
+  description: ""
+  systemPrompt: You write and fix strategy plugins with the research data tools. Test with test_strategy (pass plugin=<name> every time), read the error and line numbers, fix only what it points at, and repeat until it passes. Then evaluate once with evaluate_strategy and report the evaluation id, Sharpe and CAGR.
+  providerId:
+    $ref:
+      type: providers
+      name: Gemini-flash-3-8
+  connections:
+    - connectionId:
+        $ref:
+          type: connections
+          name: Research data
+      tools:
+        - describe_collection
+        - test_strategy
+        - evaluate_strategy
+        - get_evaluation
+  knowledgeBaseIds: []
+  skillIds: []
+  contextCompaction: true
+  maxTurns: 16
+  timeoutSeconds: 300
+  pattern: react
+  patternConfig:
+    reflections: 1
+    iterations: 3
+    doneMarker: DONE
+    maxPlanSteps: 5
+  effort: medium
+  enabled: true

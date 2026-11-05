@@ -490,3 +490,4 @@ spec:
     5. **Then evaluate once.** When `test_strategy` passes, call `evaluate_strategy(plugin, params={start, end})`.
        Every evaluation is a trial that lowers the deflated Sharpe of every idea, so do not tune the code to
        the metrics. A failing gate is not a bug: it goes to the Judge, not back into the fix loop.
+  enabled: true

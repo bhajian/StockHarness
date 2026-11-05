@@ -1,2 +1,390 @@
 # StockHarness objects (apiVersion stockharness/v1). Import from Settings -> Configuration or the
 # object list pages. References are by name; secrets and data rows are never included.
+apiVersion: stockharness/v1
+kind: CatalogEntry
+metadata:
+  name: features_daily
+spec:
+  fields:
+    accruals:
+      description: "[quality] (TTM net income − TTM operating cash flow) / total assets"
+      unit: ratio
+    adv_20d:
+      description: "[liquidity] 20-day median dollar volume (universe_daily)"
+      unit: USD
+    book_to_market:
+      description: "[valuation] Stockholders' equity / market cap"
+      unit: ratio
+    days_since_filing:
+      description: "[events] Days since the latest statement became usable (as_of_date)"
+      unit: days
+    debt_to_equity:
+      description: "[quality] Total debt / stockholders' equity"
+      unit: ratio
+    dist_52w_high:
+      description: "[price] Adjusted close / 252-day high − 1 (0 at a new high)"
+      unit: ratio
+    earnings_growth_yoy:
+      description: "[growth] TTM net income growth versus a year earlier (on |prior|), as known then"
+      unit: ratio
+    earnings_yield:
+      description: "[valuation] TTM net income / market cap"
+      unit: ratio
+    fcf_yield:
+      description: "[valuation] TTM free cash flow / market cap"
+      unit: ratio
+    gross_margin:
+      description: "[quality] TTM gross profit / TTM revenue"
+      unit: ratio
+    in_universe:
+      description: In universe_daily on this date
+    market_cap:
+      description: Market cap on this date (universe_daily)
+      unit: USD
+    mom_12_1:
+      description: "[price] Return from 252 to 21 trading days ago (skips the last month)"
+      unit: ratio
+    mom_126d:
+      description: "[price] 126-trading-day return"
+      unit: ratio
+    mom_21d:
+      description: "[price] 21-trading-day return of the adjusted close"
+      unit: ratio
+    mom_252d:
+      description: "[price] 252-trading-day return"
+      unit: ratio
+    mom_63d:
+      description: "[price] 63-trading-day return"
+      unit: ratio
+    operating_margin:
+      description: "[quality] TTM operating income / TTM revenue"
+      unit: ratio
+    ret_1d:
+      description: "[price] 1-day total split-adjusted price return"
+      unit: ratio
+    revenue_growth_yoy:
+      description: "[growth] TTM revenue / TTM revenue a year earlier − 1, as known then"
+      unit: ratio
+    roe:
+      description: "[quality] TTM net income / stockholders' equity"
+      unit: ratio
+    sales_yield:
+      description: "[valuation] TTM revenue / market cap"
+      unit: ratio
+    sector:
+      description: GICS-style sector as of the date (securities.sector_history)
+    vol_21d:
+      description: "[price] Annualized volatility of daily returns over 21 days"
+      unit: ratio
+    vol_63d:
+      description: "[price] Annualized volatility of daily returns over 63 days"
+      unit: ratio
+---
+apiVersion: stockharness/v1
+kind: CatalogEntry
+metadata:
+  name: features_ranked
+spec:
+  fields:
+    accruals_pct:
+      description: Percentile of accruals among members on this date (0..1)
+    accruals_z:
+      description: Cross-sectional z-score of accruals (members on this date, clipped at ±3)
+    adv_20d_pct:
+      description: Percentile of adv_20d among members on this date (0..1)
+    adv_20d_z:
+      description: Cross-sectional z-score of adv_20d (members on this date, clipped at ±3)
+    book_to_market_pct:
+      description: Percentile of book_to_market among members on this date (0..1)
+    book_to_market_z:
+      description: Cross-sectional z-score of book_to_market (members on this date, clipped at ±3)
+    composite_pct:
+      description: Percentile of the mean of the composite scores (averages 0.5 per date)
+    composite_sector_pct:
+      description: composite_pct within the sector
+    days_since_filing_pct:
+      description: Percentile of days_since_filing among members on this date (0..1)
+    days_since_filing_z:
+      description: Cross-sectional z-score of days_since_filing (members on this date, clipped at ±3)
+    debt_to_equity_pct:
+      description: Percentile of debt_to_equity among members on this date (0..1)
+    debt_to_equity_z:
+      description: Cross-sectional z-score of debt_to_equity (members on this date, clipped at ±3)
+    dist_52w_high_pct:
+      description: Percentile of dist_52w_high among members on this date (0..1)
+    dist_52w_high_z:
+      description: Cross-sectional z-score of dist_52w_high (members on this date, clipped at ±3)
+    earnings_growth_yoy_pct:
+      description: Percentile of earnings_growth_yoy among members on this date (0..1)
+    earnings_growth_yoy_z:
+      description: Cross-sectional z-score of earnings_growth_yoy (members on this date, clipped at ±3)
+    earnings_yield_pct:
+      description: Percentile of earnings_yield among members on this date (0..1)
+    earnings_yield_z:
+      description: Cross-sectional z-score of earnings_yield (members on this date, clipped at ±3)
+    fcf_yield_pct:
+      description: Percentile of fcf_yield among members on this date (0..1)
+    fcf_yield_z:
+      description: Cross-sectional z-score of fcf_yield (members on this date, clipped at ±3)
+    gross_margin_pct:
+      description: Percentile of gross_margin among members on this date (0..1)
+    gross_margin_z:
+      description: Cross-sectional z-score of gross_margin (members on this date, clipped at ±3)
+    growth_score:
+      description: Mean percentile of revenue_growth_yoy, earnings_growth_yoy
+    growth_sector_pct:
+      description: Percentile of growth_score within the sector
+    low_vol_score:
+      description: Mean percentile of −vol_63d
+    low_vol_sector_pct:
+      description: Percentile of low_vol_score within the sector
+    mom_12_1_pct:
+      description: Percentile of mom_12_1 among members on this date (0..1)
+    mom_12_1_z:
+      description: Cross-sectional z-score of mom_12_1 (members on this date, clipped at ±3)
+    mom_126d_pct:
+      description: Percentile of mom_126d among members on this date (0..1)
+    mom_126d_z:
+      description: Cross-sectional z-score of mom_126d (members on this date, clipped at ±3)
+    mom_21d_pct:
+      description: Percentile of mom_21d among members on this date (0..1)
+    mom_21d_z:
+      description: Cross-sectional z-score of mom_21d (members on this date, clipped at ±3)
+    mom_252d_pct:
+      description: Percentile of mom_252d among members on this date (0..1)
+    mom_252d_z:
+      description: Cross-sectional z-score of mom_252d (members on this date, clipped at ±3)
+    mom_63d_pct:
+      description: Percentile of mom_63d among members on this date (0..1)
+    mom_63d_z:
+      description: Cross-sectional z-score of mom_63d (members on this date, clipped at ±3)
+    momentum_score:
+      description: Mean percentile of mom_12_1
+    momentum_sector_pct:
+      description: Percentile of momentum_score within the sector
+    operating_margin_pct:
+      description: Percentile of operating_margin among members on this date (0..1)
+    operating_margin_z:
+      description: Cross-sectional z-score of operating_margin (members on this date, clipped at ±3)
+    quality_score:
+      description: Mean percentile of roe, gross_margin, −debt_to_equity, −accruals
+    quality_sector_pct:
+      description: Percentile of quality_score within the sector
+    ret_1d_pct:
+      description: Percentile of ret_1d among members on this date (0..1)
+    ret_1d_z:
+      description: Cross-sectional z-score of ret_1d (members on this date, clipped at ±3)
+    revenue_growth_yoy_pct:
+      description: Percentile of revenue_growth_yoy among members on this date (0..1)
+    revenue_growth_yoy_z:
+      description: Cross-sectional z-score of revenue_growth_yoy (members on this date, clipped at ±3)
+    roe_pct:
+      description: Percentile of roe among members on this date (0..1)
+    roe_z:
+      description: Cross-sectional z-score of roe (members on this date, clipped at ±3)
+    sales_yield_pct:
+      description: Percentile of sales_yield among members on this date (0..1)
+    sales_yield_z:
+      description: Cross-sectional z-score of sales_yield (members on this date, clipped at ±3)
+    sector:
+      description: GICS-style sector as of the date (securities.sector_history)
+    value_score:
+      description: Mean percentile of earnings_yield, fcf_yield, book_to_market
+    value_sector_pct:
+      description: Percentile of value_score within the sector
+    vol_21d_pct:
+      description: Percentile of vol_21d among members on this date (0..1)
+    vol_21d_z:
+      description: Cross-sectional z-score of vol_21d (members on this date, clipped at ±3)
+    vol_63d_pct:
+      description: Percentile of vol_63d among members on this date (0..1)
+    vol_63d_z:
+      description: Cross-sectional z-score of vol_63d (members on this date, clipped at ±3)
+---
+apiVersion: stockharness/v1
+kind: CatalogEntry
+metadata:
+  name: fundamentals_pit
+spec:
+  fields:
+    acquisitions:
+      description: Acquisitions, net for the quarter
+      unit: reported currency
+    as_of_date:
+      description: "First trading session after known_at: filter as_of_date <= D"
+    buybacks:
+      description: Common stock repurchased (negative = bought back) for the quarter
+      unit: reported currency
+    capex:
+      description: Capital expenditure (negative = spent) for the quarter
+      unit: reported currency
+    cash:
+      description: Cash and cash equivalents at the period end
+      unit: reported currency
+    cash_and_st_investments:
+      description: Cash and short-term investments at the period end
+      unit: reported currency
+    cost_of_revenue:
+      description: Cost of revenue for the quarter
+      unit: reported currency
+    currency:
+      description: Reported currency
+    current_assets:
+      description: Total current assets at the period end
+      unit: reported currency
+    current_liabilities:
+      description: Total current liabilities at the period end
+      unit: reported currency
+    d_and_a:
+      description: Depreciation and amortization for the quarter
+      unit: reported currency
+    derived_q4:
+      description: Q4 derived as FY − (Q1 + Q2 + Q3)
+    dividends_paid:
+      description: Common dividends paid (negative = paid) for the quarter
+      unit: reported currency
+    ebit:
+      description: EBIT for the quarter
+      unit: reported currency
+    ebitda:
+      description: EBITDA for the quarter
+      unit: reported currency
+    eps:
+      description: Basic EPS
+      unit: reported currency per share
+    eps_diluted:
+      description: Diluted EPS
+      unit: reported currency per share
+    filing_date:
+      description: SEC filing date
+    fiscal_period:
+      description: Q1..Q4
+    fiscal_year:
+      description: Fiscal year as reported
+    free_cash_flow:
+      description: Free cash flow (OCF + capex) for the quarter
+      unit: reported currency
+    goodwill_and_intangibles:
+      description: Goodwill and intangible assets at the period end
+      unit: reported currency
+    gross_profit:
+      description: Gross profit for the quarter
+      unit: reported currency
+    income_tax:
+      description: Income tax expense for the quarter
+      unit: reported currency
+    interest_expense:
+      description: Interest expense for the quarter
+      unit: reported currency
+    inventory:
+      description: Inventory at the period end
+      unit: reported currency
+    is_latest:
+      description: The newest version of this period
+    is_usd:
+      description: "Reported in USD (non-USD values are not converted, #222)"
+    known_at:
+      description: SEC acceptance time (UTC); date-only acceptances mean the end of that day
+    long_term_debt:
+      description: Long-term debt at the period end
+      unit: reported currency
+    net_debt:
+      description: Net debt (total debt − cash) at the period end
+      unit: reported currency
+    net_income:
+      description: Net income for the quarter
+      unit: reported currency
+    operating_cash_flow:
+      description: Operating cash flow for the quarter
+      unit: reported currency
+    operating_expenses:
+      description: Operating expenses for the quarter
+      unit: reported currency
+    operating_income:
+      description: Operating income for the quarter
+      unit: reported currency
+    payables:
+      description: Accounts payable at the period end
+      unit: reported currency
+    period_end:
+      description: Fiscal quarter end date
+    ppe_net:
+      description: Property, plant and equipment, net at the period end
+      unit: reported currency
+    pretax_income:
+      description: Income before tax for the quarter
+      unit: reported currency
+    rd_expense:
+      description: R&D expense for the quarter
+      unit: reported currency
+    receivables:
+      description: Net receivables at the period end
+      unit: reported currency
+    retained_earnings:
+      description: Retained earnings at the period end
+      unit: reported currency
+    revenue:
+      description: Revenue for the quarter
+      unit: reported currency
+    security_id:
+      description: StockHarness security id
+    sga_expense:
+      description: SG&A expense for the quarter
+      unit: reported currency
+    shares_basic:
+      description: Weighted average basic shares
+      unit: shares
+    shares_diluted:
+      description: Weighted average diluted shares
+      unit: shares
+    short_term_debt:
+      description: Short-term debt at the period end
+      unit: reported currency
+    statements:
+      description: Which statements this version has (income, balance, cashflow)
+    stock_based_comp:
+      description: Stock-based compensation for the quarter
+      unit: reported currency
+    stockholders_equity:
+      description: Total stockholders' equity at the period end
+      unit: reported currency
+    total_assets:
+      description: Total assets at the period end
+      unit: reported currency
+    total_debt:
+      description: Total debt at the period end
+      unit: reported currency
+    total_equity:
+      description: Total equity (incl. minority interest) at the period end
+      unit: reported currency
+    total_liabilities:
+      description: Total liabilities at the period end
+      unit: reported currency
+    transform_name:
+      description: Producing transform
+    ttm_capex:
+      description: Trailing four quarters of capital expenditure (negative = spent), as known at known_at
+      unit: reported currency
+    ttm_ebitda:
+      description: Trailing four quarters of ebitda, as known at known_at
+      unit: reported currency
+    ttm_free_cash_flow:
+      description: Trailing four quarters of free cash flow (ocf + capex), as known at known_at
+      unit: reported currency
+    ttm_gross_profit:
+      description: Trailing four quarters of gross profit, as known at known_at
+      unit: reported currency
+    ttm_net_income:
+      description: Trailing four quarters of net income, as known at known_at
+      unit: reported currency
+    ttm_operating_cash_flow:
+      description: Trailing four quarters of operating cash flow, as known at known_at
+      unit: reported currency
+    ttm_operating_income:
+      description: Trailing four quarters of operating income, as known at known_at
+      unit: reported currency
+    ttm_revenue:
+      description: Trailing four quarters of revenue, as known at known_at
+      unit: reported currency
+    version:
+      description: 1 = first filing; each later acceptance (restatement) adds one
