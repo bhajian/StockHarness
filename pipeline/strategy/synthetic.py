@@ -11,6 +11,7 @@ POLICIES = {
     "features_daily": {"mode": "pit", "rule": {"type": "asOf", "field": "as_of_date"}},
     "universe_daily": {"mode": "pit", "rule": {"type": "asOf", "field": "as_of_date"}},
     "macro_daily": {"mode": "pit", "rule": {"type": "asOf", "field": "as_of_date"}},
+    "features_ranked": {"mode": "pit", "rule": {"type": "asOf", "field": "as_of_date"}},
     "securities": {"mode": "static"},
     "trading_calendar": {"mode": "static"},
 }
@@ -37,7 +38,7 @@ def market(n_sec: int = 40, n_days: int = 520, seed: int = 1, start: str = "2020
     days = weekdays(start, n_days)
     ids = [f"SEC_{k:06d}" for k in range(n_sec)]
     drift = {s: rnd.gauss(0, 0.0008) * (momentum > 0) for s in ids}
-    prices, uni, feats = [], [], []
+    prices, uni, feats, ranked = [], [], [], []
     closes = {s: 100.0 for s in ids}
     delist = delist or {}
     overrides = overrides or {}
@@ -52,12 +53,21 @@ def market(n_sec: int = 40, n_days: int = 520, seed: int = 1, start: str = "2020
             prices.append({"security_id": s, "ticker": s.replace("SEC_", "T"), "date": d, "as_of_date": d,
                            "close": closes[s], "tr_1d": r, "ret_1d": r})
             uni.append({"security_id": s, "date": d, "as_of_date": d, "in_universe": True})
-        feats.append({"date": d, "as_of_date": d, "spx_ret_1d": sum(day_rets) / max(1, len(day_rets))})
+        spx_r = sum(day_rets) / max(1, len(day_rets))
+        spx_close = (feats[-1]["spx_close"] if feats else 1000.0) * (1 + spx_r)
+        feats.append({"date": d, "as_of_date": d, "spx_ret_1d": spx_r, "spx_close": spx_close,
+                      "vix": 30.0 if (len(feats) // 60) % 3 == 2 else 18.0})
+        for s in ids:
+            if s in delist and d > delist[s]:
+                continue
+            ranked.append({"security_id": s, "date": d, "as_of_date": d, "mom_12_1_pct": rnd.random(),
+                           "value_score": rnd.random(), "quality_score": rnd.random(), "low_vol_score": rnd.random()})
     securities = [{"security_id": s, "is_active": s not in delist,
                    "identifiers": [{"type": "ticker", "value": s.replace("SEC_", "T")}],
                    "sector_history": [{"value": "Tech" if k % 2 else "Energy", "valid_from": start, "valid_to": None}]}
                   for k, s in enumerate(ids)]
     calendar = [{"date": d, "is_trading_day": True} for d in days]
     src = MemorySource({"prices_daily": prices, "universe_daily": uni, "securities": securities,
-                        "trading_calendar": calendar, "macro_daily": feats})
+                        "trading_calendar": calendar, "macro_daily": feats,
+                        "features_ranked": ranked})
     return src, days
