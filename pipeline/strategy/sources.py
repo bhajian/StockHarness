@@ -47,6 +47,11 @@ def matches(row: dict, flt: dict | None) -> bool:
         elif k == "$or":
             if not any(matches(row, f) for f in cond):
                 return False
+        elif "." in k:  # a path into an array of sub-documents, e.g. identifiers.value
+            head, rest = k.split(".", 1)
+            items = row.get(head) if isinstance(row.get(head), list) else [row.get(head)]
+            if not any(isinstance(i, dict) and matches(i, {rest: cond}) for i in items):
+                return False
         elif not _match_value(row.get(k), cond):
             return False
     return True
