@@ -74,6 +74,13 @@ import {
   type StrategyPluginHistoryEntry,
 } from '../../../packages/core/src/strategyPlugins.js';
 import { evaluations, type Evaluation } from '../../../packages/core/src/evaluations.js';
+import {
+  restoreTheory,
+  theories,
+  theorySpec,
+  theorySpecSchema,
+  type Theory,
+} from '../../../packages/core/src/theories.js';
 
 /** An Evaluation record's spec: provenance, params, outcome and the evaluator's record, verbatim. */
 function evaluationSpec(e: Evaluation) {
@@ -263,6 +270,14 @@ export async function exportObjects(
         const name = (e as Evaluation & { sourceId?: string }).sourceId ?? e._id;
         if (!wanted(name)) continue;
         docs.push({ apiVersion: API_VERSION, kind, metadata: { name }, spec: evaluationSpec(e) });
+      }
+      continue;
+    }
+    if (kind === 'Theory') {
+      for (const t of await theories().find({ ownerId }).sort({ number: 1 }).toArray()) {
+        const name = (t as Theory & { sourceId?: string }).sourceId ?? t._id;
+        if (!wanted(name) && !wanted(`T-${t.number}`)) continue;
+        docs.push({ apiVersion: API_VERSION, kind, metadata: { name }, spec: theorySpec(t) });
       }
       continue;
     }
@@ -552,6 +567,46 @@ async function plan(
     result.items.push({ kind: 'Evaluation', name, action: current ? 'unchanged' : 'create' });
   }
 
+  // Theories (#110): records with their debate; restored as they were, never re-run. Immutable on re-import.
+  for (const doc of docs.filter((d) => d.kind === 'Theory')) {
+    const name = doc.metadata.name;
+    const parsed = theorySpecSchema.safeParse(doc.spec);
+    if (!parsed.success) {
+      const issue = parsed.error.issues[0];
+      result.errors.push({
+        kind: 'Theory',
+        name,
+        message: `${issue.path.join('.') || 'spec'}: ${issue.message}`,
+      });
+      continue;
+    }
+    const current = await theories().findOne({
+      ownerId,
+      $or: [{ _id: name }, { sourceId: name }],
+    } as Record<string, unknown>);
+    if (current && stableJson(theorySpec(current)) !== stableJson(doc.spec)) {
+      result.errors.push({
+        kind: 'Theory',
+        name,
+        message: 'This theory exists here with a different state; theories are not overwritten',
+      });
+      continue;
+    }
+    if (
+      !current &&
+      (await theories().findOne({ ownerId, number: parsed.data.number }, { projection: { _id: 1 } }))
+    ) {
+      result.errors.push({
+        kind: 'Theory',
+        name,
+        message: `T-${parsed.data.number} is a different theory in this workspace`,
+      });
+      continue;
+    }
+    prepared.push({ doc, action: current ? 'unchanged' : 'create' });
+    result.items.push({ kind: 'Theory', name, action: current ? 'unchanged' : 'create' });
+  }
+
   // Catalog docs: curated descriptions only, matched by collection name (merge semantics in both modes).
   for (const doc of docs.filter((d) => d.kind === 'CatalogEntry')) {
     const name = doc.metadata.name;
@@ -802,6 +857,15 @@ export async function applyObjectImport(
         importedAt: new Date(),
       } as Evaluation);
       done.push({ kind: 'Evaluation', name: p.doc.metadata.name, action: 'create' });
+    }
+    for (const p of prepared.filter((x) => x.doc.kind === 'Theory' && x.action === 'create')) {
+      const name = p.doc.metadata.name;
+      // Ids are global: a theory imported from another workspace keeps its name as sourceId.
+      const taken = await theories().findOne({ _id: name }, { projection: { _id: 1 } });
+      const t = await restoreTheory(ownerId, taken ? randomUUID() : name, theorySpecSchema.parse(p.doc.spec));
+      if (taken)
+        await theories().updateOne({ _id: t._id }, { $set: { sourceId: name } } as Record<string, unknown>);
+      done.push({ kind: 'Theory', name, action: 'create' });
     }
     // Removals last and in reverse dependency order, so harnesses go before the skills/agents they use.
     for (const kind of [...OBJECT_KINDS].reverse()) {

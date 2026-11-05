@@ -232,7 +232,8 @@ export type ObjectKind =
   | 'CatalogEntry'
   | 'Pipeline'
   | 'StrategyPlugin'
-  | 'Evaluation';
+  | 'Evaluation'
+  | 'Theory';
 export type ObjectImportPlan = {
   mode: 'merge' | 'replace';
   items: { kind: ObjectKind; name: string; action: 'create' | 'update' | 'unchanged' | 'remove' }[];
