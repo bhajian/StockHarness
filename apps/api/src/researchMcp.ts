@@ -17,6 +17,12 @@ import {
   isStrategyTool,
 } from '../../../packages/core/src/strategyTools.js';
 import { HttpError, safeError } from '../../../packages/core/src/security.js';
+import {
+  callLifecycleTool,
+  evaluateForTheory,
+  isLifecycleTool,
+  lifecycleToolsFor,
+} from '../../../packages/core/src/lifecycleTools.js';
 
 export const researchMcpRouter = Router();
 
@@ -29,14 +35,20 @@ async function handle(req: Request, res: Response) {
     { capabilities: { tools: {} } },
   );
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
-    tools: [...DATA_TOOLS, ...STRATEGY_TOOLS] as any,
+    tools: [...DATA_TOOLS, ...STRATEGY_TOOLS, ...lifecycleToolsFor(conn.role)] as any,
   }));
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: args = {} } = request.params;
+    // Who is calling, for the debate history (#112); the runtime sends it only to research connections.
+    const meta = ((request.params._meta ?? {}) as Record<string, any>)['openharness/agent'] ?? {};
     try {
-      const result = isStrategyTool(name)
-        ? await callStrategyTool(conn.ownerId, name, args)
-        : await callDataTool(await dataSession(conn.ownerId, conn.asOf), name, args);
+      const result = isLifecycleTool(name)
+        ? await callLifecycleTool(conn.ownerId, conn.role, name, args, meta)
+        : name === 'evaluate_strategy' && args.theory_id
+          ? await evaluateForTheory(conn.ownerId, conn.role, args, meta)
+          : isStrategyTool(name)
+            ? await callStrategyTool(conn.ownerId, name, args)
+            : await callDataTool(await dataSession(conn.ownerId, conn.asOf), name, args);
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     } catch (error) {
       const message = error instanceof HttpError ? error.message : safeError(error);

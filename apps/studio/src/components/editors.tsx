@@ -557,6 +557,23 @@ export function ConnectionEditor({ value, onClose, onSaved }: Props) {
             />
           </Field>
         )}
+        {research && (
+          <Field
+            label="Research role"
+            hint="What agents using this connection may do in the research loop. No role: data tools only."
+          >
+            <select
+              aria-label="Research role"
+              value={form.role ?? ''}
+              onChange={(e) => update('role', e.target.value || undefined)}
+            >
+              <option value="">Data tools only</option>
+              <option value="theorist">Theorist: submit theories</option>
+              <option value="judge">Judge: review theories and set verdicts</option>
+              <option value="coder">Coder: submit code and evaluate</option>
+            </select>
+          </Field>
+        )}
         {mongo && !builtIn && (
           <Field label="Database" hint="Every tool call uses this database.">
             <input

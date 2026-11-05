@@ -193,6 +193,8 @@ type Handler = {
   trustedGateway?: boolean;
   /** Collection bindings on a MongoDB connection (#148): enforced on every call. */
   collections?: CollectionBinding[];
+  /** The built-in research connection: it receives who is calling (agent, run, model) for the debate (#112). */
+  research?: boolean;
 };
 
 export async function runAgent(
@@ -459,6 +461,7 @@ async function runAgentUnchecked(stored: Agent, input: string, history: Run['his
           ...(scoped ? { collections: scoped } : {}),
           requiresApproval: tool._meta?.['openharness/approvalRequired'] === true,
           machine: connection.kind === 'device',
+          research: connection.kind === 'research',
           deviceId: connection.deviceId,
           trustedGateway:
             connection.kind === 'device' &&
@@ -2121,6 +2124,15 @@ async function runAgentUnchecked(stored: Agent, input: string, history: Run['his
                           arguments: sentArguments,
                           _meta: {
                             idempotencyKey,
+                            ...(handler.research
+                              ? {
+                                  'openharness/agent': {
+                                    agentId: ctx.agentId,
+                                    runId: ctx.runId,
+                                    model: `${provider.name}:${provider.model}`,
+                                  },
+                                }
+                              : {}),
                             ...(approval?.decision === 'approve' &&
                             handler.trustedGateway &&
                             handler.deviceId &&

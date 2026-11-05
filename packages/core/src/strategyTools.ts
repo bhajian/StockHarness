@@ -85,7 +85,11 @@ export const STRATEGY_TOOLS = [
       properties: {
         plugin: { type: 'string', description: 'StrategyPlugin name' },
         version: { type: 'integer', minimum: 1, description: 'Code version (default: the latest)' },
-        theory_id: { type: 'string', maxLength: 200 },
+        theory_id: {
+          type: 'string',
+          maxLength: 200,
+          description: 'For a theory in coding (T-<n>): evaluates its plugin and moves it to the Judge',
+        },
         params: {
           type: 'object',
           properties: {
@@ -100,7 +104,7 @@ export const STRATEGY_TOOLS = [
           required: ['start', 'end'],
         },
       },
-      required: ['plugin', 'params'],
+      required: ['params'],
       additionalProperties: false,
     },
   },
@@ -258,6 +262,7 @@ export async function callStrategyTool(
     return agentSummary(await getEvaluation(ownerId, String(args.evaluation_id ?? '')));
   if (name === 'test_strategy') return testStrategy(ownerId, args as unknown as TestArgs);
   if (name !== 'evaluate_strategy') throw new HttpError(404, `Unknown tool ${name}`);
+  if (!args.plugin) throw new HttpError(400, 'plugin is required (or theory_id, for a theory in coding)');
   const { evaluation, done } = await startEvaluation(ownerId, {
     plugin: args.plugin,
     ...(args.version ? { version: args.version } : {}),

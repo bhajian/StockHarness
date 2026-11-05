@@ -286,6 +286,7 @@ export async function verifyResearchToken(token: string) {
     kind?: string;
     enabled?: boolean;
     asOf?: string;
+    role?: 'theorist' | 'judge' | 'coder';
   }>('connections').findOne({ _id: m[1], kind: 'research' });
   if (!conn || conn.enabled === false) return undefined;
   const expected = Buffer.from(mac(conn.ownerId, conn._id), 'hex');
