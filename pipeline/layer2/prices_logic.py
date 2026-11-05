@@ -1,6 +1,8 @@
 """Pure split/dividend-adjustment + return + DQ logic for prices_daily (spec §3.3). Stdlib only."""
 from __future__ import annotations
 
+import math
+
 
 def split_adjustment_factors(dates, splits):
     """Backward-cumulative split factor per date so historical prices are on the current share basis.
@@ -20,12 +22,34 @@ def split_adjustment_factors(dates, splits):
     return out
 
 
+def effective_splits(bars, splits_by_exdate):
+    """The splits the bars still need (#240). FMP's EOD closes are already split-adjusted; other sources may not be.
+
+    A split applies only when its ex-date bar exists and applying the ratio brings the ex-date return closer to
+    zero than leaving it out: |log(close·r / prev)| < |log(close / prev)|. Already-adjusted bars, splits with no
+    bar on their ex-date (a future split from the calendar) and undeterminable cases are skipped.
+    """
+    out = {}
+    prev = None
+    for b in bars:
+        close = _num(b.get("close"))
+        r = splits_by_exdate.get(b["date"])
+        if r and r != 1.0 and prev and prev > 0 and close and close > 0:
+            if abs(math.log(close * r / prev)) < abs(math.log(close / prev)):
+                out[b["date"]] = r
+        if close is not None and close > 0:
+            prev = close
+    return out
+
+
 def compute_symbol_rows(bars, dividends_by_exdate, splits_by_exdate):
     """Per-symbol price rows with adjusted OHLC, price & total returns, dollar volume, DQ flags.
 
     bars: ascending list of {date, open, high, low, close, volume}.
-    dividends_by_exdate: {date: cash_dividend_per_share}; splits_by_exdate: {date: ratio new/old}.
+    dividends_by_exdate: {date: cash_dividend_per_share}; splits_by_exdate: {date: ratio new/old}. Splits the
+    bars already reflect are ignored (effective_splits).
     """
+    splits_by_exdate = effective_splits(bars, splits_by_exdate)
     dates = [b["date"] for b in bars]
     factors = split_adjustment_factors(dates, list(splits_by_exdate.items()))
     rows = []

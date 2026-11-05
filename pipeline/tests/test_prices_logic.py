@@ -23,6 +23,35 @@ class TestSymbolRows(unittest.TestCase):
         self.assertAlmostEqual(rows[0]["adj_close"], 100.0)  # 400 * 0.25
         self.assertAlmostEqual(rows[1]["adj_close"], 100.0)
 
+    def test_already_adjusted_bars_are_not_adjusted_again(self):
+        # #240: FMP closes are split-adjusted (NVDA 10:1 on 2024-06-10: 120.89 -> 121.79, not 1208.9 -> 121.79).
+        bars = [
+            {"date": date(2024, 6, 7), "open": 121, "high": 122, "low": 120, "close": 120.89, "volume": 10},
+            {"date": date(2024, 6, 10), "open": 120, "high": 123, "low": 117, "close": 121.79, "volume": 10},
+        ]
+        rows = p.compute_symbol_rows(bars, {}, {date(2024, 6, 10): 10.0})
+        self.assertAlmostEqual(rows[1]["ret_1d"], 121.79 / 120.89 - 1)
+        self.assertEqual([r["adj_factor"] for r in rows], [1.0, 1.0])
+        self.assertNotIn("jump_no_action", rows[1]["dq_flags"])
+
+    def test_future_or_unmatched_splits_are_ignored(self):
+        bars = [
+            {"date": date(2024, 1, 2), "open": 50, "high": 50, "low": 50, "close": 50, "volume": 5},
+            {"date": date(2024, 1, 3), "open": 51, "high": 51, "low": 51, "close": 51, "volume": 5},
+        ]
+        rows = p.compute_symbol_rows(bars, {}, {date(2024, 2, 1): 2.0})  # announced, not yet effective
+        self.assertEqual([r["adj_factor"] for r in rows], [1.0, 1.0])
+        self.assertEqual(p.effective_splits(bars, {date(2024, 2, 1): 2.0}), {})
+
+    def test_reverse_split_unadjusted_source(self):
+        bars = [
+            {"date": date(2024, 1, 2), "open": 1, "high": 1, "low": 1, "close": 1.0, "volume": 5},
+            {"date": date(2024, 1, 3), "open": 10, "high": 10, "low": 10, "close": 10.2, "volume": 5},
+        ]
+        rows = p.compute_symbol_rows(bars, {}, {date(2024, 1, 3): 0.1})  # 1-for-10
+        self.assertAlmostEqual(rows[1]["ret_1d"], 0.02)
+        self.assertAlmostEqual(rows[0]["adj_close"], 10.0)
+
     def test_total_return_includes_dividend(self):
         bars = [
             {"date": date(2024, 1, 2), "open": 100, "high": 100, "low": 100, "close": 100, "volume": 5},

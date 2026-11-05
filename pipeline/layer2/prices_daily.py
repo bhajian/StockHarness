@@ -15,7 +15,7 @@ from .prices_logic import compute_symbol_rows
 from ._resolve import as_date, security_symbols
 
 UTC = timezone.utc
-TV = "2"
+TV = "3"  # 3: splits the source closes already reflect are not applied again (#240)
 ERROR_FLAGS = ("zero_or_negative_price", "high_lt_low")
 BAR_FIELDS = ["_id", "symbol", "date", "open", "high", "low", "close", "volume", "vwap"]
 
