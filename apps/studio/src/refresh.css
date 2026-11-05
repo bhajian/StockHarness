@@ -1627,11 +1627,29 @@ textarea::placeholder {
 }
 .kpi-card {
   position: relative;
+  flex-wrap: wrap;
+  align-content: center;
+  row-gap: 4px;
 }
 .kpi-body {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  min-width: 0;
+}
+.kpi-body strong {
+  overflow-wrap: anywhere;
+}
+/* The footnote goes under the value, so a wide value never pushes it off the card. */
+.kpi-card > small {
+  flex-basis: 100%;
+  margin: 0;
+  align-self: auto;
+  line-height: 1.35;
+}
+.kpi-card > .overview-icon + .kpi-body + small,
+.kpi-card > .overview-icon + .kpi-body + svg + small {
+  padding-left: 57px;
 }
 .kpi-delta {
   font-style: normal;
@@ -3582,4 +3600,240 @@ textarea::placeholder {
 .ideas-page th small {
   display: block;
   font-weight: 400;
+}
+
+/* Simulations (#125, #126) */
+.sims-page,
+.sim-page {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+.sims-page > *,
+.sim-page > *,
+.sim-performance,
+.sim-trades,
+.sim-positions,
+.sim-attribution {
+  min-width: 0;
+}
+.sim-performance,
+.sim-trades,
+.sim-positions,
+.sim-attribution,
+.sim-config {
+  display: grid;
+  gap: 16px;
+}
+.sims-page .page-head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+.sims-page h2 {
+  margin: 0 0 4px;
+}
+.sim-page .kpi-row {
+  margin: 0;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+}
+.sim-page .eval-grid,
+.sim-attribution .eval-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
+  gap: 16px;
+}
+.sim-page .eval-grid > * {
+  min-width: 0;
+}
+.sims-table td small,
+.sims-table td strong {
+  display: block;
+}
+.sims-table tr.clickable:hover td,
+.sim-page tr.clickable:hover td {
+  background: var(--blue-bg);
+  cursor: pointer;
+}
+.sims-page .num,
+.sim-page .num,
+.trade-detail .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.nowrap {
+  white-space: nowrap;
+}
+td.gain {
+  color: #1f6f43;
+}
+td.loss {
+  color: #a3291c;
+}
+.chips .chip {
+  cursor: pointer;
+  border: 1px solid var(--border);
+  font: inherit;
+  font-size: 12px;
+}
+.chips .chip:hover {
+  border-color: var(--blue);
+}
+.tab-badge {
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: 8px;
+  background: var(--surface-3);
+  font-size: 11px;
+}
+.run-progress progress {
+  width: 100%;
+  height: 8px;
+}
+.run-progress p {
+  margin: 0 0 6px;
+}
+.sim-page .idea-actions .button[disabled] {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.warning-notice {
+  border-color: #f3d29a;
+  background: #fff8eb;
+}
+.error-notice {
+  border-color: #f0b4ad;
+  background: #fdf1ef;
+}
+.scrubber {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+}
+.scrubber input[type='range'] {
+  width: 100%;
+}
+.trade-detail {
+  display: grid;
+  gap: 14px;
+}
+.trade-detail h3 {
+  margin: 4px 0 0;
+  font-size: 0.9rem;
+}
+.trade-numbers {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px 16px;
+  margin: 0;
+}
+.trade-numbers dt {
+  font-size: 11px;
+  color: var(--faint);
+}
+.trade-numbers dd {
+  margin: 0;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.compact-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.compact-table th,
+.compact-table td {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border-soft);
+  text-align: left;
+}
+.compact-table .num {
+  text-align: right;
+}
+/* The schedule modal */
+.schedule-form {
+  display: grid;
+  gap: 14px;
+  max-height: 72vh;
+  overflow: auto;
+  padding-right: 4px;
+}
+.schedule-form fieldset {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px 12px;
+  margin: 0;
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+.schedule-form legend {
+  font-weight: 600;
+  padding: 0 4px;
+}
+.form-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px 12px;
+  align-items: end;
+}
+.form-row .field {
+  margin: 0;
+}
+.preset-row {
+  display: flex;
+  gap: 6px;
+  padding-bottom: 4px;
+}
+.button.small {
+  padding: 5px 10px;
+  font-size: 12px;
+}
+.idea-picker {
+  display: grid;
+  gap: 6px;
+  max-height: 220px;
+  overflow: auto;
+}
+.idea-pick {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+.idea-pick small {
+  grid-column: 3 / -1;
+}
+.idea-pick-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.idea-pick.on {
+  border-color: var(--blue);
+  background: var(--blue-bg);
+}
+.idea-pick.off {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.estimate-box {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: var(--surface-2);
+}
+.schedule-form .modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
 }

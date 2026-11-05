@@ -21,7 +21,8 @@ export const simulationConfigSchema = z.object({
     .trim()
     .min(1)
     .max(120)
-    .regex(/^[\w .,:()&+-]+$/, 'letters, digits, spaces and . , : ( ) & + - _'),
+    // A display label: anything but control characters and slashes.
+    .regex(/^[^\u0000-\u001f/\\]+$/, 'no control characters or slashes'),
   description: z.string().max(2000).default(''),
   /** The ideas, by reference (T-n). plugin and version pin the code; filled in when the config is saved. */
   ideas: z
@@ -481,11 +482,25 @@ export async function simulationTrade(ownerId: string, id: string, n: number) {
     .collection<Record<string, any>>('prices_daily')
     .find(
       { security_id: t.security_id, date: { $gte: pad(t.entry_date, -45), $lte: pad(end, 20) } },
-      { projection: { _id: 0, date: 1, close: 1 } },
+      { projection: { _id: 0, date: 1, close: 1, tr_1d: 1 } },
     )
     .sort({ date: 1 })
     .toArray();
-  return { trade: t, orders, prices };
+  // Without closes (some sources have only returns), a total-return index from 1, like the broker's unit price.
+  const indexed = !prices.some((p) => typeof p.close === 'number');
+  if (indexed) {
+    let level = 1;
+    for (const p of prices) {
+      if (typeof p.tr_1d === 'number' && Number.isFinite(p.tr_1d)) level *= 1 + p.tr_1d;
+      p.close = Math.round(level * 1e6) / 1e6;
+    }
+  }
+  return {
+    trade: t,
+    orders,
+    prices: prices.map((p) => ({ date: p.date, close: p.close ?? null })),
+    priceKind: indexed ? 'total_return_index' : 'close',
+  };
 }
 export async function simulationOrders(
   ownerId: string,

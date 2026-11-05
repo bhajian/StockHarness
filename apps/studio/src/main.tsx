@@ -24,6 +24,7 @@ import {
   X,
   FlaskConical,
   Lightbulb,
+  CandlestickChart,
 } from 'lucide-react';
 import { api, collections, emptyData, errorMessage, send, type Data, type Entity, type User } from './api';
 import { Button, ErrorNotice, UpdateNotice } from './components/ui';
@@ -39,6 +40,7 @@ import { DatasetsPage } from './components/DatasetsPage';
 import { EvaluationsPage } from './components/EvaluationsPage';
 import { ResearchPage } from './components/ResearchPage';
 import { IdeasPage } from './components/ideas/IdeasPage';
+import { SimulationsPage } from './components/simulations/SimulationsPage';
 import { DataFreshness } from './components/HealthTab';
 import { EmbedChat, Playground, playgroundTargets } from './components/Playground';
 import { IntegrationsPage, SettingsPage } from './components/Settings';
@@ -54,6 +56,7 @@ const nav = [
   { id: 'datasets', label: 'Datasets', icon: Database },
   { id: 'research', label: 'Research', icon: FlaskConical },
   { id: 'ideas', label: 'Ideas', icon: Lightbulb },
+  { id: 'simulations', label: 'Simulations', icon: CandlestickChart },
   { id: 'inbox', label: 'Inbox', icon: ShieldCheck },
   { id: 'executions', label: 'Executions', icon: Activity },
   { id: 'integrations', label: 'Integrations', icon: Code2 },
@@ -570,6 +573,8 @@ function App() {
               <ResearchPage data={data} isAdmin={user.role === 'admin'} />
             ) : page === 'ideas' ? (
               <IdeasPage isAdmin={user.role === 'admin'} />
+            ) : page === 'simulations' ? (
+              <SimulationsPage isAdmin={user.role === 'admin'} />
             ) : (
               <WorkflowsPage {...props} />
             )}
