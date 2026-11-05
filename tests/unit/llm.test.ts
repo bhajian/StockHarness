@@ -227,6 +227,38 @@ test('transient provider failures are retried with backoff, rejected requests ar
   assert.equal(calls, 4);
 });
 
+test('rate limits (429) wait for the quota window; other failures keep the short backoff (#270)', async (t) => {
+  const { retryDelayMs, RATE_LIMIT_ATTEMPTS } = await import('../../packages/core/src/llm.js');
+  const schedule = [0, 1, 2, 3, 4, 5].map((a) => Math.floor(retryDelayMs(a, null, 429) / 1000));
+  assert.deepEqual(schedule, [5, 10, 20, 30, 30, 30], 'about two minutes in all');
+  assert.ok(retryDelayMs(0, null, 503) < 1000 && retryDelayMs(5, null, 503) <= 8250);
+  assert.equal(retryDelayMs(0, '45', 429), 45000, 'Retry-After is followed');
+  assert.equal(retryDelayMs(0, '600', 429), 60000, 'at most a minute');
+  assert.equal(RATE_LIMIT_ATTEMPTS, 7);
+  let calls = 0;
+  t.mock.method(globalThis, 'fetch', async () => {
+    calls++;
+    if (calls < 6)
+      return new Response('{"error":{"message":"Resource exhausted"}}', {
+        status: 429,
+        headers: { 'retry-after': '0' },
+      });
+    return stream(frame({ content: 'ready' }) + frame({}, 'stop') + 'data: [DONE]\n\n');
+  });
+  assert.equal((await request()).text, 'ready', 'five rate limits in a row no longer end the request');
+  assert.equal(calls, 6);
+  calls = 0;
+  t.mock.method(globalThis, 'fetch', async () => {
+    calls++;
+    return new Response('{"error":{"message":"Resource exhausted"}}', {
+      status: 429,
+      headers: { 'retry-after': '0' },
+    });
+  });
+  await assert.rejects(request(), /HTTP 429.*after 7 attempts/);
+  assert.equal(calls, 7);
+});
+
 test('a provider error inside the stream is a retryable model response error', async (t) => {
   t.mock.method(globalThis, 'fetch', async () => stream('data: {"error":{"message":"overloaded"}}\n\n'));
   await assert.rejects(
