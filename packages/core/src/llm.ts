@@ -118,14 +118,26 @@ function causeOf(error: unknown) {
   const e = error as Error & { cause?: { code?: string; message?: string } };
   return e?.cause?.code ?? e?.cause?.message ?? e?.message ?? String(error);
 }
-/** Exponential backoff with jitter, stretched to a Retry-After header when the provider sends one (30 s at most). */
-function retryDelayMs(attempt: number, retryAfter: string | null) {
-  const base = Math.min(8000, 500 * 2 ** attempt) + Math.floor(Math.random() * 250);
-  if (!retryAfter) return base;
+/** Attempts for a rate-limited request (429): per-minute quotas need the window to pass (#270). */
+export const RATE_LIMIT_ATTEMPTS = 7;
+const RATE_LIMIT_DELAYS_MS = [5000, 10000, 20000, 30000, 30000, 30000];
+/**
+ * The wait before retry `attempt` (0-based). Transient failures: exponential backoff with jitter (8 s at most).
+ * A 429 without Retry-After waits for the quota window (5 s, 10 s, 20 s, then 30 s: about two minutes in all).
+ * A Retry-After header is followed (60 s at most for a 429, 30 s otherwise).
+ */
+export function retryDelayMs(attempt: number, retryAfter: string | null, status?: number) {
+  const rateLimited = status === 429;
+  const jitter = Math.floor(Math.random() * 250);
+  const base = rateLimited
+    ? RATE_LIMIT_DELAYS_MS[Math.min(attempt, RATE_LIMIT_DELAYS_MS.length - 1)] + jitter
+    : Math.min(8000, 500 * 2 ** attempt) + jitter;
+  if (retryAfter === null || retryAfter.trim() === '') return base;
   const header = /^\d+$/.test(retryAfter.trim())
     ? Number(retryAfter) * 1000
     : Date.parse(retryAfter) - Date.now();
-  return Number.isFinite(header) && header > 0 ? Math.min(30000, Math.max(base, header)) : base;
+  if (!Number.isFinite(header) || header < 0) return base;
+  return Math.min(rateLimited ? 60000 : 30000, rateLimited ? header : Math.max(base, header));
 }
 function wait(ms: number, signal?: AbortSignal) {
   return new Promise<void>((resolve, reject) => {
@@ -147,9 +159,11 @@ function wait(ms: number, signal?: AbortSignal) {
  */
 async function post(url: string, payload: unknown, headers: Record<string, string>, signal?: AbortSignal) {
   let retryAfter: string | null = null;
+  let lastStatus: number | undefined;
   for (let attempt = 0; ; attempt++) {
-    if (attempt) await wait(retryDelayMs(attempt - 1, retryAfter), signal);
-    const last = attempt === MODEL_REQUEST_ATTEMPTS - 1;
+    if (attempt) await wait(retryDelayMs(attempt - 1, retryAfter, lastStatus), signal);
+    const limit = lastStatus === 429 ? RATE_LIMIT_ATTEMPTS : MODEL_REQUEST_ATTEMPTS;
+    const last = attempt >= limit - 1;
     let response: Response;
     try {
       const deadline = deadlineSignal(config.MODEL_REQUEST_TIMEOUT_SECONDS * 1000);
@@ -169,7 +183,10 @@ async function post(url: string, payload: unknown, headers: Record<string, strin
       continue;
     }
     if (response.ok) return response;
-    if (last || !RETRYABLE_STATUS.has(response.status)) throw await failedResponse(response, attempt + 1);
+    // A rate limit gets the longer quota-window schedule from here on.
+    const nowLast = response.status === 429 ? attempt >= RATE_LIMIT_ATTEMPTS - 1 : last;
+    if (nowLast || !RETRYABLE_STATUS.has(response.status)) throw await failedResponse(response, attempt + 1);
+    lastStatus = response.status;
     retryAfter = response.headers.get('retry-after');
     await response.body?.cancel().catch(() => {});
   }
