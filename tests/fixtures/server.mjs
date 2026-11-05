@@ -596,6 +596,112 @@ function answer(messages, tools) {
     cycleVisits.set(token, visits);
     return { content: visits >= Number(target) ? `Visit ${visits}: DONE` : `Visit ${visits}: continue` };
   }
+  if (
+    tools?.some((t) => t.function.description?.includes('/ get_research_brief:')) ||
+    (!tools?.length &&
+      messages.some((m) => m.role === 'system' && String(m.content).includes('StockHarness research loop')))
+  ) {
+    // #115: a scripted research loop. Each agent card acts by the tools it is offered.
+    const tool = (n) => tools?.find((t) => t.function.description?.includes(`/ ${n}:`))?.function.name;
+    const unwrap = (c) => {
+      try {
+        const outer = JSON.parse(String(c));
+        const text = outer.content?.map((x) => x.text).join('') ?? String(c);
+        return JSON.parse(text);
+      } catch {
+        try {
+          return JSON.parse(String(c));
+        } catch {
+          return { raw: String(c) };
+        }
+      }
+    };
+    const results = messages.filter((m) => m.role === 'tool').map((m) => unwrap(m.content));
+    const brief = results[0] ?? {};
+    const sys = String(messages.find((m) => m.role === 'system')?.content ?? '');
+    if (!tools?.length) return { content: `Cycle step done (${results.length} tool calls). DONE` };
+    if (!results.length) return memoryCall(tool('get_research_brief'), {});
+    const k = results.length - 1;
+    const momentum = [
+      'import numpy as np',
+      'META = {"side": "long", "horizon_days": 20, "rebalance": "weekly", "top_n": 3}',
+      '',
+      'def signal(ctx):',
+      '    f = ctx.read_df("prices_daily", columns=["security_id", "tr_1d"], lookback_days=40)',
+      '    return {s: float(np.prod(1 + g.tr_1d) - 1) for s, g in f.groupby("security_id")}',
+      '',
+    ].join('\n');
+    if (tool('submit_theory')) {
+      const i = Number(/Theorist (\d+) of/.exec(sys)?.[1] ?? 1);
+      if (k === 0)
+        return memoryCall(
+          tool('submit_theory'),
+          i === 1
+            ? {
+                title: 'Forty-day trend followers',
+                hypothesis:
+                  'Names with the strongest 40-day total return keep outperforming over the next month.',
+                signal_logic: 'Rank by 40-day compounded tr_1d; long the top 3, weekly.',
+                data_needed: ['prices_daily.tr_1d'],
+                falsification: 'No excess over the S&P 500.',
+                family: 'momentum',
+                reasoning: 'Short-horizon momentum',
+              }
+            : {
+                title: 'Twenty-day losers bounce back',
+                hypothesis: 'The worst 20-day performers mean-revert over the following two weeks.',
+                signal_logic: 'Rank by 20-day compounded tr_1d ascending; long the bottom 3, weekly.',
+                data_needed: ['prices_daily.tr_1d'],
+                falsification: 'No excess over the S&P 500.',
+                family: 'reversal',
+                reasoning: 'Short-term reversal',
+              },
+        );
+      return { content: `Submitted ${results[1].theory_id ?? JSON.stringify(results[1]).slice(0, 200)}` };
+    }
+    if (tool('review_theory')) {
+      const queue = (brief.queue ?? []).filter((t) => t.status === 'pre_review');
+      if (k < queue.length)
+        return memoryCall(tool('review_theory'), {
+          theory_id: queue[k].theory_id,
+          decision: 'approve',
+          reasoning: 'Testable, no lookahead, novel enough.',
+        });
+      return {
+        content: queue.length ? `Approved ${queue.length} theories.` : 'Nothing to review. NOTHING_TO_CODE',
+      };
+    }
+    if (tool('submit_code')) {
+      const queue = brief.queue ?? [];
+      const idx = Math.floor(k / 2);
+      if (idx < queue.length) {
+        const t = queue[idx];
+        const code = /losers|reversal/i.test(t.title)
+          ? momentum
+              .replace('float(np.prod(1 + g.tr_1d) - 1)', '-float(np.prod(1 + g.tr_1d) - 1)')
+              .replace('lookback_days=40', 'lookback_days=20')
+          : momentum;
+        return k % 2 === 0
+          ? memoryCall(tool('submit_code'), { theory_id: t.theory_id, code })
+          : memoryCall(tool('evaluate_strategy'), {
+              theory_id: t.theory_id,
+              params: brief.evaluation_params,
+            });
+      }
+      return { content: `Coded and evaluated ${queue.length} theories. DONE` };
+    }
+    if (tool('set_verdict')) {
+      const queue = (brief.queue ?? []).filter((t) => t.status === 'post_review');
+      if (k < queue.length)
+        return memoryCall(tool('set_verdict'), {
+          theory_id: queue[k].theory_id,
+          verdict: 'failed',
+          reasoning: 'Below the default gates on this small sample.',
+        });
+      return { content: `Verdicts: ${queue.map((t) => `${t.theory_id} failed`).join(', ') || 'none'}` };
+    }
+    return { content: 'NO RESEARCH ROLE TOOLS' };
+  }
   if (String(input).includes('collection bindings check')) {
     // #148: a fixed sequence of MongoDB calls against an agent with collection bindings; reports raw results.
     const byTool = (n) => tools?.find((t) => t.function.description?.includes(`/ ${n}:`))?.function;

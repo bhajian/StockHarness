@@ -1,0 +1,341 @@
+// The research loop (#115): Theorists → Judge (pre-code) → condition → Coder → Judge (post-result) → verdict, as
+// an ordinary harness. Agents work their role's queue, read through the research connection of their role (#112),
+// and learn what to do from get_research_brief: their queue, the focus, the evaluation window and the latest human
+// steering note, so a note written now reaches the Theorists on the next cycle.
+import { z } from 'zod';
+import { collection } from './db.js';
+import { agentSchema, workflowSchema, type Agent, type Workflow, type WorkflowNode } from './schema.js';
+import { evaluatorSettings, latestPriceDate } from './evaluations.js';
+import { activeGates } from './gates.js';
+import { theories, type Theory } from './theories.js';
+import type { ResearchRole } from './lifecycleTools.js';
+
+/** The small-scale default (owner, 2026-11-05): 50 large caps; wider scopes come later. */
+export const DEFAULT_SYMBOLS =
+  'AAPL MSFT NVDA AMZN GOOGL META AVGO TSLA JPM LLY V UNH XOM MA JNJ PG HD COST ABBV MRK CVX KO PEP ADBE CRM WMT BAC NFLX AMD TMO ORCL ACN MCD CSCO ABT LIN DHR WFC TXN DIS PM INTU VZ CAT AMGN IBM QCOM GE NOW'.split(
+    ' ',
+  );
+export const researchSettingsSchema = z.object({
+  /** What the Theorists should look into (shown in every brief). */
+  focus: z.string().max(4000).default(''),
+  /** Theorists that propose in parallel each cycle (the harness's Parallel step). */
+  theoristsPerCycle: z.number().int().min(1).max(8).default(2),
+  /** The evaluation scope the Coder uses: symbols and how many years before the holdout. */
+  evaluationSymbols: z.array(z.string().min(1).max(20)).max(2000).default(DEFAULT_SYMBOLS),
+  evaluationYears: z.number().int().min(1).max(15).default(3),
+});
+export type ResearchSettings = z.infer<typeof researchSettingsSchema> & {
+  steering?: { note: string; at: Date; by?: string }[];
+};
+const settings = () =>
+  collection<{ _id: string } & Partial<ResearchSettings> & Record<string, unknown>>('research_settings');
+
+export async function researchSettings(ownerId: string): Promise<ResearchSettings> {
+  const s = await settings().findOne({ _id: ownerId });
+  const { _id, steering, ...rest } = s ?? ({ _id: ownerId } as Record<string, unknown>);
+  return {
+    ...researchSettingsSchema.parse(pick(rest)),
+    ...(steering ? { steering: steering as ResearchSettings['steering'] } : {}),
+  };
+}
+const pick = (o: Record<string, unknown>) =>
+  Object.fromEntries(Object.entries(o).filter(([k]) => k in researchSettingsSchema.shape));
+export async function updateResearchSettings(ownerId: string, patch: unknown) {
+  const next = researchSettingsSchema.partial().parse(patch);
+  await settings().updateOne({ _id: ownerId }, { $set: next }, { upsert: true });
+  return researchSettings(ownerId);
+}
+/** A human steering note: the Theorists see it in their next brief (the latest five are kept). */
+export async function addSteeringNote(ownerId: string, note: string, by?: string) {
+  const text = note.trim();
+  if (text.length < 3) throw new Error('Write the steering note');
+  await settings().updateOne(
+    { _id: ownerId },
+    {
+      $push: {
+        steering: {
+          $each: [{ note: text.slice(0, 4000), at: new Date(), ...(by ? { by } : {}) }],
+          $slice: -5,
+        },
+      },
+    } as Record<string, unknown>,
+    { upsert: true },
+  );
+  return researchSettings(ownerId);
+}
+
+const addYears = (iso: string, n: number) => `${Number(iso.slice(0, 4)) + n}${iso.slice(4)}`;
+/** The evaluation window the Coder should use: the years before the holdout, on the configured symbols. */
+export async function evaluationParams(ownerId: string, s?: ResearchSettings) {
+  const st = s ?? (await researchSettings(ownerId));
+  const end = (await evaluatorSettings(ownerId)).readableEnd ?? (await latestPriceDate(ownerId));
+  return end ? { start: addYears(end, -st.evaluationYears), end, symbols: st.evaluationSymbols } : undefined;
+}
+
+const QUEUES: Record<ResearchRole | 'judge_post', Theory['status'][]> = {
+  theorist: ['revise'],
+  judge: ['pre_review', 'post_review'],
+  judge_post: ['post_review'],
+  coder: ['approved_for_code', 'revise_code', 'code_error', 'coding'],
+};
+const line = (t: Theory) => ({
+  theory_id: `T-${t.number}`,
+  title: t.title,
+  status: t.status,
+  family: t.family,
+  ...(t.claim ? { claimed_by: t.claim.by } : {}),
+});
+
+/** get_research_brief: what this role should do now. */
+export async function researchBrief(
+  ownerId: string,
+  role: ResearchRole | undefined,
+  meta: { agentId?: string; nodeId?: string } = {},
+) {
+  const s = await researchSettings(ownerId);
+  const counts = Object.fromEntries(
+    (
+      await theories()
+        .aggregate<{ _id: string; n: number }>([
+          { $match: { ownerId } },
+          { $group: { _id: '$status', n: { $sum: 1 } } },
+        ])
+        .toArray()
+    ).map((c) => [c._id, c.n]),
+  );
+  const queue = role
+    ? await theories()
+        .find({ ownerId, status: { $in: QUEUES[role] } }, { projection: { history: 0 } })
+        .sort({ number: 1 })
+        .limit(50)
+        .toArray()
+    : [];
+  const me = meta.agentId ?? meta.nodeId;
+  const recent = await theories()
+    .find({ ownerId }, { projection: { number: 1, title: 1, status: 1, family: 1 } })
+    .sort({ number: -1 })
+    .limit(20)
+    .toArray();
+  const gates = await activeGates(ownerId);
+  return {
+    role: role ?? 'none',
+    focus: s.focus || 'none set: any family from the strategy-library skill',
+    steering: (s.steering ?? []).slice(-3).map((n) => ({ note: n.note, at: n.at })),
+    counts,
+    queue: queue
+      .filter((t) => role !== 'coder' || !t.claim || t.claim.by === me || stale(t.claim.at))
+      .map(line),
+    recent_theories: recent.map((t) => ({
+      theory_id: `T-${t.number}`,
+      title: t.title,
+      status: t.status,
+      family: t.family,
+    })),
+    evaluation_params: await evaluationParams(ownerId, s),
+    gates: { version: gates.version, ...gates.gates },
+  };
+}
+export const CLAIM_HOURS = 2;
+export const stale = (at: Date) => Date.now() - new Date(at).getTime() > CLAIM_HOURS * 3600_000;
+
+// --- the harness ----------------------------------------------------------------------------------------------
+export const ROLE_CONNECTION_NAMES: Record<ResearchRole, string> = {
+  theorist: 'Research — Theorist',
+  judge: 'Research — Judge',
+  coder: 'Research — Coder',
+};
+const DATA_TOOLS = ['list_collections', 'describe_collection', 'sample_collection', 'query_collection'];
+export const ROLE_TOOLS: Record<'theorist' | 'judge_pre' | 'coder' | 'judge_post', string[]> = {
+  theorist: ['get_research_brief', 'search_theories', 'get_theory', 'submit_theory', ...DATA_TOOLS],
+  judge_pre: [
+    'get_research_brief',
+    'search_theories',
+    'get_theory',
+    'review_theory',
+    'describe_collection',
+    'sample_collection',
+  ],
+  coder: [
+    'get_research_brief',
+    'get_theory',
+    'submit_code',
+    'evaluate_strategy',
+    'get_evaluation',
+    'describe_collection',
+    'sample_collection',
+    'query_collection',
+  ],
+  judge_post: ['get_research_brief', 'get_theory', 'get_evaluation', 'set_verdict'],
+};
+export const LOOP_DONE = 'NOTHING_TO_CODE';
+const PROMPTS = {
+  theorist: (i: number, n: number) =>
+    `You are Theorist ${i} of ${n} in the StockHarness research loop. Propose ONE new, testable theory.\n` +
+    '1. Call get_research_brief: read the focus, the human steering notes (follow them), recent theories and your queue.\n' +
+    '2. If your queue has a theory sent back for revision, fix exactly what the Judge asked and re-submit it with submit_theory(theory_id=...). Otherwise propose a new one.\n' +
+    `3. Pick an idea from the strategy-library skill; Theorist ${i} prefers the family at position ${i} of the library order, so parallel Theorists differ. Combine, condition or refine it; never resubmit a card unchanged.\n` +
+    '4. Check search_theories for near-duplicates, and describe_collection for every field you rely on (exact names, known-at rule).\n' +
+    '5. Call submit_theory with a precise hypothesis, the signal logic in words, data_needed (collection.field), horizon_days, direction and a measurable falsification. Reply with the theory id.',
+  judge_pre:
+    'You are the Judge (pre-code review) in the StockHarness research loop. Follow the judge-checklist skill.\n' +
+    'Call get_research_brief, then for every theory in your queue with status pre_review: get_theory, check testability, lookahead, novelty, plausibility and data, and call review_theory (approve, revise with exactly what to change, or reject). Leave post_review theories for the post-result review.\n' +
+    `End your reply with ${LOOP_DONE} if, after your reviews, no theory is approved_for_code, revise_code or code_error (nothing for the Coder).`,
+  coder:
+    'You are the Coder in the StockHarness research loop. Follow the write-a-strategy-plugin skill.\n' +
+    'Call get_research_brief. For each theory in your queue (oldest first): get_theory, check the fields with describe_collection, write the plugin, and call submit_code(theory_id, code). Read the error or warnings and fix only what they point at, calling submit_code again until it passes. Then call evaluate_strategy(theory_id, params) once, with the evaluation_params from the brief.\n' +
+    'Never tune the code to the metrics. When no theory is left in your queue, reply DONE.',
+  judge_post:
+    'You are the Judge (post-result review) in the StockHarness research loop. Follow the judge-checklist skill.\n' +
+    'Call get_research_brief. For every theory in post_review: get_theory (its evaluations), then set_verdict. The gates decide: request successful only if you believe they pass (a passing exploration runs the one-shot holdout); request failed with reasons otherwise, or revise with one concrete change. Cite the numbers. Reply with a one-line summary per theory.',
+};
+
+export type ResearchLoopInput = {
+  name?: string;
+  providers: { theorist: string; judge: string; coder: string };
+  connections: Record<ResearchRole, string>;
+  skills: { library?: string; plugin?: string; catalog?: string; judge?: string };
+  theorists: number;
+  scheduleMinutes?: number;
+};
+/** The research loop harness (ids resolved). */
+export function makeResearchLoop(o: ResearchLoopInput): Workflow {
+  const sk = (...ids: (string | undefined)[]) => ids.filter(Boolean) as string[];
+  const agent = (
+    name: string,
+    providerId: string,
+    systemPrompt: string,
+    connectionId: string,
+    tools: string[],
+    skillIds: string[],
+    extra: Partial<Agent> = {},
+  ) =>
+    agentSchema.parse({
+      name,
+      providerId,
+      systemPrompt,
+      connections: [{ connectionId, tools }],
+      skillIds,
+      maxTurns: 30,
+      timeoutSeconds: 1800,
+      ...extra,
+    });
+  const nodes: WorkflowNode[] = [
+    { id: 'start', name: 'Start', type: 'start', next: 'theorists', position: { x: 40, y: 200 } },
+  ];
+  const theoristIds = Array.from({ length: o.theorists }, (_, i) => `theorist_${i + 1}`);
+  theoristIds.forEach((id, i) =>
+    nodes.push({
+      id,
+      name: `Theorist ${i + 1}`,
+      type: 'agent',
+      config: agent(
+        `Theorist ${i + 1}`,
+        o.providers.theorist,
+        PROMPTS.theorist(i + 1, o.theorists),
+        o.connections.theorist,
+        ROLE_TOOLS.theorist,
+        sk(o.skills.library, o.skills.catalog),
+      ),
+      prompt: 'Research cycle: {{input}}',
+      next: 'judge_pre',
+      position: { x: 260, y: 40 + i * 140 },
+    } as WorkflowNode),
+  );
+  nodes.push(
+    {
+      id: 'theorists',
+      name: 'Theorists',
+      type: 'parallel',
+      agentNodeIds: theoristIds,
+      agentIds: [],
+      prompt: 'Research cycle: {{input}}',
+      next: 'judge_pre',
+      position: { x: 180, y: 200 },
+    } as WorkflowNode,
+    {
+      id: 'judge_pre',
+      name: 'Judge (pre-code)',
+      type: 'agent',
+      config: agent(
+        'Judge (pre-code)',
+        o.providers.judge,
+        PROMPTS.judge_pre,
+        o.connections.judge,
+        ROLE_TOOLS.judge_pre,
+        sk(o.skills.judge, o.skills.catalog, o.skills.library),
+      ),
+      prompt: 'Review the theories submitted this cycle.\n\nTheorists said:\n{{last}}',
+      next: 'anything_to_code',
+      position: { x: 520, y: 200 },
+    } as WorkflowNode,
+    {
+      id: 'anything_to_code',
+      name: 'Anything to code?',
+      type: 'condition',
+      value: '{{last}}',
+      operator: 'contains',
+      compare: LOOP_DONE,
+      onTrue: 'judge_post',
+      onFalse: 'coder',
+      position: { x: 740, y: 200 },
+    } as WorkflowNode,
+    {
+      id: 'coder',
+      name: 'Coder',
+      type: 'agent',
+      config: agent(
+        'Coder',
+        o.providers.coder,
+        PROMPTS.coder,
+        o.connections.coder,
+        ROLE_TOOLS.coder,
+        sk(o.skills.plugin, o.skills.catalog),
+        {
+          pattern: 'loop',
+          patternConfig: { reflections: 1, iterations: 4, doneMarker: 'DONE', maxPlanSteps: 5 },
+        },
+      ),
+      prompt: 'Code and evaluate the approved theories.',
+      next: 'judge_post',
+      position: { x: 960, y: 120 },
+    } as WorkflowNode,
+    {
+      id: 'judge_post',
+      name: 'Judge (post-result)',
+      type: 'agent',
+      config: agent(
+        'Judge (post-result)',
+        o.providers.judge,
+        PROMPTS.judge_post,
+        o.connections.judge,
+        ROLE_TOOLS.judge_post,
+        sk(o.skills.judge, o.skills.library),
+      ),
+      prompt: 'Give verdicts for the evaluated theories.',
+      next: 'finish',
+      position: { x: 1180, y: 200 },
+    } as WorkflowNode,
+    {
+      id: 'finish',
+      name: 'Finish',
+      type: 'finish',
+      template: '{{last}}',
+      position: { x: 1400, y: 200 },
+    } as WorkflowNode,
+  );
+  return workflowSchema.parse({
+    name: o.name ?? 'Research loop',
+    description:
+      'Layer 4 research loop: parallel Theorists propose, the Judge reviews, the Coder writes and evaluates plugins, the Judge gives mechanical verdicts. Steer it from the research settings.',
+    enabled: true,
+    startAt: 'start',
+    maxSteps: 200,
+    resumePolicy: 'safe',
+    resources: [],
+    bindings: [],
+    nodes,
+    ...(o.scheduleMinutes
+      ? { schedule: { enabled: true, everyMinutes: o.scheduleMinutes, input: 'Scheduled research cycle' } }
+      : {}),
+  });
+}

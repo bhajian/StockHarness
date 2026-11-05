@@ -120,3 +120,27 @@ The research agents' skills are kept as source in `skills/` and generated into `
 A unit test fails when the seed file is out of date, and `pipeline/tests/test_skill_examples.py` checks every
 plugin example in the skills against the contract (and runs the ones the synthetic market can feed). With a
 research role, only the Coder may test or evaluate code (every evaluation is a trial).
+
+## The research loop (#115)
+
+`POST /api/research/loop { providers: { theorist, judge, coder? }, theorists?, scheduleMinutes? }` installs (or updates)
+the **Research loop** harness. It creates the three role connections (`Research — Theorist`, `Research — Judge`,
+`Research — Coder`) if missing, and attaches the seed skills by name.
+
+```
+Start → Theorists (Parallel, N agent cards) → Judge (pre-code) → Anything to code? ─┬→ Coder (loop) → Judge (post-result) → Finish
+                                                                                    └→ Judge (post-result)  (NOTHING_TO_CODE)
+```
+
+- **Agents:** each agent works its role's queue and starts with `get_research_brief`. The brief has its queue, the
+  focus, the latest human steering notes, recent theories (to stay novel), the evaluation window (`start`,
+  `end` before the holdout, `symbols`) and the active gates.
+- **Parallel Theorists** prefer different families. Coders claim a theory while they code it (2 hours), so
+  overlapping cycles do not collide.
+- **Models:** the Theorist and the Judge can use different models (different providers per agent card). The debate
+  records which model made each decision.
+- **Steering:** `POST /api/research/steering { note }` reaches the Theorists on the next cycle (the latest five
+  notes are kept). `GET/PUT /api/research/settings` sets the focus, the Theorists per cycle, and the evaluation scope.
+  The default scope is small: 50 large caps over the 3 years before the holdout.
+- **Running it:** run it like any harness, on its schedule (`scheduleMinutes`) or continuously. Per-theory
+  caps are enforced by the tools, so the budget can stay unlimited.

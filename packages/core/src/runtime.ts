@@ -2129,6 +2129,7 @@ async function runAgentUnchecked(stored: Agent, input: string, history: Run['his
                                   'openharness/agent': {
                                     agentId: ctx.agentId,
                                     runId: ctx.runId,
+                                    nodeId: ctx.nodeId,
                                     model: `${provider.name}:${provider.model}`,
                                   },
                                 }
