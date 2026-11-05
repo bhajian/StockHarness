@@ -252,6 +252,11 @@ test('Research Lab: pause / resume, settings rebuild the harness, gates edits ma
     'rebuilt with three Theorists',
   );
   assert.equal(wf.nodes.find((n: any) => n.id === 'judge_pre').config.providerId, judgeProvider);
+  await ok('/research/settings', { theoristsPerCycle: 1, agentEffort: 'medium', agentMaxTurns: 12 }, 'PUT');
+  wf = (await ok('/workflows')).find((w: any) => w.name === 'Research loop');
+  const coder = wf.nodes.find((n: any) => n.id === 'coder').config;
+  assert.deepEqual([coder.effort, coder.maxTurns], ['medium', 12], 'the small development profile (#266)');
+  assert.equal(wf.nodes.filter((n: any) => n.id.startsWith('theorist_')).length, 1);
   const before = await ok('/research/gates');
   const used = before.versions.find((v: any) => v.version === before.active);
   assert.ok(used.lockedAt, 'the cycle locked the gates it used');

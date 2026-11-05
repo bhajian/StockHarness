@@ -170,3 +170,11 @@ Start → Theorists (Parallel, N agent cards) → Judge (pre-code) → Anything 
 
 APIs: `GET /api/research/status`, `POST /api/research/pause|resume`, `GET/PUT /api/research/settings`,
 `GET /api/research/gates/:version`, `GET /api/research/charts?days=`, `GET /api/research/activity?since=`.
+
+## Development smoke tests (#266)
+
+During development the loop is tested with one or two small examples that finish in about 2–3 minutes and stay well
+within the model provider's rate. Set, in the research settings (or the Research Lab drawer): 1 Theorist per cycle,
+`agentEffort: medium`, `agentMaxTurns: 12`, about 10 evaluation symbols and 1 evaluation year, and a concrete `focus`.
+Run one cycle by hand, with no schedule. The defaults (high effort, 30 turns) are for real runs, and the 7-day
+acceptance run (#117) waits until after the development phase.
