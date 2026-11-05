@@ -1,0 +1,333 @@
+[
+  {
+    "rule": {
+      "type": "eod",
+      "field": "date"
+    },
+    "row": {
+      "date": "2024-03-08"
+    },
+    "as_of_date": "2024-03-08"
+  },
+  {
+    "rule": {
+      "type": "eod",
+      "field": "date"
+    },
+    "row": {
+      "date": "2024-03-09"
+    },
+    "as_of_date": "2024-03-11"
+  },
+  {
+    "rule": {
+      "type": "eod",
+      "field": "date"
+    },
+    "row": {
+      "date": "2024-03-08 10:00:00"
+    },
+    "as_of_date": "2024-03-08"
+  },
+  {
+    "rule": {
+      "type": "eod",
+      "field": "date"
+    },
+    "row": {},
+    "as_of_date": null
+  },
+  {
+    "rule": {
+      "type": "timestamp",
+      "field": "filingDate"
+    },
+    "row": {
+      "filingDate": "2024-03-08 08:15:00"
+    },
+    "as_of_date": "2024-03-08"
+  },
+  {
+    "rule": {
+      "type": "timestamp",
+      "field": "filingDate"
+    },
+    "row": {
+      "filingDate": "2024-03-08 09:45:00"
+    },
+    "as_of_date": "2024-03-11"
+  },
+  {
+    "rule": {
+      "type": "timestamp",
+      "field": "filingDate"
+    },
+    "row": {
+      "filingDate": "2024-03-08"
+    },
+    "as_of_date": "2024-03-11"
+  },
+  {
+    "rule": {
+      "type": "timestamp",
+      "field": "filingDate"
+    },
+    "row": {
+      "filingDate": "2024-03-10T12:00:00Z"
+    },
+    "as_of_date": "2024-03-11"
+  },
+  {
+    "rule": {
+      "type": "timestamp",
+      "field": "filingDate"
+    },
+    "row": {
+      "filingDate": "2024-07-03T13:00:00+00:00"
+    },
+    "as_of_date": "2024-07-03"
+  },
+  {
+    "rule": {
+      "type": "timestamp",
+      "field": "filingDate"
+    },
+    "row": {
+      "filingDate": "not a date"
+    },
+    "as_of_date": null
+  },
+  {
+    "rule": {
+      "type": "timestamp",
+      "field": "declarationDate",
+      "fallback": "date"
+    },
+    "row": {
+      "declarationDate": "",
+      "date": "2024-05-01"
+    },
+    "as_of_date": "2024-05-02"
+  },
+  {
+    "rule": {
+      "type": "timestamp",
+      "field": "declarationDate",
+      "fallback": "date"
+    },
+    "row": {
+      "declarationDate": "2024-04-15",
+      "date": "2024-05-01"
+    },
+    "as_of_date": "2024-04-16"
+  },
+  {
+    "rule": {
+      "type": "timestamp",
+      "field": "known_at"
+    },
+    "row": {
+      "known_at": "2026-11-19"
+    },
+    "as_of_date": "2026-11-20"
+  },
+  {
+    "rule": {
+      "type": "timestamp",
+      "field": "known_at"
+    },
+    "row": {
+      "known_at": "2021-10-25T20:00:00+00:00"
+    },
+    "as_of_date": "2021-10-26"
+  },
+  {
+    "rule": {
+      "type": "nextSession",
+      "field": "date"
+    },
+    "row": {
+      "date": "2024-03-08"
+    },
+    "as_of_date": "2024-03-11"
+  },
+  {
+    "rule": {
+      "type": "nextSession",
+      "field": "date"
+    },
+    "row": {
+      "date": "2024-03-06"
+    },
+    "as_of_date": "2024-03-07"
+  },
+  {
+    "rule": {
+      "type": "dayBefore",
+      "field": "date"
+    },
+    "row": {
+      "date": "2024-03-11"
+    },
+    "as_of_date": "2024-03-11"
+  },
+  {
+    "rule": {
+      "type": "dayBefore",
+      "field": "date"
+    },
+    "row": {
+      "date": "2024-03-12"
+    },
+    "as_of_date": "2024-03-12"
+  },
+  {
+    "rule": {
+      "type": "dayBefore",
+      "field": "date"
+    },
+    "row": {
+      "date": "x"
+    },
+    "as_of_date": null
+  },
+  {
+    "rule": {
+      "type": "snapshot",
+      "field": "snapshot_date"
+    },
+    "row": {
+      "snapshot_date": "2024-03-09"
+    },
+    "as_of_date": "2024-03-11"
+  },
+  {
+    "rule": {
+      "type": "statement",
+      "field": "acceptedDate",
+      "periodField": "date"
+    },
+    "row": {
+      "date": "2023-12-31",
+      "acceptedDate": "2024-02-01 16:05:12",
+      "period": "Q4"
+    },
+    "as_of_date": "2024-02-02"
+  },
+  {
+    "rule": {
+      "type": "statement",
+      "field": "acceptedDate",
+      "periodField": "date"
+    },
+    "row": {
+      "date": "2023-12-31",
+      "acceptedDate": "2024-02-01 07:30:00",
+      "period": "Q4"
+    },
+    "as_of_date": "2024-02-01"
+  },
+  {
+    "rule": {
+      "type": "statement",
+      "field": "acceptedDate",
+      "periodField": "date"
+    },
+    "row": {
+      "date": "2023-12-31",
+      "acceptedDate": "2023-12-31 00:00:00",
+      "period": "Q4"
+    },
+    "as_of_date": "2024-04-01"
+  },
+  {
+    "rule": {
+      "type": "statement",
+      "field": "acceptedDate",
+      "periodField": "date"
+    },
+    "row": {
+      "date": "2024-03-31",
+      "acceptedDate": "2024-03-31",
+      "period": "Q1"
+    },
+    "as_of_date": "2024-05-16"
+  },
+  {
+    "rule": {
+      "type": "statement",
+      "field": "acceptedDate",
+      "periodField": "date"
+    },
+    "row": {
+      "date": "2024-06-30",
+      "period": "Q2"
+    },
+    "as_of_date": "2024-08-15"
+  },
+  {
+    "rule": {
+      "type": "statement",
+      "field": "acceptedDate",
+      "periodField": "date"
+    },
+    "row": {
+      "date": "2024-09-28",
+      "acceptedDate": null,
+      "period": "FY"
+    },
+    "as_of_date": "2024-12-30"
+  },
+  {
+    "rule": {
+      "type": "periodLag",
+      "periodField": "date",
+      "lagDays": 90
+    },
+    "row": {
+      "date": "2023-12-31"
+    },
+    "as_of_date": "2024-04-01"
+  },
+  {
+    "rule": {
+      "type": "periodLag",
+      "periodField": "date",
+      "lagDays": 20
+    },
+    "row": {
+      "date": "2024-02-01"
+    },
+    "as_of_date": "2024-02-22"
+  },
+  {
+    "rule": {
+      "type": "asOf",
+      "field": "as_of_date"
+    },
+    "row": {
+      "as_of_date": "2024-03-08",
+      "known_at": "2024-03-08T21:00:00+00:00"
+    },
+    "as_of_date": "2024-03-08"
+  },
+  {
+    "rule": {
+      "type": "asOf",
+      "field": "as_of_date"
+    },
+    "row": {
+      "as_of_date": null
+    },
+    "as_of_date": null
+  },
+  {
+    "rule": {
+      "type": "current_only"
+    },
+    "row": {
+      "symbol": "AAPL"
+    },
+    "as_of_date": null
+  }
+]

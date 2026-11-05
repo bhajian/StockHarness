@@ -224,7 +224,14 @@ export const fetchDatasetRuns = (id: string) => api<DatasetSyncRun[]>(`/dataset-
 
 // --- Everything is a YAML object (#152) ----------------------------------------------------------
 export type ObjectKind =
-  'Skill' | 'Agent' | 'Harness' | 'DatasetSync' | 'Transform' | 'CatalogEntry' | 'Pipeline';
+  | 'Skill'
+  | 'Agent'
+  | 'Harness'
+  | 'DatasetSync'
+  | 'Transform'
+  | 'CatalogEntry'
+  | 'Pipeline'
+  | 'StrategyPlugin';
 export type ObjectImportPlan = {
   mode: 'merge' | 'replace';
   items: { kind: ObjectKind; name: string; action: 'create' | 'update' | 'unchanged' | 'remove' }[];

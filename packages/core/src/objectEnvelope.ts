@@ -13,6 +13,7 @@ export const OBJECT_KINDS = [
   'Transform',
   'CatalogEntry',
   'Pipeline',
+  'StrategyPlugin',
 ] as const;
 export type ObjectKind = (typeof OBJECT_KINDS)[number];
 /**
@@ -27,6 +28,7 @@ export const REF_TYPE_BY_KIND: Record<ObjectKind, string> = {
   Transform: 'transforms',
   CatalogEntry: 'catalog',
   Pipeline: 'pipelines',
+  StrategyPlugin: 'strategyPlugins',
 };
 /** Referenceable types that are never exported (they hold secrets); they must already exist on the target. */
 export const EXTERNAL_REF_TYPES = ['connections', 'providers', 'knowledge', 'guardrails'] as const;

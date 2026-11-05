@@ -11,6 +11,7 @@ const KIND_LABEL: Record<ObjectKind, string> = {
   Transform: 'transforms',
   CatalogEntry: 'catalog docs',
   Pipeline: 'pipelines',
+  StrategyPlugin: 'strategy plugins',
 };
 
 /**

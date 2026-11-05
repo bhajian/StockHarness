@@ -19,6 +19,8 @@ export type KnownAtRule =
   | { type: 'dayBefore'; field: string }
   /** Weekly snapshots: known on `snapshot_date`. */
   | { type: 'snapshot'; field: 'snapshot_date' }
+  /** Layer 2 rows that carry their own first-usable date (`as_of_date <= D`). */
+  | { type: 'asOf'; field: string }
   /** Holds today's value only; never readable for historical dates. */
   | { type: 'current_only' };
 
@@ -105,6 +107,8 @@ export function describeKnownAt(rule: KnownAtRule): string {
       return '`snapshot_date` (weekly snapshot; no history before the first snapshot)';
     case 'current_only':
       return 'current value only; never use for historical dates';
+    case 'asOf':
+      return `\`${rule.field}\` on every row; filter \`${rule.field} <= D\``;
   }
 }
 
@@ -177,6 +181,14 @@ export function knownAtOf(rule: KnownAtRule, row: Record<string, unknown>): Know
   switch (rule.type) {
     case 'current_only':
       return null;
+    case 'asOf': {
+      const v = row[rule.field];
+      const d =
+        v instanceof Date ? v.toISOString().slice(0, 10) : typeof v === 'string' && DATE.test(v) ? v : null;
+      if (!d) return null;
+      const k = parseInstant(row.known_at) ?? parseInstant(d)!;
+      return { known_at: k.toISOString(), as_of_date: d };
+    }
     case 'eod':
     case 'snapshot':
       return out(parseInstant(row[rule.field]), (t) => onOrNextWeekday(easternDate(t)));
