@@ -58,6 +58,20 @@ import {
   refType,
   updatePipeline,
 } from '../../../packages/core/src/pipelines.js';
+import {
+  createStrategyPlugin,
+  deleteStrategyPlugin,
+  pluginProblems,
+  restoreStrategyPluginHistory,
+  strategyPluginHashProblems,
+  strategyPluginHistory,
+  strategyPluginHistorySchema,
+  strategyPluginInput,
+  strategyPluginSpec,
+  strategyPlugins,
+  updateStrategyPlugin,
+  type StrategyPluginHistoryEntry,
+} from '../../../packages/core/src/strategyPlugins.js';
 
 /** Kinds stored through the generic resource routes (the others have dedicated importers). */
 const isResourceKind = (k: ObjectKind): k is 'Skill' | 'Agent' | 'Harness' => k in RESOURCE_KIND;
@@ -187,6 +201,20 @@ export async function exportObjects(
         if (!wanted(p.name)) continue;
         const { name, ...spec } = pipelineSpec(p);
         docs.push({ apiVersion: API_VERSION, kind, metadata: { name, version: String(p.version) }, spec });
+      }
+      continue;
+    }
+    if (kind === 'StrategyPlugin') {
+      for (const p of await strategyPlugins().find({ ownerId }).toArray()) {
+        if (!wanted(p.name)) continue;
+        const history = opts.withHistory ? await strategyPluginHistory(ownerId, p) : [];
+        const spec = strategyPluginSpec(p);
+        docs.push({
+          apiVersion: API_VERSION,
+          kind,
+          metadata: { name: p.name, version: String(p.version) },
+          spec: history.length ? { ...spec, history } : spec,
+        });
       }
       continue;
     }
@@ -407,6 +435,51 @@ async function plan(
       }
   }
 
+  // Strategy plugins (#103): code verbatim; its hash (and every history entry's) must match.
+  const pluginDocs = docs.filter((d) => d.kind === 'StrategyPlugin');
+  for (const doc of pluginDocs) {
+    const name = doc.metadata.name;
+    const { history, hash: _h, ...rest } = doc.spec;
+    const parsed = strategyPluginInput.safeParse({ ...rest, name });
+    const hist = history === undefined ? undefined : strategyPluginHistorySchema.safeParse(history);
+    const problems = [
+      ...(parsed.success
+        ? pluginProblems(parsed.data)
+        : [`${parsed.error.issues[0].path.join('.') || 'spec'}: ${parsed.error.issues[0].message}`]),
+      ...(hist && !hist.success ? ['history: must be a list of { version, hash, code }'] : []),
+      ...strategyPluginHashProblems(doc.spec),
+    ];
+    if (problems.length) {
+      result.errors.push({ kind: 'StrategyPlugin', name, message: problems.join('; ') });
+      continue;
+    }
+    const current = await strategyPlugins().findOne({ ownerId, name });
+    const next = parsed.data!;
+    const action = !current
+      ? 'create'
+      : current.code === next.code &&
+          (current.description ?? '') === (next.description ?? '') &&
+          current.evaluatorVersion === next.evaluatorVersion
+        ? 'unchanged'
+        : 'update';
+    prepared.push({ doc, existingId: current?._id, action });
+    result.items.push({ kind: 'StrategyPlugin', name, action });
+  }
+  if (mode === 'replace' && pluginDocs.length) {
+    const names = new Set(pluginDocs.map((d) => d.metadata.name));
+    for (const p of await strategyPlugins()
+      .find({ ownerId }, { projection: { name: 1 } })
+      .toArray())
+      if (!names.has(p.name)) {
+        prepared.push({
+          doc: { apiVersion: API_VERSION, kind: 'StrategyPlugin', metadata: { name: p.name }, spec: {} },
+          existingId: p._id,
+          action: 'remove',
+        });
+        result.items.push({ kind: 'StrategyPlugin', name: p.name, action: 'remove' });
+      }
+  }
+
   // Catalog docs: curated descriptions only, matched by collection name (merge semantics in both modes).
   for (const doc of docs.filter((d) => d.kind === 'CatalogEntry')) {
     const name = doc.metadata.name;
@@ -609,6 +682,24 @@ export async function applyObjectImport(
       else if (p.existingId) await updatePipeline(ownerId, p.existingId, body, principal.user._id);
       else await createPipeline(ownerId, body, principal.user._id);
       done.push({ kind: 'Pipeline', name: p.doc.metadata.name, action: p.action });
+    }
+    // Strategy plugins: history is restored only for plugins this import creates.
+    for (const p of prepared.filter((x) => x.doc.kind === 'StrategyPlugin' && x.action !== 'unchanged')) {
+      const { history, hash: _h, ...spec } = p.doc.spec;
+      const body = { ...spec, name: p.doc.metadata.name };
+      if (p.action === 'remove') await deleteStrategyPlugin(ownerId, p.existingId!);
+      else if (p.existingId) await updateStrategyPlugin(ownerId, p.existingId, body, principal.user._id);
+      else {
+        const created = await createStrategyPlugin(ownerId, body, principal.user._id);
+        if (Array.isArray(history) && history.length)
+          await restoreStrategyPluginHistory(
+            ownerId,
+            created._id,
+            strategyPluginHistorySchema.parse(history) as StrategyPluginHistoryEntry[],
+            principal.user._id,
+          );
+      }
+      done.push({ kind: 'StrategyPlugin', name: p.doc.metadata.name, action: p.action });
     }
     // Removals last and in reverse dependency order, so harnesses go before the skills/agents they use.
     for (const kind of [...OBJECT_KINDS].reverse()) {

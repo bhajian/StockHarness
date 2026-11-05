@@ -19,6 +19,7 @@ export const BACKUP_FILES: Record<ObjectKind, string> = {
   Transform: 'transforms.yaml',
   CatalogEntry: 'catalog.yaml',
   Pipeline: 'pipelines.yaml',
+  StrategyPlugin: 'strategy-plugins.yaml',
 };
 /** Older export files, removed from the repo once the new files are written. */
 export const LEGACY_FILES = ['workflows.yaml', 'dataset-syncs.json'];
