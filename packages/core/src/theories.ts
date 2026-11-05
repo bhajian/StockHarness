@@ -72,6 +72,8 @@ export type Theory = TheoryContent & {
   trials: number;
   /** Depends on estimate / consensus snapshots: no backtest, paper tracking only (#113). */
   forwardOnly?: boolean;
+  /** The Coder working on it (#115): set when coding starts, so parallel Coders do not collide. Not exported. */
+  claim?: { by: string; runId?: string; at: Date };
   history: TheoryEvent[];
   createdAt: Date;
   updatedAt: Date;

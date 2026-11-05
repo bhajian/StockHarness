@@ -27,7 +27,7 @@ import {
 import { startHoldoutEvaluation } from './evaluations.js';
 
 export type ResearchRole = 'theorist' | 'judge' | 'coder';
-type Meta = { agentId?: string; runId?: string; model?: string };
+type Meta = { agentId?: string; runId?: string; model?: string; nodeId?: string };
 const WAIT_MAX_SECONDS = 50;
 
 const str = { type: 'string' } as const;
@@ -52,6 +52,13 @@ export const LIFECYCLE_TOOLS: {
   description: string;
   inputSchema: Record<string, unknown>;
 }[] = [
+  {
+    name: 'get_research_brief',
+    roles: 'all',
+    description:
+      "Start here every cycle: your role's queue of theories, the research focus, the latest human steering notes, recent theories, the evaluation window to use and the active gates.",
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+  },
   {
     name: 'search_theories',
     roles: 'all',
@@ -226,6 +233,10 @@ export async function callLifecycleTool(
   meta: Meta = {},
 ) {
   switch (name) {
+    case 'get_research_brief': {
+      const { researchBrief } = await import('./researchLoop.js');
+      return researchBrief(ownerId, role, meta);
+    }
     case 'search_theories':
       return searchTheories(ownerId, String(args.text ?? ''), Math.min(50, Number(args.limit) || 10));
     case 'get_theory':
@@ -276,16 +287,17 @@ export async function callLifecycleTool(
     }
     case 'submit_code':
       need(role, ['coder'], name);
-      return submitCode(ownerId, args, actorOf('coder', meta));
+      return submitCode(ownerId, args, actorOf('coder', meta), meta);
     default:
       throw new HttpError(404, `Unknown tool ${name}`);
   }
 }
 
-async function submitCode(ownerId: string, args: Record<string, any>, actor: TheoryActor) {
+async function submitCode(ownerId: string, args: Record<string, any>, actor: TheoryActor, meta: Meta = {}) {
   let t = await getTheory(ownerId, String(args.theory_id ?? ''));
   const caps = await lifecycleCaps(ownerId);
   const note = typeof args.note === 'string' && args.note.trim() ? args.note.trim() : 'submit_code';
+  await assertClaim(t, meta);
   if (t.status === 'approved_for_code' || t.status === 'revise_code')
     t = await transitionTheory(ownerId, t._id, 'coding', actor, note);
   else if (t.status === 'code_error') {
@@ -302,6 +314,7 @@ async function submitCode(ownerId: string, args: Record<string, any>, actor: The
     t = await transitionTheory(ownerId, t._id, 'coding', actor, note);
   } else if (t.status !== 'coding')
     throw new HttpError(409, `T-${t.number} is ${t.status}; code is submitted only for an approved theory`);
+  await claimTheory(t, meta);
   const pluginName = t.plugin?.name ?? slug(t);
   const result = (await testStrategy(ownerId, {
     code: String(args.code ?? ''),
@@ -362,6 +375,7 @@ export async function evaluateForTheory(
       409,
       `T-${t.number} is ${t.status}; it is evaluated once per coding round, after submit_code passes`,
     );
+  await assertClaim(t, meta);
   if (!t.plugin) throw new HttpError(409, `T-${t.number} has no code yet; call submit_code first`);
   if (t.forwardOnly)
     throw new HttpError(
@@ -491,3 +505,26 @@ const failing = (results: { gate: string; passed: boolean; value: unknown; thres
     .filter((r) => !r.passed)
     .map((r) => `${r.gate} ${r.value ?? 'n/a'} (needs ${r.threshold})`)
     .join('; ') || 'all pass';
+
+const claimant = (meta: Meta) => meta.agentId ?? meta.nodeId ?? meta.runId ?? 'coder';
+/** A theory another Coder is working on (claimed within the last hours) is not yours to change. */
+async function assertClaim(t: Theory, meta: Meta) {
+  const { stale } = await import('./researchLoop.js');
+  if (
+    t.claim &&
+    t.claim.by !== claimant(meta) &&
+    !stale(t.claim.at) &&
+    !['approved_for_code', 'revise_code'].includes(t.status)
+  )
+    throw new HttpError(
+      409,
+      `T-${t.number} is being coded by ${t.claim.by}; pick another theory from your brief`,
+    );
+}
+async function claimTheory(t: Theory, meta: Meta) {
+  const { theories } = await import('./theories.js');
+  await theories().updateOne(
+    { _id: t._id },
+    { $set: { claim: { by: claimant(meta), ...(meta.runId ? { runId: meta.runId } : {}), at: new Date() } } },
+  );
+}
