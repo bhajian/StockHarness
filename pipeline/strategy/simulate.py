@@ -27,7 +27,7 @@ from . import EVALUATOR_VERSION, contract, metrics
 from .broker import PaperBroker
 from .config import load_config
 from .context import StrategyContext
-from .engine import EvaluationError, _current, _universe_on, plan_books, resolve_scope, trading_days
+from .engine import EvaluationError, _current, _universe_on, plan_books, resolve_scope, trading_days, universe_top
 from .reader import PitReader
 
 SIMULATOR_VERSION = "1.0.0"
@@ -103,6 +103,7 @@ def simulate(ideas: list[dict], *, source, policies: dict, params: dict, config:
     reader = PitReader(source, policies, end=readable_end or end, start=start, scope_ids=scope, scope_tickers=tickers)
     lag = int(costs["execution_lag_days"])
     gross = float(sim["constraints"].get("gross") or 1.0)
+    top = universe_top(params)
     sink = sink or ListSink()
 
     # Pass 1: every idea's target books (the evaluator's walk).
@@ -110,7 +111,7 @@ def simulate(ideas: list[dict], *, source, policies: dict, params: dict, config:
     for idea in ideas:
         try:
             _plan_idea(idea, plans, plugins, metas, source=source, reader=reader, days=days, scope=scope, lag=lag,
-                       gross=gross)
+                       gross=gross, top=top)
         except Exception as exc:  # noqa: BLE001 - re-raised with the idea it came from (for the error frames)
             exc.idea_id = idea["id"]
             raise
@@ -183,7 +184,7 @@ def simulate(ideas: list[dict], *, source, policies: dict, params: dict, config:
         if di + lag < len(run_days):
             fill = run_days[di + lag]
             for key, reason in _exit_decisions(d, broker, sim["exits"], metas, plugins, closed_returns, reader,
-                                               plans, ideas, source, scope, days):
+                                               plans, ideas, source, scope, days, top):
                 if not any(k == key for k, _ in pending.get(fill, [])):
                     pending.setdefault(fill, []).append((key, reason))
                     blocked[key] = (d, reason)
@@ -206,12 +207,13 @@ def simulate(ideas: list[dict], *, source, policies: dict, params: dict, config:
                    int(cfg["trading_days_per_year"]), readable_end or end, sector, raw_returns)
 
 
-def _plan_idea(idea, plans, plugins, metas, *, source, reader, days, scope, lag, gross):
+def _plan_idea(idea, plans, plugins, metas, *, source, reader, days, scope, lag, gross, top=None):
     plugin = contract.load(idea["code"])
     over = idea.get("overrides") or {}
     meta = {**plugin.META, **{k: over[k] for k in ("side", "top_n", "rebalance") if over.get(k) is not None}}
     plans[idea["id"]] = plan_books(plugin, meta, source=source, reader=reader, days=days, scope=scope, lag=lag,
-                                   gross=gross, plugin_params={**plugin.params, **(idea.get("plugin_params") or {})})
+                                   gross=gross, plugin_params={**plugin.params, **(idea.get("plugin_params") or {})},
+                                   top=top)
     plugins[idea["id"]], metas[idea["id"]] = plugin, meta
 
 
@@ -297,7 +299,7 @@ def _constrain(books: dict[str, dict[str, float]], broker: PaperBroker, cfg: dic
     return out
 
 
-def _exit_decisions(d, broker, exits, metas, plugins, closed_returns, reader, plans, ideas, source, scope, days):
+def _exit_decisions(d, broker, exits, metas, plugins, closed_returns, reader, plans, ideas, source, scope, days, top=None):
     """(key, reason) for each lot that should exit, decided at today's close."""
     out = []
     stop, tp = exits.get("stop"), exits.get("take_profit")
@@ -333,7 +335,7 @@ def _exit_decisions(d, broker, exits, metas, plugins, closed_returns, reader, pl
             held = [k[1] for k in keys if k not in taken]
             if not held:
                 continue
-            ctx = StrategyContext(d, reader, plugin.params, _universe_on(source, d, scope, days))
+            ctx = StrategyContext(d, reader, plugin.params, _universe_on(source, d, scope, days, top))
             try:
                 verdicts = review(ctx, list(held)) or {}
             except Exception as exc:  # noqa: BLE001 - re-raised with the idea it came from

@@ -748,7 +748,11 @@ function ConfigView({ s, isAdmin }: { s: any; isAdmin: boolean }) {
     ['Period', `${c.period.start} → ${c.period.end}${c.period.allowHoldout ? ' · holdout allowed' : ''}`],
     [
       'Scope',
-      c.symbols?.length ? `${c.symbols.length} symbols: ${c.symbols.join(', ')}` : 'the whole universe',
+      c.universeTop
+        ? `the ${c.universeTop} largest US stocks by market cap on each date${c.universeTop === 500 ? ' (S&P 500 proxy)' : ''}`
+        : c.symbols?.length
+          ? `${c.symbols.length} symbols: ${c.symbols.join(', ')}`
+          : 'the whole universe',
     ],
     ['Capital', money(c.capital)],
     ['Allocation', c.allocation.replace('_', ' ')],

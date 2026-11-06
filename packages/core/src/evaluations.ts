@@ -23,6 +23,8 @@ export const evaluationParams = z
     rebalance: z.enum(['daily', 'weekly', 'monthly']).optional(),
     /** Values the plugin reads as ctx.params (over META.params). */
     plugin_params: z.record(z.unknown()).optional(),
+    /** #300: only the N largest names by market cap on each date (500 = an S&P 500 proxy), point in time. */
+    universe: z.object({ top_by_market_cap: z.number().int().min(1).max(5000) }).optional(),
   })
   .refine((p) => p.start <= p.end, 'start must be on or before end');
 export const evaluationInput = z.object({
@@ -330,6 +332,8 @@ export const holdoutInput = z.object({
       top_n: z.number().int().min(1).max(1000).optional(),
       rebalance: z.enum(['daily', 'weekly', 'monthly']).optional(),
       plugin_params: z.record(z.unknown()).optional(),
+      /** #300: only the N largest names by market cap on each date (500 = an S&P 500 proxy), point in time. */
+      universe: z.object({ top_by_market_cap: z.number().int().min(1).max(5000) }).optional(),
     })
     .default({}),
 });

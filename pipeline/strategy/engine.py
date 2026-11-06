@@ -73,15 +73,31 @@ def resolve_scope(source, symbols: list[str] | None) -> tuple[list[str] | None, 
     return sorted(set(ids)), sorted(set(tickers))
 
 
-def _universe_on(source, d: str, scope: list[str] | None, days: list[str]) -> list[str]:
-    """In-universe security_ids on `d` (universe_daily for that session, else the latest of the 5 before)."""
+def _universe_on(source, d: str, scope: list[str] | None, days: list[str], top: int | None = None) -> list[str]:
+    """In-universe security_ids on `d` (universe_daily for that session, else the latest of the 5 before).
+
+    `top` (#300): only the `top` largest by that session's market cap, e.g. 500 as an S&P 500 proxy. Point in time and
+    survivorship-free: the ranking uses universe_daily on that date, delisted names included.
+    """
     i = days.index(d)
     for back in days[max(0, i - 5): i + 1][::-1]:
         flt = {"date": back, "in_universe": True, **({"security_id": {"$in": scope}} if scope else {})}
-        ids = [r["security_id"] for r in source.find("universe_daily", flt, ["security_id"])]
-        if ids:
-            return sorted(set(ids))
+        rows = source.find("universe_daily", flt, ["security_id", "market_cap"] if top else ["security_id"])
+        if rows:
+            if top:
+                rows = sorted(rows, key=lambda r: (-(r.get("market_cap") or 0), r["security_id"]))[: int(top)]
+            return sorted({r["security_id"] for r in rows})
     return sorted(scope) if scope else []
+
+
+def universe_top(params: dict) -> int | None:
+    """params.universe.top_by_market_cap (#300), validated."""
+    top = (params.get("universe") or {}).get("top_by_market_cap")
+    if top is None:
+        return None
+    if not isinstance(top, int) or isinstance(top, bool) or top < 1:
+        raise EvaluationError("universe.top_by_market_cap must be a positive integer")
+    return top
 
 
 def build_book(scores: dict, eligible: set[str] | None, side: str, top_n: int, gross: float) -> dict[str, float]:
@@ -109,7 +125,7 @@ def build_book(scores: dict, eligible: set[str] | None, side: str, top_n: int, g
 
 
 def plan_books(plugin, meta: dict, *, source, reader, days: list[str], scope, lag: int, gross: float,
-               plugin_params: dict) -> dict:
+               plugin_params: dict, top: int | None = None) -> dict:
     """Pass 1 of the evaluator, shared with the paper broker (#124): signals on the rebalance dates -> target
     books, each executed `lag` sessions later. Returns targets {exec day: book}, eligible_at {exec day: (signal
     day, eligible names)}, rebalances (the record's list) and signals {exec day: {security: (score, rank, of)}}
@@ -122,7 +138,7 @@ def plan_books(plugin, meta: dict, *, source, reader, days: list[str], scope, la
         i = days.index(d)
         if i + lag >= len(days):
             break
-        uni = _universe_on(source, d, scope, days)
+        uni = _universe_on(source, d, scope, days, top)
         ctx = StrategyContext(d, reader, plugin_params, uni)
         chosen = plugin.universe(ctx) if plugin.universe else uni
         eligible = set(chosen) & set(uni) if plugin.universe and uni else set(chosen)
@@ -176,7 +192,7 @@ def evaluate(code: str, *, source, policies: dict, params: dict, config: dict | 
     lag = int(cfg["execution_lag_days"])
     gross = float(cfg["sizing"].get("gross_limit", 1.0))
     plan = plan_books(plugin, meta, source=source, reader=reader, days=days, scope=scope, lag=lag, gross=gross,
-                      plugin_params={**plugin.params, **(params.get("plugin_params") or {})})
+                      plugin_params={**plugin.params, **(params.get("plugin_params") or {})}, top=universe_top(params))
     targets, eligible_at, rebalances = plan["targets"], plan["eligible_at"], plan["rebalances"]
 
     # Pass 2: daily total returns of every name held (and, at small scale, of the whole eligible universe, for

@@ -23,6 +23,16 @@ export const researchSettingsSchema = z.object({
   theoristsPerCycle: z.number().int().min(1).max(8).default(2),
   /** The evaluation scope the Coder uses: symbols and how many years before the holdout. */
   evaluationSymbols: z.array(z.string().min(1).max(20)).max(2000).default(DEFAULT_SYMBOLS),
+  /**
+   * The evaluation scope (#300): the symbols above, or the N largest names by market cap on each date (point in
+   * time; N = 500 is the S&P 500 proxy, since the FMP plan has no constituents list).
+   */
+  scope: z
+    .object({
+      kind: z.enum(['symbols', 'top_market_cap']).default('symbols'),
+      top: z.number().int().min(1).max(5000).default(500),
+    })
+    .default({}),
   evaluationYears: z.number().int().min(1).max(15).default(3),
   /** Effort and turns per research agent (#266): the defaults suit real runs; a dev smoke test uses medium / ~12. */
   agentEffort: z.enum(['light', 'medium', 'high', 'extra-high', 'max']).default('high'),
@@ -101,7 +111,11 @@ const addYears = (iso: string, n: number) => `${Number(iso.slice(0, 4)) + n}${is
 export async function evaluationParams(ownerId: string, s?: ResearchSettings) {
   const st = s ?? (await researchSettings(ownerId));
   const end = (await evaluatorSettings(ownerId)).readableEnd ?? (await latestPriceDate(ownerId));
-  return end ? { start: addYears(end, -st.evaluationYears), end, symbols: st.evaluationSymbols } : undefined;
+  if (!end) return undefined;
+  const start = addYears(end, -st.evaluationYears);
+  return st.scope?.kind === 'top_market_cap'
+    ? { start, end, universe: { top_by_market_cap: st.scope.top } }
+    : { start, end, symbols: st.evaluationSymbols };
 }
 
 const QUEUES: Record<ResearchRole | 'judge_post', Theory['status'][]> = {

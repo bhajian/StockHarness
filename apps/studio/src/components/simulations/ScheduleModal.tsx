@@ -439,9 +439,11 @@ export function ScheduleModal({
               <span>
                 About <strong>{duration(estimate.estimate.seconds)}</strong> · {estimate.estimate.days}{' '}
                 sessions · code {estimate.config.ideas.map((i: any) => `${i.idea} v${i.version}`).join(', ')}
-                {estimate.config.symbols
-                  ? ` · ${estimate.config.symbols.length} symbols`
-                  : ' · whole universe'}
+                {estimate.config.universeTop
+                  ? ` · the ${estimate.config.universeTop} largest by market cap on each date`
+                  : estimate.config.symbols
+                    ? ` · ${estimate.config.symbols.length} symbols`
+                    : ' · whole universe'}
               </span>
             ) : (
               <span className="muted-line">

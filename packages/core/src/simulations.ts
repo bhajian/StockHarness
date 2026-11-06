@@ -40,8 +40,10 @@ export const simulationConfigSchema = z.object({
   period: z
     .object({ start: ISO, end: ISO, allowHoldout: z.boolean().default(false) })
     .refine((p) => p.start <= p.end, 'start must be on or before end'),
-  /** Tickers or security ids; omitted = the research settings' evaluation symbols at save time. */
+  /** Tickers or security ids; omitted = the research scope at save time. */
   symbols: z.array(z.string().min(1).max(20)).max(2000).optional(),
+  /** #300: the N largest names by market cap on each date (500 = the S&P 500 proxy), instead of symbols. */
+  universeTop: z.number().int().min(1).max(5000).optional(),
   capital: z.number().positive().max(1e12).default(1_000_000),
   benchmark: z.enum(['spx']).default('spx'),
   allocation: z.enum(['equal', 'risk_parity', 'custom']).default('equal'),
@@ -154,11 +156,13 @@ export async function resolveSimulationConfig(ownerId: string, input: unknown): 
     throw new HttpError(400, 'allocation "custom" needs a weight for every idea');
   if (new Set(ideas.map((i) => i.idea)).size !== ideas.length)
     throw new HttpError(400, 'an idea appears twice in the simulation');
-  const symbols =
-    c.symbols ??
-    ((await collection<any>('research_settings').findOne({ _id: ownerId }))?.evaluationSymbols as
-      string[] | undefined);
-  return { ...c, ideas, ...(symbols?.length ? { symbols } : {}) };
+  // Neither symbols nor a top-N: the research scope (#300).
+  if (!c.symbols && !c.universeTop) {
+    const rs = await collection<any>('research_settings').findOne({ _id: ownerId });
+    if (rs?.scope?.kind === 'top_market_cap') return { ...c, ideas, universeTop: rs.scope.top ?? 500 };
+    if (rs?.evaluationSymbols?.length) return { ...c, ideas, symbols: rs.evaluationSymbols as string[] };
+  }
+  return { ...c, ideas };
 }
 
 /** Save (or replace) a named config. */
@@ -301,6 +305,7 @@ export async function simulationJobParams(ownerId: string, sim: Simulation, read
       start: c.period.start,
       end: c.period.end,
       ...(c.symbols?.length ? { symbols: c.symbols } : {}),
+      ...(c.universeTop ? { universe: { top_by_market_cap: c.universeTop } } : {}),
       capital: c.capital,
       allocation: {
         mode: c.allocation,

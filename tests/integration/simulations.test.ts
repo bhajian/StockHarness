@@ -324,6 +324,28 @@ test('two ideas as one book, with risk parity and quarter-Kelly; attribution add
   );
 });
 
+test('the S&P 500 proxy scope: the N largest by market cap, for evaluations and simulations (#300)', async () => {
+  const ev = await ok('/evaluations', {
+    plugin: 't1_forty_day_trend_followers',
+    params: { ...params, universe: { top_by_market_cap: 5 } },
+  });
+  let e = ev;
+  for (let i = 0; i < 60 && e.status === 'running'; i++) {
+    await new Promise((r) => setTimeout(r, 1000));
+    e = await ok(`/evaluations/${ev.id}`);
+  }
+  assert.equal(e.status, 'succeeded', JSON.stringify(e.error));
+  assert.deepEqual(e.record.params.universe, { top_by_market_cap: 5 });
+  assert.ok(e.record.rebalances.every((r: any) => r.eligible <= 5));
+  await ok('/research/settings', { scope: { kind: 'top_market_cap', top: 5 } }, 'PUT');
+  const est = await ok('/simulations/estimate', {
+    config: { name: 'Scoped', ideas: [{ idea: momentum.ref }], period: params },
+  });
+  assert.equal(est.config.universeTop, 5, 'a config without a scope takes the research scope');
+  assert.equal(est.config.symbols, undefined);
+  await ok('/research/settings', { scope: { kind: 'symbols', top: 500 } }, 'PUT');
+});
+
 test('SimulationConfig and SimulationRun round trip into an empty workspace; delete', async () => {
   const mine = cookie;
   const exported = await ok('/objects/export?kinds=SimulationConfig,SimulationRun');

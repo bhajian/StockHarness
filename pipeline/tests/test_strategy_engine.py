@@ -114,3 +114,24 @@ class WalkForward(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class UniverseTop(unittest.TestCase):
+    """#300: universe.top_by_market_cap keeps only the N largest names on each date (an S&P 500 proxy)."""
+
+    def test_top_by_market_cap_on_each_date(self):
+        src, days = synthetic.market(n_sec=12, n_days=80, seed=5)
+        # Names 0-2 are the largest in the first half, 9-11 in the second: the scope follows the date.
+        half = days[40]
+        for r in src.collections["universe_daily"]:
+            k = int(r["security_id"][-2:])
+            r["market_cap"] = (1e12 if k < 3 else 1e9) if r["date"] < half else (1e12 if k >= 9 else 1e9)
+        code = constant(top_n=1).replace("return {", "return {s: 1.0 for s in ctx.universe_ids} or {")
+        r = run(code, src, days[5], days[-1], params={"universe": {"top_by_market_cap": 3}, "rebalance": "weekly"})
+        early = [b for b in r["rebalances"] if b["date"] < half]
+        late = [b for b in r["rebalances"] if b["date"] >= half]
+        self.assertTrue(early and late)
+        self.assertTrue(all(b["eligible"] == 3 for b in r["rebalances"]), [b["eligible"] for b in r["rebalances"]])
+        self.assertEqual(r["params"]["universe"], {"top_by_market_cap": 3}, "recorded, so the record says its scope")
+        with self.assertRaises(EvaluationError):
+            run(code, src, days[5], days[-1], params={"universe": {"top_by_market_cap": 0}})
