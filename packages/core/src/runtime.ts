@@ -114,6 +114,7 @@ import {
   type EvidenceNote,
 } from './finalAnswer.js';
 import { withLoadedSkills } from './skillContext.js';
+import { assertWithinBudget } from './spendGuard.js';
 import { LOOP_BLOCKED_MARKER, loopResult } from './loopControl.js';
 import { budgetedAgent, effortPresets } from './patterns.js';
 import { timeContext, timeContextPrompt } from './timeContext.js';
@@ -940,6 +941,8 @@ async function runAgentUnchecked(stored: Agent, input: string, history: Run['his
               toolCount: offered.length,
             },
           });
+          // The workspace's spend cap (#297): refuse the call (and stop the run) once a cap is reached.
+          await assertWithinBudget(ctx.ownerId);
           const response = await chat(requestProvider, checkedMessages, offered, signal, ctx.onDelta);
           await ctx.event({
             type: 'model_response',
