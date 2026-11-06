@@ -202,3 +202,42 @@ test(
     assert.equal((await transformRuns().findOne({ _id: run._id }))!.status, 'succeeded');
   },
 );
+
+test(
+  'a transform does not wait forever for an upstream that never completes (#291)',
+  { skip: skipReason },
+  async () => {
+    // The live case: an upstream sync whose schedule is off never completes.
+    await datasetSyncs().insertOne({
+      _id: `${owner}-treasury`,
+      ownerId: owner,
+      name: 'Treasury rates',
+      enabled: true,
+      connectionId: conn,
+      dataset: 'treasury_rates',
+      schedule: { enabled: false, everyMinutes: 1440, input: 'x' },
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    } as any);
+    await T.createTransform(owner, {
+      ...base,
+      name: 'tg_wait',
+      inputs: ['eod_prices'],
+      outputs: out('tg_wait'),
+      trigger: { after: ['dataset:eod_prices', 'dataset:treasury_rates'] },
+    });
+    await runDatasetSync((await datasetSyncs().findOne({ _id: `${owner}-eod` }))!, { trigger: 'manual' });
+    await tick();
+    assert.equal((await runsOf('tg_wait')).length, 0, 'within the wait, it waits for treasury_rates');
+    const later = await fireReadyTriggers(new Date(Date.now() + 25 * 3600_000), {
+      autostart: false,
+      ownerId: owner,
+    });
+    assert.ok(later.includes('tg_wait'), `fired after 24 h on what arrived: ${later.join(', ')}`);
+    const [run] = await runsOf('tg_wait');
+    const eod = (await datasetSyncs().findOne({ _id: `${owner}-eod` }))!;
+    assert.equal(run.window?.start, eod.cursor, 'the window comes from the upstream that did complete');
+    const t = (await T.transforms().findOne({ ownerId: owner, name: 'tg_wait' }))!;
+    await T.updateTransform(owner, t._id, { ...T.transformSpec(t), enabled: false });
+  },
+);

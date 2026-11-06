@@ -74,3 +74,42 @@ class TestSymbolRows(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestJunkAndMergedTickers(unittest.TestCase):
+    """#255, from live data: BBLGW's junk 4e-19 closes and DTE Energy's preferreds merged into its series."""
+
+    def bar(self, d, close, sym="X"):
+        return {"symbol": sym, "date": d, "open": close, "high": close, "low": close, "close": close, "volume": 1}
+
+    def test_junk_quotes_and_x10_days_carry_no_return(self):
+        days = ["2022-03-08", "2022-03-09", "2022-03-10", "2022-03-11", "2022-03-14", "2022-03-15", "2022-03-16"]
+        closes = [234.47, 225.45, 207.41, 4.3e-19, 245.29, 5.1e-19, 360.72]
+        rows = p.compute_symbol_rows([self.bar(d, c) for d, c in zip(days, closes)], {}, {})
+        tr = [r["tr_1d"] for r in rows]
+        self.assertIsNone(tr[3], "a junk quote has no return")
+        self.assertIn("implausible_price", rows[3]["dq_flags"])
+        self.assertAlmostEqual(tr[4], 245.29 / 207.41 - 1, places=12, msg="measured from the last real close")
+        self.assertAlmostEqual(tr[6], 360.72 / 245.29 - 1, places=12)
+        self.assertTrue(all(t is None or abs(t) < 1 for t in tr), tr)
+        spike = p.compute_symbol_rows([self.bar("2023-01-02", 0.2), self.bar("2023-01-03", 300.0)], {}, {})
+        self.assertIsNone(spike[1]["tr_1d"])
+        self.assertIn("return_suppressed", spike[1]["dq_flags"])
+        split = p.compute_symbol_rows(
+            [self.bar(date(2020, 8, 28), 400.0), self.bar(date(2020, 8, 31), 10.0)], {}, {date(2020, 8, 31): 40.0}
+        )
+        self.assertAlmostEqual(split[1]["tr_1d"], 0.0, places=12, msg="a split explains the ÷40")
+
+    def test_one_ticker_per_date_for_a_security_with_several(self):
+        tickers = [
+            {"value": "DTE", "valid_from": "2016-01-04", "valid_to": None},
+            {"value": "DTZ", "valid_from": "2016-01-04", "valid_to": "2019-01-02"},
+        ]
+        bars = [self.bar("2018-05-01", 80.0, "DTE"), self.bar("2018-05-01", 25.0, "DTZ"),
+                self.bar("2018-05-02", 81.0, "DTZ"), self.bar("2018-05-02", 26.0, "DTE")]
+        picked = p.pick_bars(bars, tickers)
+        self.assertEqual([b["symbol"] for b in picked], ["DTE", "DTE"], "the primary ticker on every date")
+        rename = [{"value": "FB", "valid_from": "2012-05-18", "valid_to": "2022-06-09"},
+                  {"value": "META", "valid_from": "2022-06-09", "valid_to": None}]
+        fb = [self.bar("2021-01-04", 270.0, "FB"), self.bar("2022-06-10", 175.0, "META")]
+        self.assertEqual([b["symbol"] for b in p.pick_bars(fb, rename)], ["FB", "META"])
