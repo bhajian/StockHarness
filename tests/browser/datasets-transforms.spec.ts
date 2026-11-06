@@ -126,6 +126,10 @@ test('Datasets tabs and a Flatten transform created in the UI', async ({ page })
   const row = page.locator('.transforms-table tr', { hasText: 'profiles_flat' });
   await expect(row).toContainText('company_profiles');
   await expect(row).toContainText('company_listing');
+  // #312: when it runs, in words; the explainer; an output links to its rows in the Catalog.
+  await expect(page.getByLabel('How Layer 2 works')).toBeVisible();
+  await expect(row.locator('.when-runs')).not.toBeEmpty();
+  if (process.env.SCREENSHOT) await page.screenshot({ path: 'test-results/transforms-list.png', fullPage: true });
   await page.goBack();
   await expect(page).toHaveURL(/\/datasets\/transforms\/profiles_flat$/);
   await page.getByRole('tab', { name: 'Syncs' }).click();

@@ -122,6 +122,7 @@ test('screenshot tour', async ({ page }) => {
   }
   const cycles = await api('/research/cycles');
   const pages: [string, string][] = [
+    ['map', '/map'],
     ['harnesses', '/harnesses'],
     ['playground', '/playground'],
     ['skills', '/skills'],
