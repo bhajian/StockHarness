@@ -54,7 +54,7 @@ function EvaluationList() {
   if (!data) return <Skeleton rows={6} />;
   return (
     <section className="page-section">
-      <div className="section-heading">
+      <div className="section-heading evaluations-heading">
         <h2>Evaluations</h2>
         <span className="muted-line">
           {data.items.length} shown · {data.trials} trials in this workspace · dev view

@@ -318,8 +318,8 @@ export function FilterBar({
   }, [open]);
   const labelOf = (f: FilterDef) => f.options.find((o) => o.value === f.value)?.label ?? f.value;
   return (
-    <div className="filter-row" role="search" ref={ref}>
-      <label className="filter-search">
+    <div className="filterbar" role="search" ref={ref}>
+      <label className="filterbar-search">
         <input
           aria-label={placeholder}
           placeholder={placeholder}
@@ -329,7 +329,7 @@ export function FilterBar({
       </label>
       <button
         type="button"
-        className={`button secondary filter-button${active.length ? ' has-active' : ''}`}
+        className={`button secondary filterbar-button${active.length ? ' has-active' : ''}`}
         aria-expanded={open}
         aria-haspopup="dialog"
         onClick={() => setOpen(!open)}
@@ -340,7 +340,7 @@ export function FilterBar({
         <button
           key={f.id}
           type="button"
-          className="filter-chip"
+          className="filterbar-chip"
           title={`Remove the ${f.label} filter`}
           onClick={() => f.onChange('')}
         >
@@ -353,9 +353,9 @@ export function FilterBar({
         </span>
       )}
       {open && (
-        <div className="filter-popover" role="dialog" aria-label="Filters">
+        <div className="filterbar-popover" role="dialog" aria-label="Filters">
           {filters.map((f) => (
-            <label key={f.id} className="filter-field">
+            <label key={f.id} className="filterbar-field">
               <span>{f.label}</span>
               <select aria-label={f.label} value={f.value} onChange={(e) => f.onChange(e.target.value)}>
                 <option value="">{f.all ?? `All`}</option>
@@ -367,7 +367,7 @@ export function FilterBar({
               </select>
             </label>
           ))}
-          <div className="filter-popover-actions">
+          <div className="filterbar-popover-actions">
             <button
               type="button"
               className="link-button"

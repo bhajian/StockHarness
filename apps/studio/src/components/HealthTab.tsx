@@ -309,23 +309,25 @@ export function HealthTab({ go, isAdmin = false }: { go: Go; isAdmin?: boolean }
                   <GapCell row={r} />
                 </td>
                 <td className="health-issues">
-                  {r.dq.error > 0 && (
-                    <StatusPill status="failed" label={`${fmtNumber(r.dq.error)} DQ errors`} />
-                  )}
-                  {r.dq.warn > 0 && (
-                    <StatusPill status="warn" label={`${fmtNumber(r.dq.warn)} DQ warnings`} />
-                  )}
-                  {r.caveats.blocking > 0 && (
-                    <StatusPill
-                      status="blocked"
-                      label={`${r.caveats.blocking} blocking caveat${r.caveats.blocking === 1 ? '' : 's'}`}
-                    />
-                  )}
-                  {r.error && (
-                    <span className="muted-line" title={r.error}>
-                      {r.error.slice(0, 60)}
-                    </span>
-                  )}
+                  <div>
+                    {r.dq.error > 0 && (
+                      <StatusPill status="failed" label={`${fmtNumber(r.dq.error)} DQ errors`} />
+                    )}
+                    {r.dq.warn > 0 && (
+                      <StatusPill status="warn" label={`${fmtNumber(r.dq.warn)} DQ warnings`} />
+                    )}
+                    {r.caveats.blocking > 0 && (
+                      <StatusPill
+                        status="blocked"
+                        label={`${r.caveats.blocking} blocking caveat${r.caveats.blocking === 1 ? '' : 's'}`}
+                      />
+                    )}
+                    {r.error && (
+                      <span className="muted-line" title={r.error}>
+                        {r.error.slice(0, 60)}
+                      </span>
+                    )}
+                  </div>
                 </td>
               </tr>
             ))}

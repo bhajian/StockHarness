@@ -417,14 +417,7 @@ function FieldsTable({
               </td>
               <td>{f.type}</td>
               <td>{f.null_pct}%</td>
-              <td className="catalog-example">
-                {f.example === undefined
-                  ? '—'
-                  : String(typeof f.example === 'object' ? JSON.stringify(f.example) : f.example).slice(
-                      0,
-                      40,
-                    )}
-              </td>
+              <td className="catalog-example">{exampleText(f.example)}</td>
               <td>
                 <span className="field-doc">
                   {f.doc === 'dictionary' && !drafts[f.name] && (
@@ -434,15 +427,21 @@ function FieldsTable({
                   )}
                   {f.doc === 'none' && !drafts[f.name] && <StatusPill status="warn" label="undocumented" />}
                   {isAdmin ? (
-                    <input
+                    <textarea
                       aria-label={`Description of ${f.name}`}
+                      title={value(f).description}
                       value={value(f).description}
                       placeholder="Describe this field"
                       onChange={(x) =>
                         setDrafts((d) => ({ ...d, [f.name]: { ...value(f), description: x.target.value } }))
                       }
                       onBlur={() => void save(f)}
-                      onKeyDown={(x) => x.key === 'Enter' && (x.target as HTMLInputElement).blur()}
+                      rows={2}
+                      onKeyDown={(x) =>
+                        x.key === 'Enter' &&
+                        !x.shiftKey &&
+                        (x.preventDefault(), (x.target as HTMLTextAreaElement).blur())
+                      }
                     />
                   ) : (
                     f.description || '—'
@@ -678,4 +677,12 @@ function AgentView({ name }: { name: string }) {
       <pre className="run-log">{v.text}</pre>
     </div>
   );
+}
+
+/** A field's example value: numbers rounded (no float noise), long text and objects shortened. */
+function exampleText(v: unknown): string {
+  if (v === undefined || v === null) return '—';
+  if (typeof v === 'number') return Number.isInteger(v) ? String(v) : String(Number(v.toPrecision(6)));
+  const t = typeof v === 'object' ? JSON.stringify(v) : String(v);
+  return t.length > 40 ? `${t.slice(0, 39)}…` : t;
 }
