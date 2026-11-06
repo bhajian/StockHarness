@@ -25,6 +25,7 @@ import {
   FlaskConical,
   Lightbulb,
   CandlestickChart,
+  Map as MapIcon,
 } from 'lucide-react';
 import { api, collections, emptyData, errorMessage, send, type Data, type Entity, type User } from './api';
 import { Button, ErrorNotice, UpdateNotice } from './components/ui';
@@ -41,6 +42,7 @@ import { EvaluationsPage } from './components/EvaluationsPage';
 import { ResearchPage } from './components/ResearchPage';
 import { IdeasPage } from './components/ideas/IdeasPage';
 import { SimulationsPage } from './components/simulations/SimulationsPage';
+import { MapPage } from './components/MapPage';
 import { DataFreshness } from './components/HealthTab';
 import { EmbedChat, Playground, playgroundTargets } from './components/Playground';
 import { IntegrationsPage, SettingsPage } from './components/Settings';
@@ -48,6 +50,7 @@ import './styles.css';
 import './refresh.css';
 
 const nav = [
+  { id: 'map', label: 'Map', icon: MapIcon },
   { id: 'workflows', label: 'Harnesses', icon: GitBranch },
   { id: 'playground', label: 'Playground', icon: MessageSquare },
   { id: 'skills', label: 'Skills', icon: Sparkles },
@@ -575,6 +578,8 @@ function App() {
               <IdeasPage isAdmin={user.role === 'admin'} />
             ) : page === 'simulations' ? (
               <SimulationsPage isAdmin={user.role === 'admin'} />
+            ) : page === 'map' ? (
+              <MapPage />
             ) : (
               <WorkflowsPage {...props} />
             )}

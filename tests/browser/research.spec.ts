@@ -182,6 +182,14 @@ test('the Research Lab shows a cycle: KPIs, board, activity, debate, steering, p
   await expect(theoristRow.locator('summary').first()).not.toContainText(' 0 tool calls');
   if (process.env.SCREENSHOT)
     await page.screenshot({ path: 'test-results/research-cycle.png', fullPage: true });
+  // #312: the Map connects data, prep, research setup, ideas and simulations, with a start-here checklist.
+  await page.goto('/map');
+  const flow = page.getByLabel('The workspace');
+  for (const col of ['Data sources', 'Data prep', 'Research setup', 'Ideas', 'Simulations'])
+    await expect(flow.getByLabel(col, { exact: true })).toBeVisible();
+  await expect(page.getByLabel('Start here').getByText(/Research is set up/)).toBeVisible();
+  await expect(flow.getByLabel('Research setup').getByText(/model/).first()).toBeVisible();
+  if (process.env.SCREENSHOT) await page.screenshot({ path: 'test-results/map.png', fullPage: true });
   await page.goto('/research');
 
   // #119–#123, #269: a board card opens the idea's own page; its tabs are URLs; back to the master table.

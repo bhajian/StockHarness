@@ -69,6 +69,18 @@ const triggerText = (t: Pick<TransformDraft, 'trigger'>) => {
   if (t.trigger.after.length) parts.push(`after ${t.trigger.after.map((a) => a.split(':')[1]).join(', ')}`);
   return parts.join(' · ') || 'Manual';
 };
+/** When a transform runs, in a sentence (#312). */
+const whenItRuns = (t: Pick<TransformDraft, 'trigger'>) => {
+  const after = t.trigger.after.map((a) => {
+    const [kind, name] = a.split(':');
+    return kind === 'transform' ? `the ${name} transform` : `new ${name} data`;
+  });
+  const parts = [];
+  if (after.length)
+    parts.push(`Automatically, after ${after.join(' and ')} ${after.length === 1 ? 'arrives' : 'arrive'}`);
+  if (t.trigger.schedule?.enabled) parts.push(describeSchedule(t.trigger.schedule as Schedule));
+  return parts.join('; ') || 'Only when run by hand';
+};
 const startOfToday = () => {
   const d = new Date();
   d.setHours(0, 0, 0, 0);
@@ -211,8 +223,8 @@ function TransformsList({
     <>
       <div className="tab-head">
         <p>
-          Layer 2 (optional): Python transforms that turn Layer 1 data into flat, point-in-time collections.
-          One transform can write several outputs.
+          Layer 2: Python transforms that turn Layer 1 data into flat, point-in-time collections, the data
+          research and simulations read. One transform can write several collections.
         </p>
         <div className="tab-head-actions">
           {isAdmin && <ObjectTransfer kinds={['Transform']} onImported={reload} compact />}
@@ -227,6 +239,19 @@ function TransformsList({
           </IconButton>
         </div>
       )}
+      <ol className="how-l2" aria-label="How Layer 2 works">
+        <li>
+          <strong>1. New data arrives.</strong> A Layer 1 sync finishes, or another transform does.
+        </li>
+        <li>
+          <strong>2. The transforms that read it run by themselves</strong>, in order. One with several inputs
+          waits for all of them (at most 24 hours).
+        </li>
+        <li>
+          <strong>3. Each writes its output collections</strong>, every row stamped with when it became known.
+          Click an output to see its rows in the Catalog, or open the Map for the whole chain.
+        </li>
+      </ol>
       {!list.length ? (
         <Empty
           icon={<Code2 size={28} />}
@@ -261,9 +286,9 @@ function TransformsList({
               <thead>
                 <tr>
                   <th>Name</th>
-                  <th>Inputs</th>
-                  <th>Outputs</th>
-                  <th>Trigger</th>
+                  <th>Reads</th>
+                  <th>Writes (click to see the rows)</th>
+                  <th>When it runs</th>
                   <th>Last run</th>
                   <th>Rows</th>
                   <th>Duration</th>
@@ -297,9 +322,21 @@ function TransformsList({
                       <Chips items={t.inputs} />
                     </td>
                     <td>
-                      <Chips items={t.outputs.map((o) => o.collection)} strong />
+                      <span className="chips">
+                        {t.outputs.map((o) => (
+                          <button
+                            key={o.collection}
+                            type="button"
+                            className="chip strong link-chip"
+                            title={`See the rows of ${o.collection} in the Catalog`}
+                            onClick={() => go({ tab: 'catalog', item: o.collection })}
+                          >
+                            {o.collection}
+                          </button>
+                        ))}
+                      </span>
                     </td>
-                    <td>{triggerText(t)}</td>
+                    <td className="when-runs">{whenItRuns(t)}</td>
                     <td>
                       {t.lastRun ? (
                         <>

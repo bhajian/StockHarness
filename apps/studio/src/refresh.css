@@ -4185,3 +4185,243 @@ td.loss {
   text-transform: none;
   letter-spacing: normal;
 }
+
+/* Map (#312) */
+.map-page {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+.map-page .page-head h2 {
+  margin: 0 0 4px;
+}
+.map-checklist {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 8px;
+}
+.map-checklist button {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  text-align: left;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  font: inherit;
+  cursor: pointer;
+  color: var(--faint);
+  position: relative;
+}
+.map-checklist button span {
+  display: grid;
+  gap: 2px;
+  color: var(--ink);
+}
+.map-checklist small {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+.map-checklist li.done button {
+  color: #1f6f43;
+}
+.map-checklist li.next button {
+  border-color: var(--blue);
+  box-shadow: 0 0 0 2px var(--blue-bg);
+}
+.map-next {
+  position: absolute;
+  top: -9px;
+  right: 10px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: var(--blue);
+  color: #fff !important;
+  font-size: 11px;
+  font-weight: 600;
+  display: inline-block !important;
+}
+.map-flow {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+  overflow-x: auto;
+  padding-bottom: 8px;
+}
+.map-column {
+  flex: 1 0 230px;
+  max-width: 320px;
+  display: grid;
+  gap: 8px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 10px;
+}
+.map-column-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  background: transparent;
+  padding: 2px;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+.map-column-head strong {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.map-column-head small {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+}
+.map-step {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--blue);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+}
+.map-column-body {
+  display: grid;
+  gap: 8px;
+}
+.map-note {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.4;
+}
+.map-card {
+  display: grid;
+  gap: 3px;
+  text-align: left;
+  padding: 9px 10px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface);
+  font: inherit;
+  min-width: 0;
+}
+button.map-card {
+  cursor: pointer;
+}
+button.map-card:hover {
+  border-color: var(--blue);
+}
+.map-card small {
+  font-size: 12px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+  line-height: 1.35;
+}
+.map-card code {
+  font-size: 11px;
+}
+.map-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 6px;
+}
+.map-card-head strong {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+}
+.map-big {
+  font-size: 26px;
+  font-weight: 600;
+}
+.map-arrow {
+  flex: none;
+  align-self: center;
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+  color: var(--faint);
+  width: 70px;
+  text-align: center;
+}
+.map-arrow small {
+  font-size: 10px;
+  line-height: 1.2;
+}
+.map-flow {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr) 26px) minmax(0, 1fr);
+  overflow-x: visible;
+}
+.map-column {
+  max-width: none;
+  min-width: 0;
+}
+.map-arrow {
+  width: 26px;
+}
+.map-arrow small {
+  display: none;
+}
+@media (max-width: 1100px) {
+  .map-flow {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .map-arrow {
+    transform: rotate(90deg);
+    justify-self: center;
+  }
+}
+/* Transforms: how Layer 2 works (#312) */
+.how-l2 {
+  list-style: none;
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+.how-l2 strong {
+  color: var(--ink);
+}
+@media (max-width: 1000px) {
+  .how-l2 {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.link-chip {
+  cursor: pointer;
+  border: 1px solid var(--border);
+  font-family: var(--font-code);
+  font-size: 12px;
+}
+.link-chip:hover {
+  border-color: var(--blue);
+  color: var(--blue-ink);
+}
+.when-runs {
+  max-width: 260px;
+  font-size: 13px;
+}

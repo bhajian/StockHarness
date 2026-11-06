@@ -1,5 +1,6 @@
 // Research loop API (#115): settings, human steering notes, and installing the research loop harness.
 import { Router } from 'express';
+import { workspaceMap } from '../../../packages/core/src/workspaceMap.js';
 import { researchCycle, researchCycles, researchHow } from '../../../packages/core/src/researchCycles.js';
 import { createRun } from '../../../packages/core/src/runs.js';
 import { z } from 'zod';
@@ -201,6 +202,8 @@ async function setPaused(req: any, paused: boolean) {
   }
   return researchStatus(ownerId);
 }
+// The workspace map (#312): data → prep → research → ideas → evaluations → simulations on one page.
+researchRouter.get('/map', async (req, res) => res.json(await workspaceMap(req.principal!.tenantId)));
 // How it works and what each cycle did (#302).
 researchRouter.get('/research/how', async (req, res) => res.json(await researchHow(req.principal!.tenantId)));
 researchRouter.get('/research/cycles', async (req, res) =>
