@@ -92,6 +92,11 @@ export type DatasetSync = DatasetSyncInput & {
   nextRunAt?: Date;
   lastRunAt?: Date;
   lastError?: string;
+  /** Failed runs in a row, and whether the last one hit a plan limit (#291): drives the retry backoff. */
+  consecutiveFailures?: number;
+  lastFailureKind?: 'plan_limit' | 'error';
+  /** Set when the scheduler paused the schedule after repeated plan-limit failures (#291). */
+  pausedReason?: string;
   lastRows?: number;
   createdAt: Date;
   updatedAt: Date;
@@ -150,6 +155,40 @@ export async function fmpApiKey(ownerId: string, connectionId: string) {
   return key;
 }
 
+/**
+ * A limit of the FMP plan, not a failure (#291): FMP answers 402 with "Premium Query Parameter / Special Endpoint /
+ * Special Parameters … not available under your current subscription" when a parameter value is outside the plan
+ * (page > 0 on news feeds, an old `from` on calendars, a non-US `symbol`), and "Restricted Endpoint" when the
+ * endpoint itself is not included. Never retried: retrying cannot change the answer.
+ */
+export class FmpPlanLimit extends HttpError {
+  constructor(
+    readonly endpoint: string,
+    readonly param: string,
+    detail: string,
+  ) {
+    super(
+      402,
+      param === 'endpoint'
+        ? `FMP endpoint ${endpoint} is not in the current plan`
+        : `FMP plan limit on ${endpoint}: this '${param}' value is not available on the current plan${detail ? ` (${detail})` : ''}`,
+    );
+  }
+}
+/** The plan limit a 402 body describes, or undefined for a throttle mislabelled 402. */
+export function planLimitOf(endpoint: string, body: string): FmpPlanLimit | undefined {
+  if (/restricted endpoint/i.test(body)) return new FmpPlanLimit(endpoint, 'endpoint', '');
+  if (
+    !/premium query parameter|special endpoint|special parameters|not available under your current subscription/i.test(
+      body,
+    )
+  )
+    return undefined;
+  const param = /(?:values? (?:set )?for|values for) '([a-zA-Z_]+)'/i.exec(body)?.[1] ?? 'parameter';
+  const detail = /can only be ([^\s.]+)/i.exec(body)?.[1];
+  return new FmpPlanLimit(endpoint, param, detail ? `it can only be ${detail.trim()}` : '');
+}
+
 export async function fmpGet(
   endpoint: string,
   params: Record<string, string | number>,
@@ -169,7 +208,12 @@ export async function fmpGet(
         signal: AbortSignal.timeout(120000),
       });
       if (res.ok) return await res.json();
-      // 402 on some feeds is a transient throttle mislabeled "not in current plan".
+      if (res.status === 402) {
+        // A plan limit is final: no retry, and no cooldown for the other syncs (#291).
+        const limit = planLimitOf(endpoint, await res.text().catch(() => ''));
+        if (limit) throw limit;
+      }
+      // A 402 without a plan-limit message is a throttle mislabelled 402.
       if ([402, 429, 500, 502, 503, 504].includes(res.status)) {
         if (res.status === 402 && attempt >= 5)
           throw new HttpError(402, `FMP endpoint ${endpoint} is not in the current plan`);
@@ -336,6 +380,8 @@ type PullStats = {
   symbolsCovered?: number;
   /** The first per-symbol errors of a run (#76). */
   symbolErrors?: { symbol: string; error: string }[];
+  /** A plan limit the run stopped at without failing (#291), e.g. a feed's page limit. */
+  planLimit?: string;
 };
 async function pull(
   sync: DatasetSync,
@@ -475,9 +521,15 @@ async function pullChecked(
       await dcoll.createIndex({ symbol: 1, delistedDate: 1 }).catch(() => undefined);
       await upsertRows(dcoll, delisted, ['symbol', 'delistedDate']);
     }
-    // Merge: an active screener row overrides a delisted row for the same symbol.
+    // Merge: an active screener row overrides a delisted row for the same symbol. Delisted listings on other
+    // exchanges (LSE, TSX, OTC …) are outside the plan's price data and the research universe (#291).
+    const exchanges = new Set(
+      String(p.exchange ?? 'NASDAQ,NYSE,AMEX')
+        .split(',')
+        .map((x) => x.trim().toUpperCase()),
+    );
     const bySymbol = new Map<string, Record<string, unknown>>();
-    for (const r of delisted)
+    for (const r of delisted.filter((x) => exchanges.has(String(x.exchange ?? '').toUpperCase())))
       bySymbol.set(String(r.symbol), {
         symbol: r.symbol,
         companyName: r.companyName,
@@ -490,7 +542,18 @@ async function pullChecked(
   } else if (def.scope === 'feed') {
     const maxPages = Number((sync.params as Record<string, unknown> | undefined)?.pages ?? 5);
     for (let page = 0; page < maxPages; page++) {
-      const list = checker.check(await fmpGet(def.endpoint, { page, limit: 100 }, apikey));
+      let data: unknown;
+      try {
+        data = await fmpGet(def.endpoint, { page, limit: 100 }, apikey);
+      } catch (e) {
+        // The plan serves only the first page(s) of some feeds (#291): keep what came back.
+        if (page > 0 && e instanceof FmpPlanLimit && e.param === 'page') {
+          stats.planLimit = e.message;
+          break;
+        }
+        throw e;
+      }
+      const list = checker.check(data);
       if (!list.length) break;
       rows += await upsertRows(coll, list, def.keyFields);
     }
@@ -568,6 +631,7 @@ export async function runDatasetSync(
             : {}),
           calls: calls.n,
           ...(stats.symbolErrors?.length ? { symbolErrors: stats.symbolErrors } : {}),
+          ...(stats.planLimit ? { planLimit: stats.planLimit } : {}),
         },
       },
     );
@@ -577,10 +641,11 @@ export async function runDatasetSync(
         $set: {
           lastRunAt: new Date(),
           lastRows: rows,
+          consecutiveFailures: 0,
           // A partial (earnings-triggered) run must not move the cursor past the other symbols' history.
           ...(isTimeseries(def) && !opts.symbols ? { cursor: today() } : {}),
         },
-        $unset: { lastError: '' },
+        $unset: { lastError: '', lastFailureKind: '', pausedReason: '' },
       },
     );
     // #81: downstream work (transforms, pipelines, webhooks) starts on completion, not on a timer.
@@ -619,7 +684,14 @@ export async function runDatasetSync(
     );
     await datasetSyncs().updateOne(
       { _id: sync._id },
-      { $set: { lastRunAt: new Date(), lastError: message } },
+      {
+        $set: {
+          lastRunAt: new Date(),
+          lastError: message,
+          lastFailureKind: error instanceof FmpPlanLimit ? 'plan_limit' : 'error',
+        },
+        $inc: { consecutiveFailures: 1 },
+      },
     );
     await emitHarnessEvent(sync.ownerId, 'dataset.sync.failed', {
       sync_id: sync._id,
@@ -693,14 +765,40 @@ export async function dispatchDatasetSyncs() {
           scheduleKey: `${sync._id}:${dueAt.toISOString()}`,
         });
       } catch (error) {
-        // One failing sync must not starve the others; back off a minute.
+        // Back off instead of retrying every minute (#291): transient failures retry after 5, 15, then 60
+        // minutes (never later than the next regular slot); a plan limit waits for the next regular slot, and
+        // three in a row pause the schedule with the reason.
+        const fresh = await datasetSyncs().findOne({ _id: sync._id });
+        const failures = fresh?.consecutiveFailures ?? 1;
+        const plan = error instanceof FmpPlanLimit;
+        const regular = nextScheduledAt(schedule);
+        const next = retryAt(failures, plan, regular);
         await datasetSyncs().updateOne(
           { _id: sync._id },
-          { $set: { nextRunAt: new Date(Date.now() + 60000), lastError: safeError(error) } },
+          plan && failures >= PAUSE_AFTER_PLAN_FAILURES
+            ? {
+                $set: {
+                  'schedule.enabled': false,
+                  pausedReason: `Paused after ${failures} runs in a row hit an FMP plan limit: ${safeError(error)}`,
+                  lastError: safeError(error),
+                },
+              }
+            : { $set: { nextRunAt: next, lastError: safeError(error) } },
         );
       }
     });
   }
+}
+
+export const PAUSE_AFTER_PLAN_FAILURES = 3;
+const RETRY_MINUTES = [5, 15, 60];
+/** When a failed scheduled sync runs again (#291). */
+export function retryAt(failures: number, planLimit: boolean, regular: Date, now = Date.now()): Date {
+  if (planLimit) return regular;
+  const backoff = new Date(
+    now + RETRY_MINUTES[Math.min(Math.max(failures, 1), RETRY_MINUTES.length) - 1]! * 60000,
+  );
+  return backoff < regular ? backoff : regular;
 }
 
 /** Queue a manual run (Run now, bulk Run). Returns false when the sync is already queued or running. */
