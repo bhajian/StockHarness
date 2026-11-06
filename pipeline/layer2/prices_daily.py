@@ -11,12 +11,12 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from ..core import pit
-from .prices_logic import compute_symbol_rows
+from .prices_logic import compute_symbol_rows, pick_bars
 from ._resolve import as_date, security_symbols
 
 UTC = timezone.utc
-TV = "3"  # 3: splits the source closes already reflect are not applied again (#240)
-ERROR_FLAGS = ("zero_or_negative_price", "high_lt_low")
+TV = "4"  # 4: one ticker per date, junk quotes and ×10 days without an action carry no return (#255); 3: #240
+ERROR_FLAGS = ("zero_or_negative_price", "high_lt_low", "implausible_price")
 BAR_FIELDS = ["_id", "symbol", "date", "open", "high", "low", "close", "volume", "vwap"]
 
 
@@ -25,6 +25,9 @@ def compute(read, window=None, *, security_ids=None):
     `window` has start, end and lookback_start (ISO dates) or is None for a full rebuild."""
     securities = read("securities", None, ["security_id", "identifiers"])
     sec_syms = security_symbols(securities)
+    ticker_iv = {
+        s["security_id"]: [i for i in s.get("identifiers", []) if i.get("type") == "ticker"] for s in securities
+    }
     if security_ids:
         sec_syms = {k: v for k, v in sec_syms.items() if k in set(security_ids)}
     actions = {}
@@ -52,8 +55,9 @@ def compute(read, window=None, *, security_ids=None):
         bars_raw = read("eod_prices", q, BAR_FIELDS, [("date", 1)])
         if not bars_raw:
             continue
-        by_date = {b["date"]: b for b in bars_raw}  # collapse ticker reuse to one bar per date
-        bars = [by_date[d] for d in sorted(by_date)]
+        # One bar per date, from the right ticker when the security has several (#255).
+        bars = pick_bars(bars_raw, ticker_iv.get(sid, []))
+        by_date = {b["date"]: b for b in bars}
         rows = compute_symbol_rows([{k: b.get(k) for k in BAR_FIELDS[2:]} for b in bars], divs, splits)
         docs, issues = [], []
         for r in rows:

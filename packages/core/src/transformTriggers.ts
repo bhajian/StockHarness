@@ -19,6 +19,11 @@ export const UPSTREAM_EVENTS = [
   'transform.completed',
 ];
 const debounceMs = () => (Number(process.env.TRANSFORM_TRIGGER_DEBOUNCE_SECONDS) || 60) * 1000;
+/**
+ * A transform waits for all of its upstreams, but not forever (#291): once one has completed and the others have
+ * not within this many hours (a disabled schedule, a broken sync), it runs on what has arrived.
+ */
+export const maxWaitMs = () => (Number(process.env.TRANSFORM_TRIGGER_MAX_WAIT_HOURS) || 24) * 3600_000;
 
 export type PendingUpstream = { at: Date; eventId: string; date_from?: string; date_to?: string };
 export type TriggerState = {
@@ -113,7 +118,10 @@ export async function fireReadyTriggers(
   const fired: string[] = [];
   for (const t of candidates) {
     const pending = t.triggerState?.pending ?? {};
-    if (!t.trigger.after.every((a) => pending[a])) continue;
+    const marks = Object.values(pending);
+    const oldest = Math.min(...marks.map((m) => new Date(m.at).getTime()));
+    const overdue = marks.length > 0 && now.getTime() - oldest >= maxWaitMs();
+    if (!t.trigger.after.every((a) => pending[a]) && !overdue) continue;
     // Claim: clear exactly the marks we saw; a concurrent dispatcher (or a newer event) makes this a no-op.
     const claimed = await transforms().updateOne(
       { _id: t._id, 'triggerState.lastEventAt': t.triggerState!.lastEventAt } as Record<string, unknown>,
@@ -123,7 +131,11 @@ export async function fireReadyTriggers(
       >,
     );
     if (!claimed.modifiedCount) continue;
-    const ups = t.trigger.after.map((a) => pending[a]);
+    const ups = t.trigger.after.map((a) => pending[a]).filter((u): u is PendingUpstream => !!u);
+    if (ups.length < t.trigger.after.length)
+      console.warn(
+        `${t.name}: ran after waiting ${Math.round(maxWaitMs() / 3600_000)} h without ${t.trigger.after.filter((a) => !pending[a]).join(', ')}`,
+      );
     const w = triggeredWindow(ups);
     const long = addDays(w.start, 366) < w.end;
     await requestTransformRun(t.ownerId, t._id, {

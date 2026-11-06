@@ -133,3 +133,52 @@ class TestExchangeRepair(unittest.TestCase):
         self.assertEqual(doc["exchange_history"], [{"value": "NASDAQ", "valid_from": "2016-01-04", "valid_to": None, "backfilled": True}])
         self.assertTrue(doc["exchange_is_backfilled"])
         self.assertEqual(doc["exchange_observed_from"], "2026-10-23")
+
+
+class TestConcurrentInstruments(unittest.TestCase):
+    """#255: one issuer (CIK) with a common stock and preferreds listed at the same time is several securities."""
+
+    PROFILES = [
+        {"symbol": "DTE", "companyName": "DTE Energy Company", "cik": "936340", "cusip": "233331107", "exchange": "NYSE", "isActivelyTrading": True},
+        {"symbol": "DTB", "companyName": "DTE Energy Company", "cik": "936340", "cusip": "233331701", "exchange": "NYSE", "isActivelyTrading": True},
+        {"symbol": "DTG", "companyName": "DTE Energy Company", "cik": "936340", "cusip": "233331883", "exchange": "NYSE", "isActivelyTrading": True},
+    ]
+    SEEN = {"DTE": "2016-01-04", "DTB": "2017-03-01", "DTG": "2019-05-01"}
+
+    def test_fresh_build_keeps_them_apart(self):
+        docs = s.build_securities_docs(self.PROFILES, [], [], [], self.SEEN, "2026-11-06")
+        tickers = sorted(tuple(sorted(i["value"] for i in d["identifiers"] if i["type"] == "ticker")) for d in docs)
+        self.assertEqual(tickers, [("DTB",), ("DTE",), ("DTG",)])
+
+    def test_an_existing_merge_is_split_and_the_common_stock_keeps_its_id(self):
+        merged = {
+            "security_id": "SEC_000606", "name": "DTE Energy Company", "is_active": True,
+            "identifiers": [
+                {"type": "ticker", "value": "DTE", "valid_from": "2016-01-04", "valid_to": "2017-03-01"},
+                {"type": "ticker", "value": "DTB", "valid_from": "2017-03-01", "valid_to": "2019-05-01"},
+                {"type": "ticker", "value": "DTG", "valid_from": "2019-05-01", "valid_to": "2020-01-01"},
+                {"type": "ticker", "value": "DTE", "valid_from": "2020-01-01", "valid_to": None},
+                {"type": "cik", "value": "936340", "valid_from": "2016-01-04", "valid_to": None},
+                {"type": "cusip", "value": "233331107", "valid_from": "2016-01-04", "valid_to": None},
+                {"type": "cusip", "value": "233331701", "valid_from": "2017-03-01", "valid_to": None},
+            ],
+        }
+        docs = {d["security_id"]: d for d in s.build_securities_docs(self.PROFILES, [], [], [merged], self.SEEN, "2026-11-06")}
+        dte = docs["SEC_000606"]
+        self.assertEqual([(i["value"], i["valid_from"], i["valid_to"]) for i in dte["identifiers"] if i["type"] == "ticker"],
+                         [("DTE", "2016-01-04", None)], "one open interval from the first observation")
+        self.assertNotIn("233331701", [i["value"] for i in dte["identifiers"] if i["type"] == "cusip"])
+        self.assertEqual(dte["split_tickers"], ["DTB", "DTG"])
+        others = [d for k, d in docs.items() if k != "SEC_000606"]
+        self.assertEqual(sorted(i["value"] for d in others for i in d["identifiers"] if i["type"] == "ticker"), ["DTB", "DTG"])
+        self.assertEqual(len({d["security_id"] for d in others}), 2)
+        again = {d["security_id"]: d for d in s.build_securities_docs(self.PROFILES, [], [], list(docs.values()), self.SEEN, "2026-11-07")}
+        self.assertEqual(set(again), set(docs), "a re-run keeps the same ids")
+
+    def test_a_rename_still_matches_by_cik(self):
+        old = {"security_id": "SEC_000010", "name": "Meta Platforms", "is_active": True, "identifiers": [
+            {"type": "ticker", "value": "FB", "valid_from": "2016-01-04", "valid_to": None},
+            {"type": "cik", "value": "1326801", "valid_from": "2016-01-04", "valid_to": None}]}
+        meta = [{"symbol": "META", "companyName": "Meta Platforms, Inc.", "cik": "1326801", "exchange": "NASDAQ", "isActivelyTrading": True}]
+        [doc] = s.build_securities_docs(meta, [], [], [old], {"META": "2022-06-09"}, "2026-11-06")
+        self.assertEqual(doc["security_id"], "SEC_000010")

@@ -42,6 +42,43 @@ def effective_splits(bars, splits_by_exdate):
     return out
 
 
+# #255: a close below this is a junk quote (FMP serves 4e-19 between real closes on some dead instruments).
+MIN_PRICE = 1e-4
+# A day's total return beyond ×10 or ÷10 with no split or dividend is a data error, not a return.
+MAX_RATIO = 10.0
+
+
+def pick_bars(bars, tickers):
+    """One bar per date for a security with several tickers (#255). `bars`: [{symbol, date, ...}];
+    `tickers`: [{value, valid_from, valid_to}]. Per date: the primary ticker's bar (the current one, the
+    earliest-seen if several are open); else the ticker whose interval covers the date; else the ticker with
+    the most bars. Never a mix of instruments chosen by processing order."""
+    by_date = {}
+    for b in bars:
+        by_date.setdefault(b["date"], []).append(b)
+    if all(len(v) == 1 for v in by_date.values()):
+        return [by_date[d][0] for d in sorted(by_date)]
+    open_ = sorted((t for t in tickers if t.get("valid_to") is None), key=lambda t: (t.get("valid_from") or "", t["value"]))
+    primary = open_[0]["value"] if open_ else None
+    counts = {}
+    for b in bars:
+        counts[b["symbol"]] = counts.get(b["symbol"], 0) + 1
+
+    def covers(t, d):
+        return (t.get("valid_from") or "") <= d and (t.get("valid_to") is None or d < t["valid_to"])
+
+    out = []
+    for d in sorted(by_date):
+        options = {b["symbol"]: b for b in by_date[d]}
+        if primary in options:
+            out.append(options[primary])
+            continue
+        valid = [t["value"] for t in tickers if t["value"] in options and covers(t, d)]
+        pick = valid[0] if valid else max(options, key=lambda s: (counts[s], s))
+        out.append(options[pick])
+    return out
+
+
 def compute_symbol_rows(bars, dividends_by_exdate, splits_by_exdate):
     """Per-symbol price rows with adjusted OHLC, price & total returns, dollar volume, DQ flags.
 
@@ -63,9 +100,16 @@ def compute_symbol_rows(bars, dividends_by_exdate, splits_by_exdate):
         div = dividends_by_exdate.get(d, 0.0) or 0.0
         flags = _dq_flags(b, prev_close, r, div, recent_closes)
         ret_1d = tr_1d = None
-        if prev_close and prev_close > 0 and close is not None:
+        usable = close is not None and close >= MIN_PRICE
+        if close is not None and 0 < close < MIN_PRICE:
+            flags.append("implausible_price")
+        if prev_close and prev_close > 0 and usable:
             ret_1d = (close * r) / prev_close - 1.0
             tr_1d = ((close + div) * r) / prev_close - 1.0
+            # No corporate action can explain a ×10 / ÷10 day: keep the bar, drop the return (#255).
+            if r == 1.0 and not div and not (1 / MAX_RATIO < 1 + tr_1d < MAX_RATIO):
+                ret_1d = tr_1d = None
+                flags.append("return_suppressed")
         row = {
             "date": d,
             "open": _num(b.get("open")),
@@ -85,7 +129,7 @@ def compute_symbol_rows(bars, dividends_by_exdate, splits_by_exdate):
             "dq_flags": flags,
         }
         rows.append(row)
-        if close is not None:
+        if usable:  # a junk quote never becomes the base of the next return
             prev_close = close
             recent_closes.append(close)
             if len(recent_closes) > 6:
