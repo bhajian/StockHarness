@@ -51,6 +51,10 @@ export const researchSettingsSchema = z.object({
       capSince: z.coerce.date().optional(),
       dailyCapUsd: z.number().min(0).optional(),
       prices: z.record(z.object({ input: z.number().min(0), output: z.number().min(0) })).optional(),
+      /** Per-model caps (#301), on top of the overall ones: only that model's calls are refused at its cap. */
+      models: z
+        .record(z.object({ capUsd: z.number().min(0).optional(), dailyCapUsd: z.number().min(0).optional() }))
+        .optional(),
       stoppedAt: z.coerce.date().optional(),
       stopReason: z.string().optional(),
     })
@@ -64,7 +68,14 @@ export const researchSettingsSchema = z.object({
     })
     .default({}),
   /** Cycles every N minutes (applied to the harness schedule). */
-  schedule: z.object({ enabled: z.boolean(), everyMinutes: z.number().int().min(10).max(10080) }).optional(),
+  schedule: z
+    .object({
+      enabled: z.boolean(),
+      everyMinutes: z.number().int().min(10).max(10080),
+      /** Stop scheduling after this moment (ISO date-time), #301. */
+      until: z.string().datetime({ offset: true }).optional(),
+    })
+    .optional(),
 });
 export type ResearchSettings = z.infer<typeof researchSettingsSchema> & {
   steering?: { note: string; at: Date; by?: string }[];
@@ -341,6 +352,7 @@ export type ResearchLoopInput = {
   effort?: 'light' | 'medium' | 'high' | 'extra-high' | 'max';
   maxTurns?: number;
   scheduleMinutes?: number;
+  scheduleUntil?: string;
 };
 /** The research loop harness (ids resolved). */
 export function makeResearchLoop(o: ResearchLoopInput): Workflow {
@@ -477,7 +489,14 @@ export function makeResearchLoop(o: ResearchLoopInput): Workflow {
     bindings: [],
     nodes,
     ...(o.scheduleMinutes
-      ? { schedule: { enabled: true, everyMinutes: o.scheduleMinutes, input: 'Scheduled research cycle' } }
+      ? {
+          schedule: {
+            enabled: true,
+            everyMinutes: o.scheduleMinutes,
+            input: 'Scheduled research cycle',
+            ...(o.scheduleUntil ? { until: o.scheduleUntil } : {}),
+          },
+        }
       : {}),
   });
 }

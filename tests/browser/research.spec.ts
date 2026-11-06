@@ -137,14 +137,52 @@ test('the Research Lab shows a cycle: KPIs, board, activity, debate, steering, p
   await expect(page.getByRole('button', { name: 'Resume' })).toBeVisible();
   await page.getByRole('button', { name: 'Resume' }).click();
   await expect(page.getByRole('button', { name: 'Pause' })).toBeVisible();
-  await page.locator('.research-page').getByRole('button', { name: 'Settings' }).click();
-  await expect(page.getByText(/Changing a threshold creates gates v2/)).toBeVisible();
-  await expect(page.getByLabel('Gate minSharpe')).toHaveValue('0.5');
-  if (process.env.SCREENSHOT)
-    await page.screenshot({ path: 'test-results/research-settings.png', fullPage: true });
-  await page.keyboard.press('Escape');
   if (process.env.SCREENSHOT)
     await page.screenshot({ path: 'test-results/research-page.png', fullPage: true });
+  // #301: Settings opens Research → Setup: scope, agents, budget per model, schedule, gates.
+  await page.locator('.research-lab').getByRole('button', { name: 'Settings' }).click();
+  await expect(page).toHaveURL(/\/research\/setup$/);
+  await expect(page.getByRole('radio', { name: 'S&P 500 proxy (top 500)' })).toBeVisible();
+  await expect(page.getByRole('table', { name: 'Spend by model' }).getByText('test-research')).toBeVisible();
+  await expect(page.getByText(/changing a threshold creates gates v2/i)).toBeVisible();
+  await expect(page.getByLabel('Gate minSharpe')).toHaveValue('0.5');
+  await page.getByRole('radio', { name: 'S&P 500 proxy (top 500)' }).click();
+  await page.getByRole('button', { name: 'Save' }).click();
+  await expect(page.getByRole('status')).toHaveText(/Saved/);
+  await expect
+    .poll(async () => (await api('/research/settings')).scope)
+    .toEqual({ kind: 'top_market_cap', top: 500 });
+  await api('/research/settings', { scope: { kind: 'symbols', top: 500 } }, 'PUT');
+  if (process.env.SCREENSHOT)
+    await page.screenshot({ path: 'test-results/research-setup.png', fullPage: true });
+  // #302: How it works — the pipeline, and each agent's model, skills and tools.
+  await page.getByRole('tab', { name: 'How it works' }).click();
+  await expect(page).toHaveURL(/\/research\/how$/);
+  const pipeline = page.getByLabel('The research loop');
+  await expect(pipeline.getByRole('button', { name: /Theorist 1/ })).toBeVisible();
+  await pipeline.getByRole('button', { name: /^Coder/ }).click();
+  const coder = page.getByLabel('Coder details');
+  await expect(coder.getByRole('button', { name: 'write-a-strategy-plugin' })).toBeVisible();
+  await expect(coder.locator('code', { hasText: 'submit_code' })).toBeVisible();
+  if (process.env.SCREENSHOT)
+    await page.screenshot({ path: 'test-results/research-how.png', fullPage: true });
+  // Cycles: the list, then one cycle's trace per agent.
+  await page.getByRole('tab', { name: 'Cycles' }).click();
+  const cycles = page.getByRole('table', { name: 'Cycles' });
+  await cycles.locator('tbody tr').first().click();
+  await expect(page).toHaveURL(/\/research\/cycles\/[0-9a-f-]{36}$/);
+  await expect(page.getByRole('heading', { name: 'What each agent did' })).toBeVisible();
+  const agentRows = page.locator('details.cycle-agent');
+  await expect(agentRows.first()).toBeVisible();
+  const coderRow = agentRows.filter({ has: page.locator('summary strong', { hasText: /^Coder$/ }) });
+  await coderRow.locator('summary').first().click();
+  await expect(coderRow.locator('code', { hasText: 'submit_code' }).first()).toBeVisible();
+  const theoristRow = agentRows.filter({ has: page.locator('summary strong', { hasText: /^Theorists/ }) });
+  await expect(theoristRow.locator('summary').first()).not.toContainText('not run');
+  await expect(theoristRow.locator('summary').first()).not.toContainText(' 0 tool calls');
+  if (process.env.SCREENSHOT)
+    await page.screenshot({ path: 'test-results/research-cycle.png', fullPage: true });
+  await page.goto('/research');
 
   // #119–#123, #269: a board card opens the idea's own page; its tabs are URLs; back to the master table.
   await verdicts.first().click();

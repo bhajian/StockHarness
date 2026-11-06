@@ -459,6 +459,14 @@ export async function dispatchSchedules() {
     .toArray();
   for (const w of due) {
     if (!w.schedule) continue;
+    // A schedule that ran until a date turns itself off (#301).
+    if (w.schedule.until && Date.now() >= Date.parse(w.schedule.until)) {
+      await workflows.updateOne(
+        { _id: w._id },
+        { $set: { 'schedule.enabled': false, updatedAt: new Date() } },
+      );
+      continue;
+    }
     // A schedule with a wall-clock time waits for that time instead of firing the moment it is saved.
     if (!w.nextRunAt && w.schedule.at && w.schedule.everyMinutes >= 1440) {
       await workflows.updateOne(
