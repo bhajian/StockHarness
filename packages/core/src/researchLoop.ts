@@ -29,11 +29,20 @@ export const researchSettingsSchema = z.object({
   agentMaxTurns: z.number().int().min(3).max(200).default(30),
   /** Paused: no scheduled cycles, and agents of a running cycle are told to stop (#116). */
   paused: z.boolean().default(false),
-  /** Alerts only: never stops the loop. */
+  /**
+   * Spend (#297). dailyTokenAlert only alerts; capUsd (since capSince) and dailyCapUsd (the UTC day) stop every model
+   * call in the workspace when reached and pause the loop. prices override the built-in table (USD per 1M tokens).
+   */
   budget: z
     .object({
       dailyTokenAlert: z.number().int().min(0).optional(),
       usdPerMillionTokens: z.number().min(0).optional(),
+      capUsd: z.number().min(0).optional(),
+      capSince: z.coerce.date().optional(),
+      dailyCapUsd: z.number().min(0).optional(),
+      prices: z.record(z.object({ input: z.number().min(0), output: z.number().min(0) })).optional(),
+      stoppedAt: z.coerce.date().optional(),
+      stopReason: z.string().optional(),
     })
     .default({}),
   /** Model and skills per role (provider ids, skill ids); the harness is rebuilt when they change. */

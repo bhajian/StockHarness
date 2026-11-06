@@ -266,3 +266,38 @@ test('Research Lab: pause / resume, settings rebuild the harness, gates edits ma
   assert.deepEqual(after.gates, used.gates, 'the locked version is unchanged');
   await ok('/research/settings', { schedule: { enabled: false, everyMinutes: 120 } }, 'PUT');
 });
+
+test('a spend cap below the spend stops the next cycle at its first model call and pauses the loop (#297)', async () => {
+  let s = await ok('/research/status');
+  assert.ok(s.spend.today > 0, 'the cycle above was priced');
+  assert.equal(s.spend.capUsd, undefined);
+  await ok(
+    '/research/settings',
+    {
+      schedule: { enabled: true, everyMinutes: 120 },
+      budget: { capUsd: 0.000001, capSince: '2020-01-01T00:00:00Z' },
+    },
+    'PUT',
+  );
+  let run = await ok('/runs', { workflowId: harnessId, input: 'over the cap' });
+  for (let i = 0; i < 60 && ['queued', 'running'].includes(run.status); i++) {
+    await new Promise((r) => setTimeout(r, 1000));
+    run = await ok(`/runs/${run.id}`);
+  }
+  assert.equal(run.status, 'failed');
+  assert.match(
+    run.error,
+    /Spend cap reached: the spend since 2020-01-01 00:00 \(\$[\d.]+\) reached the cap of \$0\.00/,
+  );
+  s = await ok('/research/status');
+  assert.equal(s.paused, true, 'the loop paused itself');
+  assert.match(s.spend.stopReason, /reached the cap/);
+  assert.ok(s.spend.sinceCap >= s.spend.today);
+  const wf = (await ok('/workflows')).find((w: any) => w.name === 'Research loop');
+  assert.equal(wf.schedule.enabled, false, 'its schedule is off');
+  // Lifting the cap and resuming runs again.
+  await ok('/research/settings', { budget: {} }, 'PUT');
+  await ok('/research/resume', {});
+  assert.equal((await ok('/research/status')).paused, false);
+  await ok('/research/settings', { schedule: { enabled: false, everyMinutes: 120 } }, 'PUT');
+});

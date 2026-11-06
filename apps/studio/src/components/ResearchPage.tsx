@@ -46,6 +46,16 @@ type Status = {
     costToday?: number;
   };
   budgetAlert: string | null;
+  spend?: {
+    today: number;
+    sinceCap?: number;
+    capUsd?: number;
+    capSince?: string;
+    dailyCapUsd?: number;
+    exceeded?: string;
+    stoppedAt?: string;
+    stopReason?: string;
+  };
   tokensByRole: Record<string, { input: number; output: number; calls: number }>;
   board: { columns: { key: string; label: string; cards: Card[] }[]; verdictsToday: Card[] };
 };
@@ -143,6 +153,13 @@ export function ResearchPage({ data, isAdmin }: { data: Data; isAdmin: boolean }
           for you).
         </p>
       )}
+      {status.spend?.stoppedAt && (
+        <p className="schedule-warning" role="alert">
+          <StatusPill status="blocked" label="spend cap" /> The loop paused itself on{' '}
+          {new Date(status.spend.stoppedAt).toLocaleString()}: {status.spend.stopReason}. Raise the cap in
+          Settings, then Resume.
+        </p>
+      )}
       {status.budgetAlert && (
         <p className="schedule-warning" role="alert">
           <StatusPill status="warn" label="budget" /> {status.budgetAlert}
@@ -165,9 +182,19 @@ export function ResearchPage({ data, isAdmin }: { data: Data; isAdmin: boolean }
         />
         <KpiCard
           icon={<CircleDollarSign size={18} />}
-          label="Tokens today"
-          value={k.tokensToday.toLocaleString()}
-          footnote={k.costToday !== undefined ? `≈ $${k.costToday.toFixed(2)}` : 'set a $ rate in settings'}
+          label="Spend today"
+          value={`$${(status.spend?.today ?? k.costToday ?? 0).toFixed(2)}`}
+          footnote={[
+            `${k.tokensToday.toLocaleString()} tokens`,
+            status.spend?.dailyCapUsd !== undefined ? `daily cap $${status.spend.dailyCapUsd}` : '',
+            status.spend?.capUsd !== undefined
+              ? `$${(status.spend.sinceCap ?? 0).toFixed(2)} of $${status.spend.capUsd} since ${
+                  status.spend.capSince ? new Date(status.spend.capSince).toLocaleDateString() : 'the start'
+                }`
+              : 'no spend cap',
+          ]
+            .filter(Boolean)
+            .join(' · ')}
         />
       </div>
       <div className="research-board" aria-label="Pipeline board">
@@ -439,7 +466,55 @@ function SettingsDrawer({
             />
           </Field>
         </div>
-        <h4>Budget (alerts only)</h4>
+        <h4>Spend cap</h4>
+        <p className="muted-line">
+          Model calls are priced per model (Gemini 3.8 Flash: $0.75 / $3.75 per million input / output
+          tokens). At a cap every model call in the workspace is refused and the loop pauses itself.
+        </p>
+        <div className="two-columns">
+          <Field label="Total cap (USD)" hint="Counted from when it is set">
+            <input
+              aria-label="Total spend cap"
+              type="number"
+              min={0}
+              step="1"
+              value={s.budget?.capUsd ?? ''}
+              onChange={(e) =>
+                setS({
+                  ...s,
+                  budget: {
+                    ...s.budget,
+                    capUsd: e.target.value ? Number(e.target.value) : undefined,
+                    capSince: e.target.value ? (s.budget?.capSince ?? new Date().toISOString()) : undefined,
+                    stoppedAt: undefined,
+                    stopReason: undefined,
+                  },
+                })
+              }
+            />
+          </Field>
+          <Field label="Daily cap (USD)" hint="The UTC day">
+            <input
+              aria-label="Daily spend cap"
+              type="number"
+              min={0}
+              step="1"
+              value={s.budget?.dailyCapUsd ?? ''}
+              onChange={(e) =>
+                setS({
+                  ...s,
+                  budget: {
+                    ...s.budget,
+                    dailyCapUsd: e.target.value ? Number(e.target.value) : undefined,
+                    stoppedAt: undefined,
+                    stopReason: undefined,
+                  },
+                })
+              }
+            />
+          </Field>
+        </div>
+        <h4>Alerts</h4>
         <div className="two-columns">
           <Field label="Daily token alert">
             <input
@@ -458,7 +533,7 @@ function SettingsDrawer({
               }
             />
           </Field>
-          <Field label="$ per million tokens">
+          <Field label="$ per million tokens" hint="Only for models missing from the price table">
             <input
               aria-label="Dollars per million tokens"
               type="number"

@@ -4,6 +4,7 @@ import { collection } from './db.js';
 import { theories, type Theory } from './theories.js';
 import { trialCount } from './evaluations.js';
 import { researchSettings } from './researchLoop.js';
+import { budgetState } from './spendGuard.js';
 
 export const BOARD_COLUMNS: { key: string; label: string; statuses: Theory['status'][] }[] = [
   { key: 'draft', label: 'Draft', statuses: ['draft', 'revise'] },
@@ -81,7 +82,7 @@ export async function researchStatus(ownerId: string) {
   const successes = decided.filter((t) => t.status === 'successful' || t.status === 'approved').length;
   const tokens = await tokensByRole(ownerId, today);
   const tokensToday = Object.values(tokens).reduce((n, r) => n + r.input + r.output, 0);
-  const rate = s.budget?.usdPerMillionTokens;
+  const spend = await budgetState(ownerId);
   const lastRun = h
     ? await collection<{ _id: string; status: string; createdAt: Date; finishedAt?: Date }>('runs')
         .find({ ownerId, workflowId: h._id } as Record<string, unknown>, {
@@ -109,8 +110,10 @@ export async function researchStatus(ownerId: string) {
       decided: decided.length,
       trials: await trialCount(ownerId),
       tokensToday,
-      ...(rate ? { costToday: Math.round((tokensToday / 1e6) * rate * 100) / 100 } : {}),
+      // Priced per model (#297); usdPerMillionTokens only for models missing from the price table.
+      costToday: Math.round(spend.today * 100) / 100,
     },
+    spend,
     budgetAlert:
       s.budget?.dailyTokenAlert && tokensToday > s.budget.dailyTokenAlert
         ? `Today's tokens (${tokensToday.toLocaleString('en-US')}) passed the alert of ${s.budget.dailyTokenAlert.toLocaleString('en-US')}`
