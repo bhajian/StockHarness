@@ -271,3 +271,117 @@ export function Tabs<T extends string>({
     </div>
   );
 }
+
+export type FilterDef = {
+  id: string;
+  label: string;
+  value: string;
+  options: { value: string; label?: string }[];
+  onChange: (v: string) => void;
+  /** Label of the empty option ("All …"). */
+  all?: string;
+};
+/**
+ * A one-row filter bar (#303): search, a Filters button that opens a popover with the selects, the active filters
+ * as removable chips, and the match count. Replaces rows of full-width selects.
+ */
+export function FilterBar({
+  search,
+  onSearch,
+  placeholder = 'Search',
+  filters,
+  shown,
+  total,
+}: {
+  search: string;
+  onSearch: (v: string) => void;
+  placeholder?: string;
+  filters: FilterDef[];
+  shown?: number;
+  total?: number;
+}) {
+  const [open, setOpen] = React.useState(false);
+  const ref = React.useRef<HTMLDivElement>(null);
+  const active = filters.filter((f) => f.value);
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    const esc = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false);
+    addEventListener('mousedown', close);
+    addEventListener('keydown', esc);
+    return () => {
+      removeEventListener('mousedown', close);
+      removeEventListener('keydown', esc);
+    };
+  }, [open]);
+  const labelOf = (f: FilterDef) => f.options.find((o) => o.value === f.value)?.label ?? f.value;
+  return (
+    <div className="filter-row" role="search" ref={ref}>
+      <label className="filter-search">
+        <input
+          aria-label={placeholder}
+          placeholder={placeholder}
+          value={search}
+          onChange={(e) => onSearch(e.target.value)}
+        />
+      </label>
+      <button
+        type="button"
+        className={`button secondary filter-button${active.length ? ' has-active' : ''}`}
+        aria-expanded={open}
+        aria-haspopup="dialog"
+        onClick={() => setOpen(!open)}
+      >
+        Filters{active.length ? ` (${active.length})` : ''}
+      </button>
+      {active.map((f) => (
+        <button
+          key={f.id}
+          type="button"
+          className="filter-chip"
+          title={`Remove the ${f.label} filter`}
+          onClick={() => f.onChange('')}
+        >
+          {f.label}: {labelOf(f)} <X size={12} aria-hidden="true" />
+        </button>
+      ))}
+      {shown !== undefined && total !== undefined && shown !== total && (
+        <span className="muted-line">
+          {shown} of {total}
+        </span>
+      )}
+      {open && (
+        <div className="filter-popover" role="dialog" aria-label="Filters">
+          {filters.map((f) => (
+            <label key={f.id} className="filter-field">
+              <span>{f.label}</span>
+              <select aria-label={f.label} value={f.value} onChange={(e) => f.onChange(e.target.value)}>
+                <option value="">{f.all ?? `All`}</option>
+                {f.options.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label ?? o.value}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ))}
+          <div className="filter-popover-actions">
+            <button
+              type="button"
+              className="link-button"
+              disabled={!active.length}
+              onClick={() => active.forEach((f) => f.onChange(''))}
+            >
+              Clear all
+            </button>
+            <button type="button" className="button secondary small" onClick={() => setOpen(false)}>
+              Done
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
