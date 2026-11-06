@@ -349,7 +349,7 @@ async function submitCode(ownerId: string, args: Record<string, any>, actor: The
   return {
     ...result,
     ...brief(t),
-    next: `Passed. Evaluate it once with evaluate_strategy(theory_id="T-${t.number}", params={start, end, symbols}).`,
+    next: `Passed. Evaluate it once with evaluate_strategy(theory_id="T-${t.number}", params=evaluation_params from the brief).`,
   };
 }
 const lastError = (t: Theory) =>
@@ -460,6 +460,7 @@ async function mechanicalVerdict(
       theoryId: t._id,
       params: {
         ...(explore.params.symbols ? { symbols: explore.params.symbols } : {}),
+        ...(explore.params.universe ? { universe: explore.params.universe } : {}),
         ...(explore.params.side ? { side: explore.params.side } : {}),
         ...(explore.params.top_n ? { top_n: explore.params.top_n } : {}),
         ...(explore.params.rebalance ? { rebalance: explore.params.rebalance } : {}),
