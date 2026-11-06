@@ -2830,7 +2830,7 @@ textarea::placeholder {
   border: 1px solid #c0392b;
   box-sizing: border-box;
 }
-.health-issues {
+.health-issues > div {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
@@ -4080,7 +4080,7 @@ td.loss {
 }
 
 /* FilterBar (#303) */
-.filter-row {
+.filterbar {
   position: relative;
   display: flex;
   flex-wrap: wrap;
@@ -4088,19 +4088,19 @@ td.loss {
   gap: 8px;
   margin-bottom: 10px;
 }
-.filter-search input {
+.filterbar-search input {
   width: 280px;
   height: 34px;
 }
-.filter-button {
+.filterbar-button {
   height: 34px;
   padding: 0 12px;
 }
-.filter-button.has-active {
+.filterbar-button.has-active {
   border-color: var(--blue);
   color: var(--blue-ink);
 }
-.filter-chip {
+.filterbar-chip {
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -4114,7 +4114,7 @@ td.loss {
   font-size: 12px;
   cursor: pointer;
 }
-.filter-popover {
+.filterbar-popover {
   position: absolute;
   top: 40px;
   left: 0;
@@ -4128,24 +4128,60 @@ td.loss {
   border-radius: 10px;
   box-shadow: 0 8px 24px #141f2c22;
 }
-.filter-field {
+.filterbar-field {
   display: grid;
   gap: 4px;
   font-size: 12px;
   color: var(--slate);
 }
-.filter-field select {
+.filterbar-field select {
   width: 100%;
   height: 32px;
 }
-.filter-popover-actions {
+.filterbar-popover-actions {
   grid-column: 1 / -1;
   display: flex;
   justify-content: space-between;
   align-items: center;
 }
-.filter-chip {
+.filterbar-chip {
   text-transform: none;
   letter-spacing: normal;
   font-weight: 500;
+}
+
+/* UI pass (#283) */
+.field-doc {
+  min-width: 300px;
+}
+.field-doc textarea {
+  flex: 1;
+  min-width: 0;
+  resize: vertical;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.35;
+  min-height: 38px;
+  padding: 4px 8px;
+}
+.research-board {
+  align-items: start;
+}
+.board-column {
+  min-height: 0;
+}
+.board-empty {
+  font-size: 12px;
+  color: var(--faint);
+  padding: 4px 2px;
+}
+.idea-summary {
+  align-items: start;
+}
+.evaluations-heading {
+  margin-bottom: 12px;
+}
+.status-chips .filter-chip {
+  text-transform: none;
+  letter-spacing: normal;
 }

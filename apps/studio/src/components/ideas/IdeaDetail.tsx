@@ -38,7 +38,13 @@ const ROLE_LABEL: Record<string, string> = {
 };
 const when = (v: string) => new Date(v).toLocaleString();
 const fmtGate = (v: unknown) =>
-  typeof v === 'number' ? (Math.abs(v) < 5 ? v.toFixed(3) : v.toFixed(1)) : String(v ?? '—');
+  typeof v === 'number'
+    ? Number.isInteger(v)
+      ? v.toLocaleString()
+      : Math.abs(v) < 10
+        ? v.toFixed(2)
+        : v.toFixed(1)
+    : String(v ?? '—');
 
 export function IdeaDetail({ id, tab, isAdmin }: { id: string; tab: string; isAdmin: boolean }) {
   const [idea, setIdea] = useState<any>(null);

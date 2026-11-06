@@ -132,17 +132,18 @@ function ResearchLab({ data, isAdmin }: { data: Data; isAdmin: boolean }) {
           <span className="muted-line">every {status.harness.schedule.everyMinutes} min</span>
         )}
         <span className="spacer" />
-        <Button onClick={() => go('/ideas')}>
+        <Button variant="secondary" onClick={() => go('/ideas')}>
           <Lightbulb size={14} /> All ideas
         </Button>
         {isAdmin && (
           <>
             <Button
+              variant="secondary"
               onClick={() => void send(status.paused ? '/research/resume' : '/research/pause').then(load)}
             >
               {status.paused ? <Play size={14} /> : <Pause size={14} />} {status.paused ? 'Resume' : 'Pause'}
             </Button>
-            <Button onClick={() => go('/research/setup')}>
+            <Button variant="secondary" onClick={() => go('/research/setup')}>
               <Settings2 size={14} /> Settings
             </Button>
           </>
@@ -207,6 +208,7 @@ function ResearchLab({ data, isAdmin }: { data: Data; isAdmin: boolean }) {
             <h3>
               {col.label} <small>{col.cards.length}</small>
             </h3>
+            {!col.cards.length && <span className="board-empty">Nothing here now</span>}
             {col.cards.map((c) => (
               <button key={c.id} type="button" className="board-card" onClick={() => go(`/ideas/${c.ref}`)}>
                 <strong>

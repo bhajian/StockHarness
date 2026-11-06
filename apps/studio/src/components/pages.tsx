@@ -469,7 +469,7 @@ export function RunsPage() {
     <>
       <PageTitle title="Executions" />
       <ErrorNotice error={error} />
-      <div className="filter-row">
+      <div className="filter-row status-chips">
         {[
           'all',
           'running',
@@ -485,7 +485,7 @@ export function RunsPage() {
             className={`filter-chip ${filter === s ? 'active' : ''}`}
             onClick={() => setFilter(s)}
           >
-            {s}
+            {RUN_STATUS_LABEL[s] ?? s}
             {s !== 'all' && counts[s] ? <small>{counts[s]}</small> : null}
           </button>
         ))}
@@ -588,3 +588,14 @@ export function RunsPage() {
     </>
   );
 }
+
+const RUN_STATUS_LABEL: Record<string, string> = {
+  all: 'All',
+  running: 'Running',
+  queued: 'Queued',
+  waiting_for_human: 'Waiting for a person',
+  succeeded: 'Succeeded',
+  failed: 'Failed',
+  interrupted: 'Interrupted',
+  cancelled: 'Cancelled',
+};
