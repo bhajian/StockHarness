@@ -115,6 +115,8 @@ before(async () => {
   );
   await ok('/catalog/refresh', {});
   await ok('/evaluator/settings', { holdoutMonths: 1 }, 'PUT');
+  // A theory's evaluation runs on the research scope (#319): the synthetic names.
+  await ok('/research/settings', { evaluationSymbols: ids }, 'PUT');
 
   process.env.ENCRYPTION_KEY = env
     .split('\n')
@@ -343,6 +345,16 @@ test('the S&P 500 proxy scope: the N largest by market cap, for evaluations and 
   });
   assert.equal(est.config.universeTop, 5, 'a config without a scope takes the research scope');
   assert.equal(est.config.symbols, undefined);
+  // A theory is evaluated on the research scope whatever names the Coder passes, or none (#319).
+  const scoped = await idea('Scoped trend followers', 'momentum', GOOD);
+  const se = await ok(`/evaluations/${scoped.evaluationId}`);
+  assert.deepEqual(
+    se.record.params.universe,
+    { top_by_market_cap: 5 },
+    'the research scope, not the whole universe',
+  );
+  assert.equal(se.record.params.symbols, undefined);
+  assert.equal(se.record.params.start, params.start, "the Coder's window is kept");
   await ok('/research/settings', { scope: { kind: 'symbols', top: 500 } }, 'PUT');
 });
 
