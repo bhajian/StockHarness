@@ -295,6 +295,28 @@ test('a spend cap below the spend stops the next cycle at its first model call a
   assert.ok(s.spend.sinceCap >= s.spend.today);
   const wf = (await ok('/workflows')).find((w: any) => w.name === 'Research loop');
   assert.equal(wf.schedule.enabled, false, 'its schedule is off');
+  // One cycle at a time (#317): Run a cycle now refuses while one is running.
+  await ok('/research/settings', { budget: {} }, 'PUT');
+  await ok('/research/resume', {});
+  await ok('/research/settings', { schedule: { enabled: false, everyMinutes: 120 } }, 'PUT');
+  for (let i = 0; i < 120; i++) {
+    const cycles = await ok('/research/cycles');
+    if (!cycles.some((c: any) => ['queued', 'running'].includes(c.status))) break;
+    await new Promise((res) => setTimeout(res, 1000));
+  }
+  const first = await ok('/research/run-now', {});
+  const second = await fetch(base + '/api/research/run-now', {
+    method: 'POST',
+    headers: { Origin: base, Cookie: cookie, 'Content-Type': 'application/json' },
+    body: '{}',
+  });
+  assert.equal(second.status, 409);
+  assert.match((await second.json()).error, /already running/);
+  for (let i = 0; i < 90; i++) {
+    const r = await ok(`/runs/${first.id}`);
+    if (!['queued', 'running'].includes(r.status)) break;
+    await new Promise((res) => setTimeout(res, 1000));
+  }
   // A model's own cap (#301): only that model's calls are refused.
   await ok(
     '/research/settings',

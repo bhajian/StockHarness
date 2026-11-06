@@ -221,6 +221,15 @@ researchRouter.post('/research/run-now', async (req, res) => {
   if (!h) throw new HttpError(409, 'Install the research loop first (Setup → Start)');
   const s = await researchSettings(ownerId);
   if (s.paused) throw new HttpError(409, 'The research loop is paused; resume it first');
+  const busy = await collection<any>('runs').findOne(
+    { ownerId, workflowId: h._id, status: { $in: ['queued', 'running'] } },
+    { projection: { _id: 1, createdAt: 1 } },
+  );
+  if (busy)
+    throw new HttpError(
+      409,
+      `A research cycle is already running (started ${new Date(busy.createdAt).toLocaleString()}); one at a time`,
+    );
   const run = await createRun(
     ownerId,
     { workflowId: h._id, input: 'Research cycle (run now)', history: [] },
