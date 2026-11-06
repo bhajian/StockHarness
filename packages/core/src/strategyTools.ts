@@ -100,11 +100,16 @@ export const STRATEGY_TOOLS = [
             top_n: { type: 'integer', minimum: 1 },
             rebalance: { type: 'string', enum: ['daily', 'weekly', 'monthly'] },
             plugin_params: { type: 'object' },
+            universe: {
+              type: 'object',
+              properties: { top_by_market_cap: { type: 'integer', minimum: 1 } },
+              description: 'Only the N largest names by market cap on each date',
+            },
           },
-          required: ['start', 'end'],
+          description:
+            'For a theory (theory_id) the research scope (its names) is applied for you, and the research window when start or end is missing.',
         },
       },
-      required: ['params'],
       additionalProperties: false,
     },
   },

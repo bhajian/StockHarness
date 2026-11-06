@@ -362,6 +362,22 @@ const lastError = (t: Theory) =>
  * evaluate_strategy for a theory (the Coder, theory in coding): runs the theory's plugin, links the evaluation
  * and, when it finishes, moves the theory to post_review (or code_error if the evaluation failed).
  */
+/**
+ * A theory is evaluated on the research scope (Research → Setup), whatever names the agent passed (#319); the
+ * research window fills in a missing start or end (the evaluator still stops before the holdout). The agent
+ * may choose the window, side, top_n, rebalance and plugin_params, not the names.
+ */
+export async function scopedParams(ownerId: string, given: unknown) {
+  const { evaluationParams } = await import('./researchLoop.js');
+  const research = await evaluationParams(ownerId);
+  const p = given && typeof given === 'object' ? { ...(given as Record<string, unknown>) } : {};
+  if (!research) return p;
+  const { start, end, ...names } = research;
+  delete p.symbols;
+  delete p.universe;
+  return { ...p, start: p.start ?? start, end: p.end ?? end, ...names };
+}
+
 export async function evaluateForTheory(
   ownerId: string,
   role: ResearchRole | undefined,
@@ -389,7 +405,7 @@ export async function evaluateForTheory(
     plugin: t.plugin.name,
     version,
     theoryId: t._id,
-    params: args.params,
+    params: await scopedParams(ownerId, args.params),
   });
   const evaluator = actorOf('evaluator', meta);
   const settled = done.then(async (e: Evaluation) => {
