@@ -31,6 +31,8 @@ export type CodeJobSpec = {
   purpose?: string;
   /** Names of Python secrets the job receives as environment variables. */
   secrets?: string[];
+  /** Memory for the job's container (Kubernetes quantity), over EXECUTOR_JOB_MEMORY; evaluations ask for more. */
+  memory?: string;
   /**
    * Transform context (#90): OH_WINDOW, OH_OUTPUTS, OH_DQ_COLLECTION for the `oh` SDK. Only these names are
    * accepted by the executor, which never lets job env set other OH_* variables.
@@ -129,6 +131,7 @@ export async function runCodeJob(ctx: CodeJobContext, spec: CodeJobSpec): Promis
       ...(spec.context ? { context: spec.context } : {}),
       purpose: spec.purpose,
       secrets: spec.secrets ?? [],
+      ...(spec.memory ? { memory: spec.memory } : {}),
       timeoutSeconds: jobTimeoutSeconds(spec.timeoutSeconds),
       tokenHash: hash(token),
       backend: config.EXECUTOR_BACKEND as 'kubernetes' | 'service',
@@ -227,8 +230,11 @@ async function launch(record: CodeJobRecord, token: string) {
               command: ['python', '/opt/executor/runner.py'],
               env,
               resources: {
-                requests: { cpu: config.EXECUTOR_JOB_CPU, memory: config.EXECUTOR_JOB_MEMORY },
-                limits: { memory: config.EXECUTOR_JOB_MEMORY },
+                requests: {
+                  cpu: config.EXECUTOR_JOB_CPU,
+                  memory: record.memory ?? config.EXECUTOR_JOB_MEMORY,
+                },
+                limits: { memory: record.memory ?? config.EXECUTOR_JOB_MEMORY },
               },
               securityContext: {
                 allowPrivilegeEscalation: false,
@@ -262,11 +268,27 @@ async function executorImage() {
 }
 async function waitForJob(record: CodeJobRecord, signal: AbortSignal): Promise<CodeJobOutcome> {
   const deadline = record.createdAt.getTime() + (record.timeoutSeconds + LAUNCH_GRACE_SECONDS) * 1000;
+  let nextBackendCheck = Date.now() + BACKEND_CHECK_MS;
   try {
     for (;;) {
       signal.throwIfAborted();
       const current = (await jobs().findOne({ _id: record._id })) as CodeJobRecord;
       if (['succeeded', 'failed', 'cancelled'].includes(current.status)) return outcomeOf(current);
+      // The pod can die without reporting (an OOM kill, a crash): ask Kubernetes now and then.
+      if (Date.now() >= nextBackendCheck) {
+        nextBackendCheck = Date.now() + BACKEND_CHECK_MS;
+        const dead = await backendFailed(current).catch(() => undefined);
+        if (dead) {
+          await sleep(5000, signal); // a result posted just before the pod exited still wins
+          const again = (await jobs().findOne({ _id: record._id })) as CodeJobRecord;
+          if (['succeeded', 'failed', 'cancelled'].includes(again.status)) return outcomeOf(again);
+          await finish(record._id, {
+            status: 'failed',
+            error: `The job's pod stopped without reporting: ${dead}`,
+          });
+          return outcomeOf((await jobs().findOne({ _id: record._id })) as CodeJobRecord);
+        }
+      }
       if (Date.now() > deadline) {
         const detail = await diagnose(current).catch(() => undefined);
         await finish(record._id, {
@@ -288,6 +310,22 @@ async function waitForJob(record: CodeJobRecord, signal: AbortSignal): Promise<C
     }
     throw error;
   }
+}
+const BACKEND_CHECK_MS = 30_000;
+/** A diagnosis when the job's Kubernetes Job has failed (its pod is gone for good), else undefined. */
+async function backendFailed(record: CodeJobRecord): Promise<string | undefined> {
+  if (record.backend !== 'kubernetes' || !record.externalName) return undefined;
+  const namespace = config.EXECUTOR_NAMESPACE || (await ownNamespace());
+  const job = await getJob(namespace, record.externalName);
+  const failed = (job?.status as { failed?: number } | undefined)?.failed ?? 0;
+  const condition = job?.status?.conditions?.find((c) => c.type === 'Failed' && c.status === 'True');
+  if (!failed && !condition) return undefined;
+  const pods = await jobPods(namespace, record.externalName).catch(() => []);
+  const oom = pods.some((p) => p.reason === 'OOMKilled');
+  const detail = (await diagnose(record).catch(() => undefined)) ?? 'the job failed';
+  return oom
+    ? `out of memory (OOMKilled at ${record.memory ?? config.EXECUTOR_JOB_MEMORY}); ${detail}`
+    : detail;
 }
 /** Why a Kubernetes job never reported: image pull failures, OOM kills, scheduling problems, pod logs. */
 async function diagnose(record: CodeJobRecord) {

@@ -41,6 +41,8 @@ const s = z.object({
   EXECUTOR_NAMESPACE: z.string().default(''),
   EXECUTOR_JOB_CPU: z.string().default('1'),
   EXECUTOR_JOB_MEMORY: z.string().default('2Gi'),
+  /** Evaluations and simulations load prices for hundreds of names (a top-500 scope): more memory. */
+  EXECUTOR_EVALUATION_MEMORY: z.string().default('4Gi'),
   EXECUTOR_JOB_DISK: z.string().default('10Gi'),
   EXECUTOR_JOB_TTL_SECONDS: z.coerce.number().int().min(60).max(604800).default(3600),
   /** Jobs a workspace may have in flight at once; 0 means no limit. */
