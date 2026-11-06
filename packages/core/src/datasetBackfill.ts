@@ -9,6 +9,7 @@ import { workspaceDatabase } from './mongoMcp.js';
 import { HttpError, safeError } from './security.js';
 import { catalogById, type DatasetDef } from './datasetCatalog.js';
 import {
+  FmpPlanLimit,
   addDays,
   chunkRanges,
   datasetSyncs,
@@ -33,7 +34,8 @@ export type BackfillBatch = {
   end?: number;
   from?: string;
   to?: string;
-  status: 'pending' | 'running' | 'done' | 'failed';
+  /** skipped: outside what the FMP plan serves (#291), e.g. a calendar window older than its history. */
+  status: 'pending' | 'running' | 'done' | 'failed' | 'skipped';
   /** Next symbol index to process inside the batch (resume point). */
   next?: number;
   rows: number;
@@ -60,6 +62,8 @@ export type Backfill = {
   startedAt?: Date;
   finishedAt?: Date;
   lastError?: string;
+  /** E.g. how many windows were outside the plan's history (#291). */
+  note?: string;
   requestedBy?: string;
 };
 export const backfills = () => collection<Backfill>('dataset_backfills');
@@ -293,7 +297,7 @@ export async function runBackfill(job: Backfill) {
 
   await syncContext.run({ priority: 'BACKFILL' }, async () => {
     for (const b of job.batches) {
-      if (b.status === 'done' || b.status === 'failed') continue;
+      if (b.status === 'done' || b.status === 'failed' || b.status === 'skipped') continue;
       const status = await live();
       if (status !== 'running') return; // paused or cancelled between batches
       await save(b.i, { status: 'running', attempts: b.attempts + 1 });
@@ -325,7 +329,8 @@ export async function runBackfill(job: Backfill) {
                 symRows += await upsertRows(coll, list, def.keyFields);
               }
             } catch (e) {
-              errors++;
+              // A symbol the plan does not serve (non-US listings) is not an error of the backfill (#291).
+              if (!(e instanceof FmpPlanLimit && e.param === 'symbol')) errors++;
               lastErr = `${symbol}: ${safeError(e)}`;
             }
             rows += symRows;
@@ -363,13 +368,22 @@ export async function runBackfill(job: Backfill) {
           ...(lastErr ? { error: lastErr } : {}),
         });
       } catch (e) {
-        await save(b.i, { status: 'failed', rows, errors: errors + 1, error: safeError(e) });
+        // A window older than the plan's history can never succeed: skip it, do not fail the backfill (#291).
+        if (e instanceof FmpPlanLimit && e.param === 'from')
+          await save(b.i, {
+            status: 'skipped',
+            rows,
+            errors,
+            error: `Outside the plan's history: ${e.message}`,
+          });
+        else await save(b.i, { status: 'failed', rows, errors: errors + 1, error: safeError(e) });
       }
     }
   });
   const final = await backfills().findOne({ _id: job._id });
   if (!final || final.status !== 'running') return; // paused / cancelled
   const anyFailed = final.batches.some((x) => x.status === 'failed');
+  const skipped = final.batches.filter((x) => x.status === 'skipped').length;
   await backfills().updateOne(
     { _id: job._id },
     {
@@ -381,6 +395,9 @@ export async function runBackfill(job: Backfill) {
           ? {
               lastError: `${final.batches.filter((x) => x.status === 'failed').length} batch(es) failed; retry them`,
             }
+          : {}),
+        ...(skipped
+          ? { note: `${skipped} window(s) are older than the FMP plan's history and were skipped` }
           : {}),
       },
     },
