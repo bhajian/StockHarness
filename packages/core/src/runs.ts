@@ -467,6 +467,20 @@ export async function dispatchSchedules() {
       );
       continue;
     }
+    // Never overlap a workflow's runs (#317): while an earlier run is queued or running, skip to the next slot.
+    if (
+      await collection<Run>('runs').countDocuments({
+        ownerId: w.ownerId,
+        workflowId: w._id,
+        status: { $in: ['queued', 'running'] },
+      })
+    ) {
+      await workflows.updateOne(
+        { _id: w._id, ...(w.nextRunAt ? { nextRunAt: w.nextRunAt } : {}) },
+        { $set: { nextRunAt: nextScheduledAt(w.schedule) } },
+      );
+      continue;
+    }
     // A schedule with a wall-clock time waits for that time instead of firing the moment it is saved.
     if (!w.nextRunAt && w.schedule.at && w.schedule.everyMinutes >= 1440) {
       await workflows.updateOne(
