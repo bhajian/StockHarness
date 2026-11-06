@@ -84,13 +84,19 @@ class Ledger(unittest.TestCase):
         # Trade P&L + dividends - costs (+ the open lots' unrealized P&L) = the change in NAV.
         total = sum(t["pnl"] for t in rows["sim_trades"])
         self.assertAlmostEqual(total, res["summary"]["final_nav"] - 100000.0, delta=0.05)
-        # The evaluator's tr_1d reinvests the dividend in the stock; the broker credits it to cash until the next
-        # rebalance. The gap is the stock's move on the dividend over a few sessions: tiny, and bounded here.
+        # Reinvested (the default), the dividend buys more of the stock at that close, as the evaluator's tr_1d
+        # assumes: the equity curves match exactly, and the reinvestment is a fill of its own.
         ev = engine.evaluate(self.code, source=self.src, policies=synthetic.POLICIES,
                              params={"start": self.days[70], "end": self.days[-1]}, config=COSTS)
-        gap = abs(ev["series"]["series"]["equity"][-1] - res["series"]["series"]["equity"][-1])
-        self.assertLess(gap, 2e-4)
-        self.assertGreater(gap, 0, "a dividend in cash is not a dividend reinvested")
+        gaps = [abs(a - b) for a, b in zip(ev["series"]["series"]["equity"], res["series"]["series"]["equity"])]
+        self.assertLess(max(gaps), 1e-9)
+        drip = [o for o in rows["sim_orders"] if o["reason"] == "dividend"]
+        self.assertTrue(drip and all(o["fill_date"] == self.div_day and o["cost"] == 0 for o in drip))
+        # Kept in cash, it misses the stock's moves until the next rebalance: a small gap, and still reconciled.
+        cash, _ = sim([self.code], self.src, self.days[70], self.days[-1], capital=100000.0, dividends="cash")
+        gap = abs(ev["series"]["series"]["equity"][-1] - cash["series"]["series"]["equity"][-1])
+        self.assertTrue(0 < gap < 2e-4, gap)
+        self.assertLess(cash["reconciliation"]["max_pnl_error"], 1e-6)
 
     def test_same_config_same_ledger(self):
         a, ra = sim([self.code], self.src, self.days[70], self.days[-1], seed=42)

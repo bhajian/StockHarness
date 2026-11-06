@@ -39,6 +39,7 @@ DEFAULTS = {
     "constraints": {"position_cap": None, "sector_cap": None, "gross": 1.0, "net": None},
     "exits": {"stop": None, "take_profit": None, "horizon": False, "review": True},
     "hard_to_borrow": [],
+    "dividends": "reinvest",  # reinvest | cash (see broker.PaperBroker.dividends)
     "seed": 0,
 }
 
@@ -136,7 +137,7 @@ def simulate(ideas: list[dict], *, source, policies: dict, params: dict, config:
         borrow_bps=float(costs["borrow_cost_bps_default"]), delisting_return=float(costs["delisting_return"]),
         periods=int(cfg["trading_days_per_year"]),
         inactive={r["security_id"] for r in sec_rows if r.get("is_active") is False},
-        final_bar=final_bar, tickers=ticker)
+        final_bar=final_bar, tickers=ticker, dividends=str(sim.get("dividends") or "reinvest"))
 
     ids = [i["id"] for i in ideas]
     shadow: dict[str, list[float]] = {i: [] for i in ids}  # each idea's unscaled book return per day

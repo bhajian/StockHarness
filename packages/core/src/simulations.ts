@@ -80,6 +80,9 @@ export const simulationConfigSchema = z.object({
     .partial()
     .default({}),
   hardToBorrow: z.array(z.string().min(1).max(40)).max(2000).default([]),
+  /** reinvest: a long lot's dividend buys more of it at that close (as the evaluator's total returns assume);
+   *  cash: it stays in cash until the next rebalance. Shorts pay theirs from cash either way. */
+  dividends: z.enum(['reinvest', 'cash']).default('reinvest'),
   seed: z
     .number()
     .int()
@@ -187,29 +190,62 @@ const weekdaysBetween = (a: string, b: string) => {
   return n;
 };
 /** Seconds the run should take: each plugin's measured evaluation speed (ms per session) times the sessions. */
+/** Starting the executor job, writing the ledger and reading the result back. */
+const JOB_OVERHEAD_MS = 6000;
+/**
+ * Seconds the run should take. Measured per session from this workspace's earlier simulations (time per
+ * session per idea); without any, from the ideas' evaluations with the job's start-up time taken out.
+ */
 export async function estimateSimulation(ownerId: string, config: SimulationConfig) {
   const days = weekdaysBetween(config.period.start, config.period.end);
+  const median = (xs: number[]) => {
+    const v = xs.filter((r) => Number.isFinite(r) && r > 0).sort((a, b) => a - b);
+    return v.length ? v[Math.floor(v.length / 2)]! : undefined;
+  };
+  const past = await simulations()
+    .find(
+      { ownerId, status: 'succeeded', durationMs: { $gt: 0 } },
+      { projection: { durationMs: 1, 'result.period.days': 1, 'config.ideas': 1 } },
+    )
+    .sort({ createdAt: -1 })
+    .limit(10)
+    .toArray();
+  const simRate = median(
+    past.map(
+      (s) =>
+        Math.max(0, (s.durationMs ?? 0) - JOB_OVERHEAD_MS) /
+        Math.max(1, (s.result as any)?.period?.days ?? 0) /
+        Math.max(1, s.config.ideas.length),
+    ),
+  );
   let ms = 0;
   const perIdea = [];
   for (const i of config.ideas) {
-    const runs = await evaluations()
-      .find(
-        { ownerId, pluginName: i.plugin, status: 'succeeded', durationMs: { $gt: 0 } },
-        { projection: { durationMs: 1, 'record.period.days': 1, 'params.symbols': 1 } },
-      )
-      .sort({ createdAt: -1 })
-      .limit(5)
-      .toArray();
-    const rates = runs
-      .map((e) => (e.durationMs ?? 0) / Math.max(1, (e.record as any)?.period?.days ?? 0))
-      .filter((r) => Number.isFinite(r) && r > 0)
-      .sort((a, b) => a - b);
-    const rate = rates.length ? rates[Math.floor(rates.length / 2)]! : 40;
-    perIdea.push({ idea: i.idea, msPerDay: Math.round(rate), measured: rates.length > 0 });
+    let rate = simRate;
+    let source: 'simulations' | 'evaluations' | 'default' = 'simulations';
+    if (rate === undefined) {
+      const runs = await evaluations()
+        .find(
+          { ownerId, pluginName: i.plugin, status: 'succeeded', durationMs: { $gt: 0 } },
+          { projection: { durationMs: 1, 'record.period.days': 1 } },
+        )
+        .sort({ createdAt: -1 })
+        .limit(5)
+        .toArray();
+      rate = median(
+        runs.map(
+          (e) =>
+            Math.max(0, (e.durationMs ?? 0) - JOB_OVERHEAD_MS) /
+            Math.max(1, (e.record as any)?.period?.days ?? 0),
+        ),
+      );
+      source = rate === undefined ? 'default' : 'evaluations';
+    }
+    rate = Math.max(rate ?? 10, 0.5);
+    perIdea.push({ idea: i.idea, msPerDay: Math.round(rate * 10) / 10, source });
     ms += rate * days;
   }
-  // The broker's own pass and the ledger writes, plus starting the job.
-  const seconds = Math.ceil((ms * 1.2 + days * 2) / 1000 + 15);
+  const seconds = Math.ceil((ms + JOB_OVERHEAD_MS) / 1000);
   return { seconds, days, ideas: perIdea };
 }
 
@@ -292,6 +328,7 @@ export async function simulationJobParams(ownerId: string, sim: Simulation, read
         ...(cost.executionLagDays !== undefined ? { execution_lag_days: cost.executionLagDays } : {}),
       },
       hard_to_borrow: c.hardToBorrow,
+      dividends: c.dividends,
       seed: c.seed,
     },
   };

@@ -58,6 +58,7 @@ export function ScheduleModal({
         constraints: { positionCap: null, sectorCap: null, gross: 1, net: null },
         exits: { stop: null, takeProfit: null, horizon: false, review: true },
         costs: {},
+        dividends: 'reinvest',
         seed: 0,
       });
     });
@@ -235,6 +236,18 @@ export function ScheduleModal({
                 <select value={cfg.sizing.mode} onChange={(e) => set('sizing.mode', e.target.value)}>
                   <option value="equal">Equal weight (as evaluated)</option>
                   <option value="quarter_kelly">Quarter-Kelly</option>
+                </select>
+              </Field>
+              <Field
+                label="Dividends"
+                hint="Reinvested: as the evaluation assumes; in cash: until the next rebalance"
+              >
+                <select
+                  value={cfg.dividends ?? 'reinvest'}
+                  onChange={(e) => set('dividends', e.target.value)}
+                >
+                  <option value="reinvest">Reinvest in the stock</option>
+                  <option value="cash">Keep in cash</option>
                 </select>
               </Field>
             </div>

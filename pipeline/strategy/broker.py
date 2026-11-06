@@ -67,6 +67,9 @@ class PaperBroker:
     inactive: set = field(default_factory=set)  # securities no longer active (for the delisting rule)
     final_bar: dict = field(default_factory=dict)  # security -> the last date it has a price
     tickers: dict = field(default_factory=dict)
+    # "reinvest": a long lot's dividend buys more of it at that close, at no cost (as the evaluator's tr_1d
+    # assumes); "cash": it stays in cash until the next rebalance. Shorts always pay theirs from cash.
+    dividends: str = "reinvest"
 
     def __post_init__(self):
         self.cash = float(self.capital)
@@ -111,6 +114,7 @@ class PaperBroker:
             close, ratio, div = _price_step(prev, bar)
             if close is None:
                 continue
+            reinvest = []
             if s in held and prev is not None:
                 for lot in (l for l in self.lots.values() if l.security_id == s):
                     before = lot.shares * prev
@@ -120,7 +124,19 @@ class PaperBroker:
                     st["dividends"] += d
                     self.cash += d
                     st["price_pnl"] += lot.shares * close - before
+                    if d > 0 and lot.shares > 0 and self.dividends == "reinvest":
+                        reinvest.append((lot, d))
             self.close[s] = close
+            for lot, d in reinvest:  # cash into shares at the close: no change in NAV
+                qty = d / close
+                lot.shares += qty
+                lot.net_invested += d
+                self.cash -= d
+                self.orders.append({
+                    "n": len(self.orders) + 1, "date": day, "fill_date": day, "idea_id": lot.idea,
+                    "security_id": s, "ticker": self.tickers.get(s), "side": "buy", "shares": _r(qty, 6),
+                    "price": _r(close, 6), "notional": _r(d, 4), "cost": 0.0, "reason": "dividend",
+                })
         for key in [k for k, l in self.lots.items() if l.security_id not in bars]:
             s = key[1]
             if s in self.inactive and self.final_bar.get(s, day) < day:
