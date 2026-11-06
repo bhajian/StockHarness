@@ -57,9 +57,15 @@ test('syncs list and the sync detail page', async ({ page }) => {
 
   await page.goto('/datasets/syncs');
   await expect(page.locator('.kpi-card', { hasText: 'FMP calls today' })).toContainText('2');
-  await page.getByLabel('Cadence').selectOption('weekly');
+  // #303: the filters sit in a popover behind one Filters button; active ones show as chips.
+  await page.getByRole('button', { name: 'Filters' }).click();
+  await page.getByRole('dialog', { name: 'Filters' }).getByLabel('Cadence').selectOption('weekly');
   await expect(page.locator('.dataset-table tbody tr')).toHaveCount(0);
-  await page.getByLabel('Cadence').selectOption('daily');
+  await page.getByRole('dialog', { name: 'Filters' }).getByLabel('Cadence').selectOption('daily');
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('dialog', { name: 'Filters' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Cadence: daily' })).toBeVisible();
+  if (process.env.SCREENSHOT) await page.screenshot({ path: 'test-results/syncs-filters.png' });
   const row = page.locator('.dataset-table tbody tr', { hasText: 'EOD fixture' });
   await expect(row).toContainText('from 2026-10-26');
   await row.locator('td', { hasText: 'EOD fixture' }).click();

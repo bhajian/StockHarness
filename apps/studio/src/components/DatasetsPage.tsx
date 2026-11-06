@@ -48,7 +48,7 @@ import type { Schedule } from '../../../../packages/core/src/schema.js';
 import { Button, IconButton, Field, Modal, SaveForm, Empty, PageTitle, Status } from './ui';
 import { ScheduleFields } from './agentFields';
 import { DataGrid } from './DataGrid';
-import { KpiCard, Tabs } from './kit';
+import { FilterBar, KpiCard, Tabs } from './kit';
 import { fmtNumber } from '../charts/chartData';
 import { TransformsTab } from './TransformsTab';
 import { PipelinesTab } from './PipelinesTab';
@@ -529,53 +529,47 @@ function SyncsTab({
                   footnote={stats ? `${stats.runs} runs, ${stats.failed} failed` : undefined}
                 />
               </div>
-              <div className="sync-filters" role="search">
-                <input
-                  aria-label="Search syncs"
-                  placeholder="Search syncs"
-                  value={q}
-                  onChange={(e) => setQ(e.target.value)}
-                />
-                <select
-                  aria-label="Category"
-                  value={fCategory}
-                  onChange={(e) => setFCategory(e.target.value)}
-                >
-                  <option value="">All categories</option>
-                  {[...new Set(catalog.map((c) => c.category))].sort().map((c) => (
-                    <option key={c} value={c}>
-                      {c}
-                    </option>
-                  ))}
-                </select>
-                <select
-                  aria-label="Priority"
-                  value={fPriority}
-                  onChange={(e) => setFPriority(e.target.value)}
-                >
-                  <option value="">All priorities</option>
-                  {['P0', 'P1', 'P2'].map((p) => (
-                    <option key={p}>{p}</option>
-                  ))}
-                </select>
-                <select aria-label="Status" value={fStatus} onChange={(e) => setFStatus(e.target.value)}>
-                  <option value="">All statuses</option>
-                  {['ready', 'running', 'queued', 'failed', 'disabled'].map((p) => (
-                    <option key={p}>{p}</option>
-                  ))}
-                </select>
-                <select aria-label="Cadence" value={fCadence} onChange={(e) => setFCadence(e.target.value)}>
-                  <option value="">Any cadence</option>
-                  {['intraday', 'daily', 'weekly', 'monthly', 'manual'].map((p) => (
-                    <option key={p}>{p}</option>
-                  ))}
-                </select>
-                {visible.length !== syncs.length && (
-                  <span className="muted-line">
-                    {visible.length} of {syncs.length}
-                  </span>
-                )}
-              </div>
+              <FilterBar
+                search={q}
+                onSearch={setQ}
+                placeholder="Search syncs"
+                shown={visible.length}
+                total={syncs.length}
+                filters={[
+                  {
+                    id: 'category',
+                    label: 'Category',
+                    all: 'All categories',
+                    value: fCategory,
+                    onChange: setFCategory,
+                    options: [...new Set(catalog.map((c) => c.category))].sort().map((c) => ({ value: c })),
+                  },
+                  {
+                    id: 'priority',
+                    label: 'Priority',
+                    all: 'All priorities',
+                    value: fPriority,
+                    onChange: setFPriority,
+                    options: ['P0', 'P1', 'P2'].map((p) => ({ value: p })),
+                  },
+                  {
+                    id: 'status',
+                    label: 'Status',
+                    all: 'All statuses',
+                    value: fStatus,
+                    onChange: setFStatus,
+                    options: ['ready', 'running', 'queued', 'failed', 'disabled'].map((p) => ({ value: p })),
+                  },
+                  {
+                    id: 'cadence',
+                    label: 'Cadence',
+                    all: 'Any cadence',
+                    value: fCadence,
+                    onChange: setFCadence,
+                    options: ['intraday', 'daily', 'weekly', 'monthly', 'manual'].map((p) => ({ value: p })),
+                  },
+                ]}
+              />
               {isAdmin && (
                 <div className="dataset-toolbar" role="toolbar" aria-label="Dataset sync actions">
                   <label className="dataset-toolbar-select">
