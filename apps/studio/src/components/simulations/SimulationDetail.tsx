@@ -36,6 +36,7 @@ const REASON_LABEL: Record<string, string> = {
   no_price: 'no price',
   open: 'still open',
   entry: 'entry',
+  dividend: 'dividend reinvested',
 };
 const REASON_PILL: Record<string, string> = {
   stop: 'failed',
@@ -781,6 +782,12 @@ function ConfigView({ s, isAdmin }: { s: any; isAdmin: boolean }) {
             .map(([k, v]) => `${k} ${v}`)
             .join(' · ')
         : 'the evaluator defaults (backtest.yaml)',
+    ],
+    [
+      'Dividends',
+      (c.dividends ?? 'reinvest') === 'reinvest'
+        ? 'reinvested in the stock at the ex-date close (as the evaluation assumes)'
+        : 'kept in cash until the next rebalance',
     ],
     ['Seed', String(c.seed)],
     ['Ledger hash', <code key="h">{s.result?.ledger_hash ?? '—'}</code>],
