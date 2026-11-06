@@ -5,6 +5,7 @@
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { collection, mongo } from './db.js';
+import { config } from './config.js';
 import { HttpError, safeError } from './security.js';
 import { runCodeJob, type CodeJobOutcome } from './codeJobs.js';
 import { evaluations, evaluatorSettings, JOB_CODE } from './evaluations.js';
@@ -357,6 +358,7 @@ async function finishSimulation(doc: Simulation, execute: Execute, readableEnd?:
         code: JOB_CODE,
         params: await simulationJobParams(doc.ownerId, doc, readableEnd),
         timeoutSeconds: SIMULATION_TIMEOUT_SECONDS,
+        memory: config.EXECUTOR_EVALUATION_MEMORY,
         purpose: `Simulate ${doc.name} ${doc.config.period.start} → ${doc.config.period.end}`,
       },
     );
@@ -665,4 +667,19 @@ export async function restoreSimulationRun(
     ...(spec.finishedAt ? { finishedAt: new Date(spec.finishedAt) } : {}),
     importedAt: new Date(),
   });
+}
+
+/** At startup: simulations a previous process left running are closed out (their waiter is gone). */
+export async function recoverSimulations() {
+  const r = await simulations().updateMany(
+    { status: 'running' },
+    {
+      $set: {
+        status: 'failed',
+        error: { message: 'Interrupted by a server restart; run it again' },
+        finishedAt: new Date(),
+      },
+    },
+  );
+  return r.modifiedCount;
 }

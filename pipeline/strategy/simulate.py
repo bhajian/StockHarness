@@ -27,7 +27,8 @@ from . import EVALUATOR_VERSION, contract, metrics
 from .broker import PaperBroker
 from .config import load_config
 from .context import StrategyContext
-from .engine import EvaluationError, _current, _universe_on, plan_books, resolve_scope, trading_days, universe_top
+from .engine import (EvaluationError, _current, _universe_on, plan_books, resolve_scope, top_scope, trading_days,
+                     universe_top)
 from .reader import PitReader
 
 SIMULATOR_VERSION = "1.0.0"
@@ -100,10 +101,14 @@ def simulate(ideas: list[dict], *, source, policies: dict, params: dict, config:
     scope, tickers = resolve_scope(source, params.get("symbols"))
     if params.get("symbols") and not scope:
         raise EvaluationError("none of params.symbols is a known security")
-    reader = PitReader(source, policies, end=readable_end or end, start=start, scope_ids=scope, scope_tickers=tickers)
     lag = int(costs["execution_lag_days"])
     gross = float(sim["constraints"].get("gross") or 1.0)
     top = universe_top(params)
+    # Read only the names that are ever in scope; weekly dates cover monthly rebalancers, and a daily one's top N
+    # on other days barely differs (market caps move slowly).
+    read_ids, read_tickers = top_scope(source, days, "weekly", scope, top, lag)
+    reader = PitReader(source, policies, end=readable_end or end, start=start, scope_ids=read_ids,
+                       scope_tickers=read_tickers if top else tickers)
     sink = sink or ListSink()
 
     # Pass 1: every idea's target books (the evaluator's walk).

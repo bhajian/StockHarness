@@ -5,6 +5,7 @@
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { collection, mongo } from './db.js';
+import { config } from './config.js';
 import { workspaceDatabase } from './mongoMcp.js';
 import { runCodeJob, type CodeJobOutcome } from './codeJobs.js';
 import { HttpError, safeError } from './security.js';
@@ -264,6 +265,7 @@ async function finish(doc: Evaluation, code: string, execute: Execute, readableE
           plugin_ref: { name: doc.pluginName, version: doc.pluginVersion },
         },
         timeoutSeconds: EVALUATION_TIMEOUT_SECONDS,
+        memory: config.EXECUTOR_EVALUATION_MEMORY,
         purpose: `Evaluate ${doc.pluginName} v${doc.pluginVersion} ${doc.params.start} → ${doc.params.end}`,
       },
     );
@@ -383,4 +385,22 @@ export async function startHoldoutEvaluation(
   );
   await holdoutRuns().updateOne({ _id }, { $set: { evaluationId: started.evaluation._id } });
   return started;
+}
+
+/**
+ * The API process waits on each evaluation's job; at startup any evaluation still marked running lost its
+ * waiter. Close it out (a theory left in coding is evaluated again by the Coder's next step, #280).
+ */
+export async function recoverEvaluations() {
+  const r = await evaluations().updateMany(
+    { status: 'running' } as Record<string, unknown>,
+    {
+      $set: {
+        status: 'failed',
+        error: { message: 'Interrupted by a server restart; run it again' },
+        finishedAt: new Date(),
+      },
+    } as Record<string, unknown>,
+  );
+  return r.modifiedCount;
 }

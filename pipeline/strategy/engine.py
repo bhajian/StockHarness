@@ -100,6 +100,27 @@ def universe_top(params: dict) -> int | None:
     return top
 
 
+def top_scope(source, days: list[str], every: str, scope, top: int | None, lag: int):
+    """The securities that are ever in the top N on a rebalance date (#300 memory): reads are narrowed to them,
+    so a top-500 run does not load every security's rows. Each date's eligible list is unchanged (point in time):
+    this only stops loading names that are never in scope. Returns (security_ids, tickers) or (scope, None)."""
+    if not top:
+        return scope, None
+    names: set[str] = set()
+    for d in rebalance_dates(days, every):
+        if days.index(d) + lag >= len(days):
+            break
+        names |= set(_universe_on(source, d, scope, days, top))
+    ids = sorted(names)
+    tickers = sorted({
+        i["value"]
+        for r in (source.find("securities", {"security_id": {"$in": ids}}, ["identifiers"]) if ids else [])
+        for i in r.get("identifiers") or []
+        if i.get("type") == "ticker"
+    })
+    return ids or scope, tickers or None
+
+
 def build_book(scores: dict, eligible: set[str] | None, side: str, top_n: int, gross: float) -> dict[str, float]:
     """Equal-weight target weights; ties break on security_id so the book is deterministic."""
     ranked = sorted(
@@ -188,11 +209,14 @@ def evaluate(code: str, *, source, policies: dict, params: dict, config: dict | 
     scope, tickers = resolve_scope(source, params.get("symbols"))
     if params.get("symbols") and not scope:
         raise EvaluationError("none of params.symbols is a known security")
-    reader = PitReader(source, policies, end=readable_end or end, start=start, scope_ids=scope, scope_tickers=tickers)
     lag = int(cfg["execution_lag_days"])
+    top = universe_top(params)
+    read_ids, read_tickers = top_scope(source, days, meta["rebalance"], scope, top, lag)
+    reader = PitReader(source, policies, end=readable_end or end, start=start, scope_ids=read_ids,
+                       scope_tickers=read_tickers if top else tickers)
     gross = float(cfg["sizing"].get("gross_limit", 1.0))
     plan = plan_books(plugin, meta, source=source, reader=reader, days=days, scope=scope, lag=lag, gross=gross,
-                      plugin_params={**plugin.params, **(params.get("plugin_params") or {})}, top=universe_top(params))
+                      plugin_params={**plugin.params, **(params.get("plugin_params") or {})}, top=top)
     targets, eligible_at, rebalances = plan["targets"], plan["eligible_at"], plan["rebalances"]
 
     # Pass 2: daily total returns of every name held (and, at small scale, of the whole eligible universe, for
