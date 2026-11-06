@@ -36,8 +36,8 @@ import json, sys
 m = json.load(sys.stdin)
 layers = [l["mediaType"] for l in m.get("layers", [])]
 if not layers or any("in-toto" in l for l in layers):
-    sys.exit(f"bad manifest: {m.get(\"mediaType\")} with layers {layers}")
-print(f"   manifest ok: {len(layers)} layers")'
+    sys.exit("bad manifest: %s with layers %s" % (m.get("mediaType"), layers))
+print("   manifest ok: %d layers" % len(layers))'
 }
 precheck() { # name command...
   local image="$REGISTRY/$1:$SHA" pod="precheck-$1-$RANDOM"
@@ -67,16 +67,20 @@ if [ "$want_exec" = 1 ]; then
 fi
 
 # Nothing in flight that a restart would interrupt (transform runs, harness runs, evaluations, simulations).
-POD=$(kubectl -n "$NS" get pods -o name | grep '^pod/app-' | head -1 | cut -d/ -f2)
-kubectl -n "$NS" exec "$POD" -c api -- node -e "
+if [ -n "${FORCE:-}" ]; then
+  echo "FORCE set: not checking for work in flight"
+else
+  POD=$(kubectl -n "$NS" get pods -o name | grep '^pod/app-' | head -1 | cut -d/ -f2)
+  kubectl -n "$NS" exec "$POD" -c api -- node --input-type=module -e "
 const { connectDatabase, collection, mongo } = await import('/app/dist/packages/core/src/db.js');
 await connectDatabase();
 const busy = {};
 for (const c of ['transform_runs', 'runs', 'evaluations', 'simulations']) busy[c] = await collection(c).countDocuments({ status: { \$in: ['queued', 'running'] } });
 await mongo.close();
 console.log('in flight', JSON.stringify(busy));
-if (Object.values(busy).some(Boolean) && !process.env.FORCE) process.exit(3);
-" --input-type=module || { echo "work is in flight; wait, or set FORCE=1" >&2; exit 3; }
+if (Object.values(busy).some(Boolean)) process.exit(3);
+" || { echo "work is in flight; wait, or set FORCE=1" >&2; exit 3; }
+fi
 
 kubectl apply -k deploy/k8s/overlays/aws | grep -E 'deployment.apps/app' || true
 kubectl -n "$NS" rollout status deploy/app --timeout=400s
