@@ -295,6 +295,22 @@ test('a spend cap below the spend stops the next cycle at its first model call a
   assert.ok(s.spend.sinceCap >= s.spend.today);
   const wf = (await ok('/workflows')).find((w: any) => w.name === 'Research loop');
   assert.equal(wf.schedule.enabled, false, 'its schedule is off');
+  // A model's own cap (#301): only that model's calls are refused.
+  await ok(
+    '/research/settings',
+    { budget: { capSince: '2020-01-01T00:00:00Z', models: { 'test-research': { capUsd: 0.000001 } } } },
+    'PUT',
+  );
+  await ok('/research/resume', {});
+  run = await ok('/runs', { workflowId: harnessId, input: 'over the model cap' });
+  for (let i = 0; i < 60 && ['queued', 'running'].includes(run.status); i++) {
+    await new Promise((r) => setTimeout(r, 1000));
+    run = await ok(`/runs/${run.id}`);
+  }
+  assert.equal(run.status, 'failed');
+  assert.match(run.error, /Spend cap reached: test-research: \$[\d.]+ since the cap started reached its cap/);
+  s = await ok('/research/status');
+  assert.ok(s.spend.models.some((m: any) => m.model === 'test-research' && m.exceeded));
   // Lifting the cap and resuming runs again.
   await ok('/research/settings', { budget: {} }, 'PUT');
   await ok('/research/resume', {});

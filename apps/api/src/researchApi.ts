@@ -1,5 +1,7 @@
 // Research loop API (#115): settings, human steering notes, and installing the research loop harness.
 import { Router } from 'express';
+import { researchCycle, researchCycles, researchHow } from '../../../packages/core/src/researchCycles.js';
+import { createRun } from '../../../packages/core/src/runs.js';
 import { z } from 'zod';
 import { collection } from '../../../packages/core/src/db.js';
 import { HttpError } from '../../../packages/core/src/security.js';
@@ -132,6 +134,7 @@ export async function installResearchLoop(
     effort: s.agentEffort,
     maxTurns: s.agentMaxTurns,
     scheduleMinutes: schedule,
+    ...(s.schedule?.until ? { scheduleUntil: s.schedule.until } : {}),
   });
   const existing = await collection<any>('workflows').findOne({ ownerId, name }, { projection: { _id: 1 } });
   const saved = await saveResource('workflows', principal, workflow, existing ? { id: existing._id } : {});
@@ -198,5 +201,31 @@ async function setPaused(req: any, paused: boolean) {
   }
   return researchStatus(ownerId);
 }
+// How it works and what each cycle did (#302).
+researchRouter.get('/research/how', async (req, res) => res.json(await researchHow(req.principal!.tenantId)));
+researchRouter.get('/research/cycles', async (req, res) =>
+  res.json(await researchCycles(req.principal!.tenantId, Math.min(200, Number(req.query.limit) || 50))),
+);
+researchRouter.get('/research/cycles/:id', async (req, res) =>
+  res.json(await researchCycle(req.principal!.tenantId, String(req.params.id))),
+);
 researchRouter.post('/research/pause', async (req, res) => res.json(await setPaused(req, true)));
+/** Run one cycle now (#301), whatever the schedule. */
+researchRouter.post('/research/run-now', async (req, res) => {
+  adminOnly(req.principal!.user.role);
+  const ownerId = req.principal!.tenantId;
+  const h = await researchHarness(ownerId);
+  if (!h) throw new HttpError(409, 'Install the research loop first (Setup → Start)');
+  const s = await researchSettings(ownerId);
+  if (s.paused) throw new HttpError(409, 'The research loop is paused; resume it first');
+  const run = await createRun(
+    ownerId,
+    { workflowId: h._id, input: 'Research cycle (run now)', history: [] },
+    {
+      initiatedBy: req.principal!.user._id,
+      trigger: 'studio',
+    },
+  );
+  res.status(202).json({ id: run._id, status: run.status });
+});
 researchRouter.post('/research/resume', async (req, res) => res.json(await setPaused(req, false)));

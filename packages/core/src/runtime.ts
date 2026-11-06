@@ -942,7 +942,7 @@ async function runAgentUnchecked(stored: Agent, input: string, history: Run['his
             },
           });
           // The workspace's spend cap (#297): refuse the call (and stop the run) once a cap is reached.
-          await assertWithinBudget(ctx.ownerId);
+          await assertWithinBudget(ctx.ownerId, provider.model);
           const response = await chat(requestProvider, checkedMessages, offered, signal, ctx.onDelta);
           await ctx.event({
             type: 'model_response',

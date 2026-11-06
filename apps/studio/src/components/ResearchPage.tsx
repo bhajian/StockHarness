@@ -15,9 +15,12 @@ import {
 } from 'lucide-react';
 import { api, send, type Data } from '../api';
 import { Button, Field } from './ui';
-import { Drawer, KpiCard, Skeleton, StatusPill } from './kit';
+import { KpiCard, Skeleton, StatusPill, Tabs } from './kit';
 import { IdeaStatus } from './ideas/IdeaStatus';
-import { go } from './ideas/nav';
+import { go, useLocation } from './ideas/nav';
+import { ResearchSetup } from './research/ResearchSetup';
+import { ResearchHow } from './research/ResearchHow';
+import { ResearchCycles } from './research/ResearchCycles';
 import { BarChart, TimeSeriesChart } from '../charts/Charts';
 import { ObjectTransfer } from './ObjectTransfer';
 
@@ -75,11 +78,10 @@ const ROLES = ['theorist', 'judge', 'coder'] as const;
 const pct = (v: number | null | undefined) =>
   v === null || v === undefined ? '—' : `${Math.round(v * 100)}%`;
 
-export function ResearchPage({ data, isAdmin }: { data: Data; isAdmin: boolean }) {
+function ResearchLab({ data, isAdmin }: { data: Data; isAdmin: boolean }) {
   const [status, setStatus] = useState<Status | null>(null);
   const [charts, setCharts] = useState<any>(null);
   const [feed, setFeed] = useState<Item[]>([]);
-  const [settingsOpen, setSettingsOpen] = useState(false);
   const [note, setNote] = useState('');
   const [error, setError] = useState('');
   const load = useCallback(async () => {
@@ -118,9 +120,8 @@ export function ResearchPage({ data, isAdmin }: { data: Data; isAdmin: boolean }
   if (!status) return <Skeleton rows={8} />;
   const k = status.kpis;
   return (
-    <section className="page-section research-page">
+    <div className="research-lab">
       <div className="section-heading">
-        <h2>Research</h2>
         <StatusPill
           status={status.paused ? 'paused' : (status.lastRun?.status ?? 'idle')}
           label={
@@ -141,7 +142,7 @@ export function ResearchPage({ data, isAdmin }: { data: Data; isAdmin: boolean }
             >
               {status.paused ? <Play size={14} /> : <Pause size={14} />} {status.paused ? 'Resume' : 'Pause'}
             </Button>
-            <Button onClick={() => setSettingsOpen(true)}>
+            <Button onClick={() => go('/research/setup')}>
               <Settings2 size={14} /> Settings
             </Button>
           </>
@@ -296,297 +297,41 @@ export function ResearchPage({ data, isAdmin }: { data: Data; isAdmin: boolean }
           />
         </div>
       )}
-      {settingsOpen && (
-        <SettingsDrawer
-          data={data}
-          onClose={() => setSettingsOpen(false)}
-          onSaved={load}
-          hasHarness={!!status.harness}
-        />
-      )}
-    </section>
+    </div>
   );
 }
 
-function SettingsDrawer({
-  data,
-  onClose,
-  onSaved,
-  hasHarness,
-}: {
-  data: Data;
-  onClose: () => void;
-  onSaved: () => Promise<void>;
-  hasHarness: boolean;
-}) {
-  const [s, setS] = useState<any>(null);
-  const [gates, setGates] = useState<any>(null);
-  const [draftGates, setDraftGates] = useState<Record<string, number>>({});
-  const [msg, setMsg] = useState('');
-  useEffect(() => {
-    void api('/research/settings').then(setS);
-    void api('/research/gates').then(setGates);
-  }, []);
-  if (!s || !gates)
-    return (
-      <Drawer title="Research settings" onClose={onClose}>
-        <Skeleton rows={6} />
-      </Drawer>
-    );
-  const llms = data.providers.filter((p: any) => p.modelType !== 'embedding');
-  const active = gates.versions.find((v: any) => v.version === gates.active);
-  const setAgent = (role: string, providerId: string) =>
-    setS({ ...s, agents: { ...s.agents, [role]: { ...(s.agents?.[role] ?? {}), providerId } } });
-  const save = async () => {
-    const { steering, paused, ...rest } = s;
-    if (!hasHarness) await send('/research/loop', {});
-    await send('/research/settings', rest, 'PUT');
-    if (Object.keys(draftGates).length) {
-      const v = await send('/research/gates', { ...draftGates, note: 'Edited in the Research Lab' });
-      setMsg(`Saved. Gates v${v.version} is now active; verdicts under v${gates.active} stay as they were.`);
-    } else setMsg('Saved.');
-    await onSaved();
-  };
+type ResearchTab = 'lab' | 'setup' | 'how' | 'cycles';
+/** Research (#116, #301, #302): Lab (the loop at a glance), Setup, How it works, Cycles — each a URL. */
+export function ResearchPage({ data, isAdmin }: { data: Data; isAdmin: boolean }) {
+  const loc = useLocation();
+  const parts = loc.path.split('/').filter(Boolean); // ['research', tab?, id?]
+  const tab = (['setup', 'how', 'cycles'].includes(parts[1] ?? '') ? parts[1] : 'lab') as ResearchTab;
+  const [version, setVersion] = useState(0);
   return (
-    <Drawer title="Research settings" onClose={onClose}>
-      <div className="research-settings">
-        <h4>Agents</h4>
-        {ROLES.map((role) => (
-          <Field key={role} label={`${role[0].toUpperCase()}${role.slice(1)} model`}>
-            <select
-              aria-label={`${role} model`}
-              value={s.agents?.[role]?.providerId ?? ''}
-              onChange={(e) => setAgent(role, e.target.value)}
-            >
-              <option value="">Default (first chat model)</option>
-              {llms.map((p: any) => (
-                <option key={p.id} value={p.id}>
-                  {p.name} · {p.model}
-                </option>
-              ))}
-            </select>
-          </Field>
-        ))}
-        <div className="two-columns">
-          <Field label="Agent effort">
-            <select
-              aria-label="Agent effort"
-              value={s.agentEffort}
-              onChange={(e) => setS({ ...s, agentEffort: e.target.value })}
-            >
-              {['light', 'medium', 'high', 'extra-high', 'max'].map((v) => (
-                <option key={v} value={v}>
-                  {v}
-                </option>
-              ))}
-            </select>
-          </Field>
-          <Field label="Turns per agent">
-            <input
-              aria-label="Turns per agent"
-              type="number"
-              min={3}
-              max={200}
-              value={s.agentMaxTurns}
-              onChange={(e) => setS({ ...s, agentMaxTurns: Number(e.target.value) })}
-            />
-          </Field>
-        </div>
+    <section className="page-section research-page">
+      <div className="section-heading research-title">
+        <h2>Research</h2>
         <p className="muted-line">
-          Skills per role default to the seed skills. Agents have no temperature setting here. For a quick
-          development check: 1 Theorist, medium effort, about 12 turns, about 10 symbols over 1 year.
+          Agents propose, review, code and judge trading ideas; every step is a record you can open.
         </p>
-        <Field label="Focus">
-          <textarea
-            aria-label="Research focus"
-            rows={3}
-            value={s.focus}
-            onChange={(e) => setS({ ...s, focus: e.target.value })}
-          />
-        </Field>
-        <div className="two-columns">
-          <Field label="Theorists per cycle">
-            <input
-              aria-label="Theorists per cycle"
-              type="number"
-              min={1}
-              max={8}
-              value={s.theoristsPerCycle}
-              onChange={(e) => setS({ ...s, theoristsPerCycle: Number(e.target.value) })}
-            />
-          </Field>
-          <Field label="Evaluation years (before the holdout)">
-            <input
-              aria-label="Evaluation years"
-              type="number"
-              min={1}
-              max={15}
-              value={s.evaluationYears}
-              onChange={(e) => setS({ ...s, evaluationYears: Number(e.target.value) })}
-            />
-          </Field>
-        </div>
-        <Field label={`Evaluation symbols (${s.evaluationSymbols.length})`}>
-          <textarea
-            aria-label="Evaluation symbols"
-            rows={3}
-            value={s.evaluationSymbols.join(' ')}
-            onChange={(e) =>
-              setS({ ...s, evaluationSymbols: e.target.value.split(/[\s,]+/).filter(Boolean) })
-            }
-          />
-        </Field>
-        <h4>Schedule</h4>
-        <div className="two-columns">
-          <label className="check-row">
-            <input
-              type="checkbox"
-              checked={!!s.schedule?.enabled}
-              onChange={(e) =>
-                setS({
-                  ...s,
-                  schedule: { everyMinutes: s.schedule?.everyMinutes ?? 120, enabled: e.target.checked },
-                })
-              }
-            />
-            Run a cycle on a schedule
-          </label>
-          <Field label="Every (minutes)">
-            <input
-              aria-label="Cycle minutes"
-              type="number"
-              min={10}
-              value={s.schedule?.everyMinutes ?? 120}
-              onChange={(e) =>
-                setS({
-                  ...s,
-                  schedule: { enabled: !!s.schedule?.enabled, everyMinutes: Number(e.target.value) },
-                })
-              }
-            />
-          </Field>
-        </div>
-        <h4>Spend cap</h4>
-        <p className="muted-line">
-          Model calls are priced per model (Gemini 3.8 Flash: $0.75 / $3.75 per million input / output
-          tokens). At a cap every model call in the workspace is refused and the loop pauses itself.
-        </p>
-        <div className="two-columns">
-          <Field label="Total cap (USD)" hint="Counted from when it is set">
-            <input
-              aria-label="Total spend cap"
-              type="number"
-              min={0}
-              step="1"
-              value={s.budget?.capUsd ?? ''}
-              onChange={(e) =>
-                setS({
-                  ...s,
-                  budget: {
-                    ...s.budget,
-                    capUsd: e.target.value ? Number(e.target.value) : undefined,
-                    capSince: e.target.value ? (s.budget?.capSince ?? new Date().toISOString()) : undefined,
-                    stoppedAt: undefined,
-                    stopReason: undefined,
-                  },
-                })
-              }
-            />
-          </Field>
-          <Field label="Daily cap (USD)" hint="The UTC day">
-            <input
-              aria-label="Daily spend cap"
-              type="number"
-              min={0}
-              step="1"
-              value={s.budget?.dailyCapUsd ?? ''}
-              onChange={(e) =>
-                setS({
-                  ...s,
-                  budget: {
-                    ...s.budget,
-                    dailyCapUsd: e.target.value ? Number(e.target.value) : undefined,
-                    stoppedAt: undefined,
-                    stopReason: undefined,
-                  },
-                })
-              }
-            />
-          </Field>
-        </div>
-        <h4>Alerts</h4>
-        <div className="two-columns">
-          <Field label="Daily token alert">
-            <input
-              aria-label="Daily token alert"
-              type="number"
-              min={0}
-              value={s.budget?.dailyTokenAlert ?? ''}
-              onChange={(e) =>
-                setS({
-                  ...s,
-                  budget: {
-                    ...s.budget,
-                    dailyTokenAlert: e.target.value ? Number(e.target.value) : undefined,
-                  },
-                })
-              }
-            />
-          </Field>
-          <Field label="$ per million tokens" hint="Only for models missing from the price table">
-            <input
-              aria-label="Dollars per million tokens"
-              type="number"
-              min={0}
-              step="0.01"
-              value={s.budget?.usdPerMillionTokens ?? ''}
-              onChange={(e) =>
-                setS({
-                  ...s,
-                  budget: {
-                    ...s.budget,
-                    usdPerMillionTokens: e.target.value ? Number(e.target.value) : undefined,
-                  },
-                })
-              }
-            />
-          </Field>
-        </div>
-        <h4>
-          Gates v{gates.active} {active?.lockedAt ? <StatusPill status="locked" label="locked" /> : null}
-        </h4>
-        <p className="schedule-warning">
-          <StatusPill status="warn" label="new version" /> Changing a threshold creates gates v
-          {Math.max(...gates.versions.map((v: any) => v.version)) + 1}. Verdicts under different versions are
-          not comparable.
-        </p>
-        <div className="two-columns">
-          {Object.entries(active?.gates ?? {})
-            .filter(([, v]) => typeof v === 'number')
-            .map(([key, v]) => (
-              <Field key={key} label={key}>
-                <input
-                  aria-label={`Gate ${key}`}
-                  type="number"
-                  step="0.01"
-                  defaultValue={v as number}
-                  onChange={(e) => setDraftGates({ ...draftGates, [key]: Number(e.target.value) })}
-                />
-              </Field>
-            ))}
-        </div>
-        <div className="compact-actions">
-          <Button onClick={() => void save().catch((e) => setMsg(e?.message ?? String(e)))}>
-            {hasHarness ? 'Save' : 'Install the loop and save'}
-          </Button>
-          <ObjectTransfer kinds={['ResearchSettings', 'Gates']} onImported={onSaved} compact />
-        </div>
-        {msg && (
-          <p className="muted-line" role="status">
-            {msg}
-          </p>
-        )}
       </div>
-    </Drawer>
+      <Tabs
+        tabs={[
+          { id: 'lab', label: 'Lab' },
+          { id: 'setup', label: 'Setup' },
+          { id: 'how', label: 'How it works' },
+          { id: 'cycles', label: 'Cycles' },
+        ]}
+        value={tab}
+        onChange={(t) => go(t === 'lab' ? '/research' : `/research/${t}`)}
+      />
+      {tab === 'lab' && <ResearchLab key={version} data={data} isAdmin={isAdmin} />}
+      {tab === 'setup' && (
+        <ResearchSetup data={data} isAdmin={isAdmin} onChanged={() => setVersion((v) => v + 1)} />
+      )}
+      {tab === 'how' && <ResearchHow />}
+      {tab === 'cycles' && <ResearchCycles id={parts[2]} />}
+    </section>
   );
 }

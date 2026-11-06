@@ -3837,3 +3837,244 @@ td.loss {
   justify-content: flex-end;
   gap: 8px;
 }
+
+/* Research: Setup, How it works, Cycles (#301, #302) */
+.research-title {
+  display: grid !important;
+  gap: 2px;
+}
+.research-title p {
+  margin: 0;
+}
+.research-lab {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+.research-setup,
+.research-how,
+.research-cycle {
+  display: grid;
+  gap: 18px;
+  min-width: 0;
+  max-width: 1180px;
+}
+.setup-status {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+.setup-status > div:first-child {
+  display: grid;
+  gap: 3px;
+}
+.setup-section {
+  display: grid;
+  gap: 10px;
+  border-top: 1px solid var(--border-soft);
+  padding-top: 14px;
+}
+.setup-section h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+.setup-section p.muted-line {
+  margin: 0;
+}
+.setup-section textarea,
+.setup-section select {
+  width: 100%;
+}
+.setup-agents td {
+  vertical-align: top;
+}
+.setup-agents td small {
+  display: block;
+}
+.setup-agents select {
+  min-width: 220px;
+}
+.skill-picks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.skill-picks .chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  border: 1px solid var(--border);
+}
+.skill-picks .chip input {
+  margin: 0;
+}
+.skill-picks .chip.on {
+  border-color: var(--blue);
+  background: var(--blue-bg);
+  color: var(--blue-ink);
+}
+.setup-section table input {
+  width: 110px;
+}
+.setup-footer {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0;
+  background: linear-gradient(to top, var(--page) 70%, transparent);
+}
+.how-pipeline {
+  list-style: none;
+  margin: 0;
+  padding: 4px 0 8px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  overflow-x: auto;
+}
+.how-step {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.how-arrow {
+  color: var(--faint);
+  margin: 0 2px;
+}
+.how-parallel {
+  display: grid;
+  gap: 6px;
+  padding: 6px;
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+}
+.how-card {
+  display: grid;
+  gap: 2px;
+  text-align: left;
+  min-width: 150px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  font: inherit;
+  cursor: pointer;
+}
+.how-card small {
+  color: var(--muted);
+  font-size: 11px;
+}
+.how-card.active {
+  border-color: var(--blue);
+  box-shadow: 0 0 0 2px var(--blue-bg);
+}
+.how-terminal {
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: var(--surface-3);
+  color: var(--slate);
+  font-size: 12px;
+  font-weight: 600;
+}
+.how-detail h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 10px;
+}
+.how-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 18px;
+}
+.how-grid h4 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 10px 0 4px;
+  font-size: 0.85rem;
+}
+.how-grid ul {
+  margin: 0;
+  padding-left: 18px;
+}
+.how-skills {
+  list-style: none;
+  padding: 0 !important;
+  display: grid;
+  gap: 6px;
+}
+.how-skills small {
+  display: block;
+}
+.how-prompt,
+.cycle-io pre,
+.cycle-output {
+  white-space: pre-wrap;
+  font-size: 12px;
+  max-height: 320px;
+  overflow: auto;
+  background: var(--surface-2);
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin: 4px 0 8px;
+}
+.cycle-theories {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 10px;
+}
+.cycle-events {
+  margin: 4px 0 0;
+  padding-left: 18px;
+  font-size: 13px;
+}
+.cycle-agent summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+.cycle-tools {
+  list-style: none;
+  padding: 0;
+  margin: 8px 0;
+  display: grid;
+  gap: 4px;
+}
+.cycle-tools summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+.cycle-io {
+  display: grid;
+  gap: 2px;
+  padding-left: 18px;
+}
+.skill-picks .chip input[type='checkbox'] {
+  width: auto;
+  flex: none;
+}
+.research-setup .form-row {
+  grid-template-columns: repeat(auto-fill, minmax(180px, 260px));
+}
+.setup-footer {
+  background: var(--page);
+  border-top: 1px solid var(--border);
+  margin-top: 4px;
+}
+.skill-picks .chip.default {
+  border-style: dashed;
+}

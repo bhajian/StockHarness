@@ -342,6 +342,8 @@ export const scheduleSchema = z.object({
     .optional(),
   weekday: z.number().int().min(0).max(6).optional(),
   timezone: z.string().max(64).refine(validTimeZone, 'Unknown time zone').optional(),
+  /** After this moment the schedule turns itself off (an experiment that runs until a date, #301). */
+  until: z.string().datetime({ offset: true }).optional(),
 });
 export type Schedule = z.infer<typeof scheduleSchema>;
 const kebabKey = z
