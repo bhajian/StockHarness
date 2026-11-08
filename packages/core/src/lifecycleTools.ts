@@ -249,6 +249,7 @@ export async function callLifecycleTool(
         const edited = await editTheory(ownerId, t._id, content(args), actor, args.reasoning);
         return brief(await transitionTheory(ownerId, edited._id, 'pre_review', actor, args.reasoning));
       }
+      await assertBacklogRoom(ownerId);
       return brief(
         await createTheory(ownerId, content(args), actor, { submit: true, reasoning: args.reasoning }),
       );
@@ -362,6 +363,17 @@ const lastError = (t: Theory) =>
  * evaluate_strategy for a theory (the Coder, theory in coding): runs the theory's plugin, links the evaluation
  * and, when it finishes, moves the theory to post_review (or code_error if the evaluation failed).
  */
+/** #336: a new theory waits while the Coder's backlog is at its limit (a revision is not new and still goes). */
+async function assertBacklogRoom(ownerId: string) {
+  const { researchSettings, coderBacklog } = await import('./researchLoop.js');
+  const [limit, waiting] = [(await researchSettings(ownerId)).maxCoderBacklog, await coderBacklog(ownerId)];
+  if (waiting >= limit)
+    throw new HttpError(
+      409,
+      `The Coder has ${waiting} ideas waiting for code (the limit is ${limit}, Research → Setup): no new theory until it catches up. Revise one sent back to you instead, or reply DONE.`,
+    );
+}
+
 /**
  * A theory is evaluated on the research scope (Research → Setup), whatever names the agent passed (#319); the
  * research window fills in a missing start or end (the evaluator still stops before the holdout). The agent

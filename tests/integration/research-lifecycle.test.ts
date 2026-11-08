@@ -439,3 +439,26 @@ test('the Coder works ready-to-evaluate theories first (#280)', async () => {
   assert.ok(order.includes(`${older}:write`), order.join(' '));
   assert.ok(order.indexOf(`${older}:write`) > 0);
 });
+
+test('a full Coder backlog stops new theories, not revisions (#336)', async () => {
+  const { theorist } = clients;
+  const waiting = (await theorist.call('get_research_brief', {})).coder_queue as number;
+  assert.ok(waiting >= 1, 'the earlier tests left ideas waiting for code');
+  await ok('/research/settings', { maxCoderBacklog: waiting }, 'PUT');
+  const brief = await theorist.call('get_research_brief', {});
+  assert.equal(brief.backlog_full, true);
+  assert.equal(brief.coder_backlog_limit, waiting);
+  assert.match(brief.instruction, /do not propose a new theory/);
+  const refused = await theorist.call('submit_theory', {
+    title: 'One more idea while the Coder is busy',
+    hypothesis: 'Securities with the longest losing streak bounce back over the following week.',
+    signal_logic: 'Rank by the count of consecutive negative tr_1d days; long the top 3, weekly.',
+    falsification: 'No excess over the S&P 500.',
+    data_needed: ['prices_daily.tr_1d'],
+    reasoning: 'Backlog test',
+  });
+  assert.match(refused.error, /waiting for code \(the limit is \d+/);
+  await ok('/research/settings', { maxCoderBacklog: waiting + 1 }, 'PUT');
+  assert.equal((await theorist.call('get_research_brief', {})).backlog_full, undefined);
+  await ok('/research/settings', { maxCoderBacklog: 8 }, 'PUT');
+});
