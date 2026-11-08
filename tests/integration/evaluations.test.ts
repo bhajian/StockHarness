@@ -176,6 +176,40 @@ test('an evaluation runs in the executor and is reproducible', async () => {
   assert.ok(list.trials >= 2 && list.items.length >= 2 && !list.items[0].record?.series);
 });
 
+test('name subsets: picked on the first part, checked on the rest against random sets (#325)', async () => {
+  const parent = await evaluate({ plugin: 'momentum_40d', params: { start: DAYS[0], end: DAYS[134] } });
+  assert.equal(parent.status, 'succeeded', JSON.stringify(parent.error));
+  const bad = await request(`/evaluations/${parent.id}/subset`, { top_k: 4, n_random: 5 });
+  assert.equal(bad.status, 400, 'fewer than 19 random sets can never pass at 5%');
+  const started = await ok(`/evaluations/${parent.id}/subset`, { top_k: 4, n_random: 19, min_days: 5 });
+  assert.equal(started.subsetOf, parent.id);
+  assert.ok(started.trial > parent.trial, 'a subset search is a trial');
+  let e = started;
+  for (let i = 0; i < 300 && e.status === 'running'; i++) {
+    await new Promise((r) => setTimeout(r, 1000));
+    e = await ok(`/evaluations/${started.id}`);
+  }
+  assert.equal(e.status, 'succeeded', JSON.stringify(e.error));
+  const s = e.record.subset;
+  assert.equal(s.chosen.length, 4);
+  assert.equal(e.record.period.start, s.check_period.start, 'the record is the check run');
+  assert.ok(s.check_period.start > s.pick_period.end);
+  assert.deepEqual([...e.record.params.symbols].sort(), s.chosen.map((c: any) => c.security_id).sort());
+  assert.equal(s.random.n, 19);
+  assert.equal(typeof s.passed, 'boolean');
+  assert.ok(Object.keys(e.record.holdings.weights).every((id) => e.record.params.symbols.includes(id)));
+  const listed = await ok(`/evaluations?subsetOf=${parent.id}`);
+  assert.deepEqual(
+    listed.items.map((x: any) => x.id),
+    [started.id],
+  );
+  assert.equal(
+    (await request(`/evaluations/${started.id}/subset`, {})).status,
+    409,
+    'not a subset of a subset',
+  );
+});
+
 test('a contract violation fails with its line', async () => {
   await ok('/strategy-plugins', {
     name: 'broken',

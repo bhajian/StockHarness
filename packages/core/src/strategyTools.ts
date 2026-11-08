@@ -72,6 +72,23 @@ export function agentSummary(e: Evaluation) {
             t: Object.fromEntries(Object.entries(r.factors?.t ?? {}).map(([k, v]) => [k, r4(v)])),
           },
           deflated_sharpe: r4(r.trial_context?.dsr),
+          ...(r.subset
+            ? {
+                subset: {
+                  passed: r.subset.passed,
+                  verdict: r.subset.verdict,
+                  pick_period: r.subset.pick_period,
+                  check_period: r.subset.check_period,
+                  names: r.subset.chosen.map(
+                    (c: { ticker?: string; security_id: string }) => c.ticker ?? c.security_id,
+                  ),
+                  check_sharpe: r4(r.subset.check?.sharpe),
+                  whole_scope_sharpe: r4(r.subset.whole?.sharpe),
+                  random_mean_sharpe: r4(r.subset.random?.mean_sharpe),
+                  p_value: r4(r.subset.random?.p_value),
+                },
+              }
+            : {}),
           // #324: which names carried it (contribution before costs).
           ...(r.by_name
             ? {

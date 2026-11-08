@@ -4462,7 +4462,7 @@ button.map-card:hover {
 .by-name td.neg {
   color: var(--danger, #b42318);
 }
-.by-name > .btn {
+.by-name > .button {
   justify-self: start;
 }
 .th-sort {
@@ -4473,4 +4473,85 @@ button.map-card:hover {
 .th-sort:focus-visible {
   outline: 2px solid var(--accent, #2563eb);
   outline-offset: 2px;
+}
+
+/* Name subsets (#325) */
+.subset-panel {
+  display: grid;
+  gap: 10px;
+  margin: 12px 0;
+  min-width: 0;
+}
+.subset-head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 8px 24px;
+}
+.subset-head h3 {
+  margin: 0 0 2px;
+  font-size: 14px;
+}
+.subset-head .muted-line {
+  margin: 0;
+  max-width: 72ch;
+}
+.subset-start {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+.subset-start label {
+  display: grid;
+  gap: 2px;
+  font-size: 12px;
+  color: var(--muted, #626761);
+}
+.subset-start input {
+  width: 72px;
+}
+.subset-result {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+.subset-verdict {
+  margin: 0;
+}
+.subset-result .chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.subset-result td,
+.subset-result th {
+  font-variant-numeric: tabular-nums;
+}
+.sharpe-strip {
+  margin: 0;
+  max-width: 680px;
+}
+.sharpe-strip figcaption {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 14px;
+  font-size: 12px;
+  color: var(--ink, #242625);
+}
+.sharpe-strip .legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.sharpe-strip svg[role='img'] {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+.subset-earlier {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  font-size: 13px;
 }

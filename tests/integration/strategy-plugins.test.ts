@@ -188,3 +188,60 @@ test('Evaluation records round-trip verbatim and stay immutable', { skip: skipRe
   );
   await evaluations().deleteMany({ ownerId: { $in: [S, T] } });
 });
+
+test(
+  'a name-subset Evaluation keeps what it was picked from through the round trip (#325)',
+  { skip: skipReason },
+  async () => {
+    const { evaluations } = await import('../../packages/core/src/evaluations.js');
+    const hash = plugins.codeHash(V2);
+    const [parent, sub] = [randomUUID(), randomUUID()];
+    const base = {
+      ownerId: S,
+      pluginId: 'x',
+      pluginName: 'mom_12_1',
+      pluginVersion: 2,
+      codeHash: hash,
+      mode: 'explore',
+      status: 'succeeded',
+      durationMs: 1000,
+      createdAt: new Date('2026-11-07T03:00:00.000Z'),
+      finishedAt: new Date('2026-11-07T03:00:01.000Z'),
+    };
+    await evaluations().insertOne({
+      ...base,
+      _id: parent,
+      params: { start: '2023-01-03', end: '2024-12-31' },
+      trial: 8,
+      record: {
+        plugin: { hash, name: 'mom_12_1', version: 2 },
+        summary: { sharpe: 0.5 },
+        record_hash: 'sha256:' + 'c'.repeat(64),
+      },
+    } as any);
+    await evaluations().insertOne({
+      ...base,
+      _id: sub,
+      params: { start: '2023-01-03', end: '2024-12-31' },
+      subsetOf: parent,
+      select: { top_k: 20, n_random: 40 },
+      trial: 9,
+      record: {
+        plugin: { hash, name: 'mom_12_1', version: 2 },
+        summary: { sharpe: 1.5 },
+        subset: { passed: true, chosen: [{ security_id: 'SEC_1', ticker: 'AAPL' }] },
+        record_hash: 'sha256:' + 'd'.repeat(64),
+      },
+    } as any);
+    const { yaml } = await exportObjects(S, ['Evaluation']);
+    assert.match(yaml, new RegExp(`subsetOf: ${parent}`));
+    assert.match(yaml, /top_k: 20/);
+    const r = await applyObjectImport(who(T), yaml, 'merge');
+    assert.equal(r.applied, true, JSON.stringify(r));
+    const copy = await evaluations().findOne({ ownerId: T, sourceId: sub } as any);
+    assert.equal(copy!.subsetOf, parent);
+    assert.deepEqual(copy!.select, { top_k: 20, n_random: 40 });
+    assert.equal((await exportObjects(T, ['Evaluation'])).yaml, yaml, 'identical round trip');
+    await evaluations().deleteMany({ ownerId: { $in: [S, T] } });
+  },
+);

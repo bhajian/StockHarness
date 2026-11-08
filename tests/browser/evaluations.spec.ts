@@ -136,9 +136,38 @@ test('an evaluation record renders on the dev evaluation page', async ({ page })
   await page.getByLabel('Find a ticker or sector').fill(best.ticker);
   await expect(byName.getByRole('row')).toHaveCount(2);
   await page.getByLabel('Find a ticker or sector').fill('');
+  // #325: find the names it works for. This strategy loses on every name, so the search says why it cannot.
+  const subset = page.getByRole('region', { name: 'Names it works for' });
+  await subset.getByLabel('Names').fill('3');
+  await subset.getByRole('button', { name: 'Find the names' }).click();
+  await expect(subset.getByText(/a subset needs at least 3/)).toBeVisible({ timeout: 180000 });
   await page.getByText('Provenance').click();
   await expect(page.getByText(e.record.record_hash)).toBeVisible();
   if (process.env.SCREENSHOT)
     await page.screenshot({ path: 'test-results/evaluation-page.png', fullPage: true });
+
+  // A book of the six highest-numbered names: two of them add to the return, so a subset of 2 is picked.
+  await api('/strategy-plugins', {
+    name: 'by_number',
+    code:
+      'META = {"side": "long", "horizon_days": 5, "rebalance": "weekly", "top_n": 6}\n\n' +
+      'def signal(ctx):\n    f = ctx.read_df("prices_daily", columns=["security_id"], lookback_days=5)\n' +
+      '    return {s: float(s[-1]) for s in set(f.security_id)}\n',
+  });
+  const second = await api('/evaluations', {
+    plugin: 'by_number',
+    params: { start: days[70], end: days[260] },
+  });
+  for (let i = 0; i < 120 && (await api(`/evaluations/${second.id}`)).status === 'running'; i++)
+    await page.waitForTimeout(1000);
+  await page.goto(`/evaluations/${second.id}`);
+  const found = page.getByRole('region', { name: 'Names it works for' });
+  await found.getByLabel('Names').fill('2');
+  await found.getByRole('button', { name: 'Find the names' }).click();
+  await expect(found.getByRole('table', { name: 'Subset comparison' })).toBeVisible({ timeout: 180000 });
+  await expect(found.getByText(/shown out of sample|not shown/).first()).toBeVisible();
+  await expect(found.getByRole('img', { name: /chosen names against random sets/ })).toBeVisible();
+  await expect(found.getByLabel('Chosen names').locator('.chip')).toHaveCount(2);
+  if (process.env.SCREENSHOT) await found.screenshot({ path: 'test-results/subset-panel.png' });
   expect(errors).toEqual([]);
 });

@@ -106,6 +106,8 @@ function evaluationSpec(e: Evaluation) {
     trial: e.trial,
     status: e.status,
     params: e.params,
+    // #325: a name subset names the evaluation it was picked from (by its record name).
+    ...(e.subsetOf ? { subsetOf: e.subsetOf, select: e.select ?? {} } : {}),
     ...(e.error ? { error: e.error } : {}),
     ...(e.record ? { record: e.record } : {}),
     ...(e.durationMs !== undefined ? { durationMs: e.durationMs } : {}),
@@ -1027,6 +1029,7 @@ export async function applyObjectImport(
         ...(sp.theoryId ? { theoryId: sp.theoryId } : {}),
         mode: sp.mode,
         params: sp.params as Evaluation['params'],
+        ...(sp.subsetOf ? { subsetOf: sp.subsetOf, select: sp.select ?? {} } : {}),
         trial: sp.trial,
         status: sp.status,
         ...(sp.error ? { error: sp.error } : {}),
