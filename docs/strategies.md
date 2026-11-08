@@ -120,6 +120,22 @@ The record is the check run (out of sample), with `subset` saying how it was pic
 search is one trial. It must start from a succeeded exploration that ends before the holdout. A subset that is
 shown can then become its own idea, checked once on the holdout on those names (#325, next step).
 
+## Options pricing (#327)
+
+`pipeline/strategy/options.py` is the pricing the options evaluator (#329) will use. It is fixed platform code,
+like the rest of the evaluator, and needs only `math` and `datetime`.
+
+- **Values and greeks:** Black-Scholes-Merton with a continuous dividend yield. Greeks are delta, gamma, vega
+  (per 1.00 of volatility) and theta (per year). An implied-volatility solver works by bisection.
+- **Listed contracts:** monthly expiries on the third Friday, and `pick_expiry` takes the one nearest a target
+  number of days (at least a week out). The strike grid steps $1 under $25, $2.50 under $100, $5 under $200 and
+  $10 above. Strikes are picked by moneyness or by target delta. Contracts are 100 shares.
+- **Modeled quotes,** when there is no market chain (#326): a put skew on the at-the-money volatility
+  (`skew × ln(S/K)`, clamped), and a bid/ask spread of 4% of the mid with a minimum tick of $0.05 ($0.01 under
+  $3). Buys pay the ask and sells get the bid.
+- **Settlement:** at expiry the option is worth its intrinsic value. A short call in the money is assigned the
+  day before an ex-dividend date when its time value is below the dividend.
+
 ## Metrics (#106)
 
 `pipeline/strategy/metrics.py` (numpy only; checked against empyrical and the published deflated-Sharpe example):
