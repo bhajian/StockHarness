@@ -462,3 +462,57 @@ test('a full Coder backlog stops new theories, not revisions (#336)', async () =
   assert.equal((await theorist.call('get_research_brief', {})).backlog_full, undefined);
   await ok('/research/settings', { maxCoderBacklog: 8 }, 'PUT');
 });
+
+test('idea profiles: equity long / short / long-short now, options once they can be tested (#323)', async () => {
+  const { theorist } = clients;
+  await ok('/research/settings', { maxCoderBacklog: 200 }, 'PUT');
+  const brief = await theorist.call('get_research_brief', {});
+  assert.deepEqual(
+    brief.profiles.map((p: any) => p.id),
+    ['equity_long', 'equity_short', 'equity_long_short'],
+  );
+  await ok('/research/settings', { profiles: ['equity_short', 'options_covered_call'] }, 'PUT');
+  const chosen = (await theorist.call('get_research_brief', {})).profiles;
+  assert.deepEqual(
+    chosen.map((p: any) => [p.id, p.available ?? true]),
+    [
+      ['equity_short', true],
+      ['options_covered_call', false],
+    ],
+  );
+  const idea = {
+    hypothesis: 'Names with the weakest twenty-day returns keep falling over the next month.',
+    signal_logic: 'Rank by compounded tr_1d over 20 days; short the bottom 3, weekly.',
+    falsification: 'The short book earns more than the S&P 500.',
+    data_needed: ['prices_daily.tr_1d'],
+    reasoning: 'Profile test',
+  };
+  const short = await theorist.call('submit_theory', {
+    ...idea,
+    title: 'Twenty-day losers keep losing',
+    direction: 'short',
+    instrument: 'equity',
+  });
+  assert.ok(short.theory_id, JSON.stringify(short));
+  const covered = await theorist.call('submit_theory', {
+    ...idea,
+    title: 'Covered calls on calm names',
+    instrument: 'options',
+    structure: 'covered_call',
+  });
+  assert.match(covered.error, /options evaluator is coming \(#329\)/);
+  const neutral = await theorist.call('submit_theory', {
+    ...idea,
+    title: 'A neutral stock idea',
+    direction: 'neutral',
+  });
+  assert.match(neutral.error, /neutral is for options ideas/);
+  const listed = await ok('/ideas?profile=equity_short&limit=1000');
+  const row = listed.items.find((i: any) => i.ref === short.theory_id);
+  assert.equal(row?.profile, 'equity_short');
+  assert.equal(row?.profileLabel, 'Equity · short');
+  assert.ok(listed.items.every((i: any) => i.profile === 'equity_short'));
+  const exported = await ok(`/objects/export?kinds=ResearchSettings`);
+  assert.match(exported, /profiles:\n\s+- equity_short\n\s+- options_covered_call/);
+  await ok('/research/settings', { profiles: [], maxCoderBacklog: 8 }, 'PUT');
+});

@@ -1,5 +1,6 @@
 // Ideas (#119, #123, #269): the master table of the research loop's ideas, with filters kept in the URL, a card
 // view, and multi-select to compare. /ideas/:id opens the idea (IdeaDetail), /ideas/compare?ids= compares 2–4.
+import { OPTION_STRUCTURES } from '../../../../../packages/core/src/profiles.js';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   CheckCircle2,
@@ -43,6 +44,7 @@ function IdeasList({ search }: { search: string }) {
   const q = params.get('q') ?? '';
   const family = params.get('family') ?? '';
   const side = params.get('side') ?? '';
+  const profile = params.get('profile') ?? '';
   const [data, setData] = useState<any>(null);
   const [families, setFamilies] = useState<string[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
@@ -55,10 +57,11 @@ function IdeasList({ search }: { search: string }) {
       ...(q ? { q } : {}),
       ...(family ? { family } : {}),
       ...(side ? { side } : {}),
+      ...(profile ? { profile } : {}),
       limit: '1000',
     });
     void api(`/ideas?${qs}`).then(setData);
-  }, [statusKey, sort, q, family, side]);
+  }, [statusKey, sort, q, family, side, profile]);
   useEffect(() => {
     void api('/ideas?limit=1000').then((all) =>
       setFamilies([...new Set<string>(all.items.map((i: any) => i.family))].sort()),
@@ -150,14 +153,24 @@ function IdeasList({ search }: { search: string }) {
           ))}
         </select>
         <select
-          aria-label="Side"
-          value={side}
-          onChange={(e) => setQuery({ side: e.target.value || undefined })}
+          aria-label="Profile"
+          value={profile}
+          onChange={(e) => setQuery({ profile: e.target.value || undefined, side: undefined })}
         >
-          <option value="">Any side</option>
-          <option value="long">Long</option>
-          <option value="short">Short</option>
-          <option value="long_short">Long / short</option>
+          <option value="">Any profile</option>
+          <optgroup label="Equity">
+            <option value="equity_long">Long</option>
+            <option value="equity_short">Short</option>
+            <option value="equity_long_short">Long / short</option>
+          </optgroup>
+          <optgroup label="Options">
+            <option value="options">Any options idea</option>
+            {Object.entries(OPTION_STRUCTURES).map(([id, o]) => (
+              <option key={id} value={`options_${id}`}>
+                {o.label}
+              </option>
+            ))}
+          </optgroup>
         </select>
         <select
           aria-label="Sort"
@@ -221,7 +234,7 @@ function IdeasList({ search }: { search: string }) {
               </header>
               <h3>{i.title}</h3>
               <p className="muted-line">
-                {i.family} · {i.side} · {i.horizonDays}d
+                {i.profileLabel ?? i.side} · {i.family} · {i.horizonDays}d
               </p>
               {i.spark.length > 1 && <Sparkline values={i.spark} width={240} height={36} />}
               <dl>
@@ -313,6 +326,7 @@ function IdeaTable({
               <td>
                 <strong>{i.title}</strong>
                 <small className="muted-line">
+                  {i.profileLabel ? `${i.profileLabel} · ` : ''}
                   {i.family}
                   {i.forwardOnly ? ' · forward only' : ''}
                 </small>

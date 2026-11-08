@@ -2,6 +2,7 @@
 // may do (the Judge reviews and gives verdicts, the Coder submits code, the Theorist submits theories); every write
 // is a legal transition of the state machine (#110) with its reasoning. Read tools are open to every role.
 import { HttpError } from './security.js';
+import { OPTIONS_EVALUATOR_READY, STRUCTURE_IDS } from './profiles.js';
 import {
   createTheory,
   editTheory,
@@ -39,7 +40,21 @@ const THEORY_FIELDS = {
   universe: str,
   signal_logic: { type: 'string', description: 'The signal in words: what is ranked, how, and when' },
   horizon_days: { type: 'integer', minimum: 1 },
-  direction: { type: 'string', enum: ['long', 'short', 'long_short'] },
+  direction: {
+    type: 'string',
+    enum: ['long', 'short', 'long_short', 'neutral'],
+    description: 'neutral is for options ideas (straddles, strangles, iron condors)',
+  },
+  instrument: {
+    type: 'string',
+    enum: ['equity', 'options'],
+    description: "The idea's profile (#323): equity (default) or options; see profiles in the brief",
+  },
+  structure: {
+    type: 'string',
+    enum: STRUCTURE_IDS,
+    description: 'For an options idea: the structure (covered_call, cash_secured_put, iron_condor, ...)',
+  },
   falsification: { type: 'string', description: 'What result would show the hypothesis is wrong' },
   family: str,
   tags: { type: 'array', items: str },
@@ -171,6 +186,8 @@ const content = (a: Record<string, any>) =>
       signalLogic: a.signal_logic,
       horizonDays: a.horizon_days,
       direction: a.direction,
+      instrument: a.instrument,
+      structure: a.structure,
       falsification: a.falsification,
       family: a.family,
       tags: a.tags,
@@ -244,6 +261,11 @@ export async function callLifecycleTool(
     case 'submit_theory': {
       need(role, ['theorist'], name);
       const actor = actorOf('theorist', meta);
+      if (args.instrument === 'options' && !OPTIONS_EVALUATOR_READY)
+        throw new HttpError(
+          409,
+          'Options ideas cannot be tested yet: the options evaluator is coming (#329). Propose an equity idea (instrument: equity) this cycle.',
+        );
       if (args.theory_id) {
         const t = await getTheory(ownerId, String(args.theory_id));
         const edited = await editTheory(ownerId, t._id, content(args), actor, args.reasoning);

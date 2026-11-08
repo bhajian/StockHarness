@@ -25,6 +25,7 @@ import { GateChecklist, KpiCard, Skeleton, StatusPill, Tabs } from '../kit';
 import { CodeEditor } from '../../editor/CodeEditor';
 import { EvaluationReport } from '../EvaluationsPage';
 import { SubsetPanel } from '../SubsetPanel';
+import { profileOf, theoryProfileId } from '../../../../../packages/core/src/profiles.js';
 import { IdeaStatus } from './IdeaStatus';
 import { STATUS_LABEL, go, num, pct } from './nav';
 
@@ -128,8 +129,8 @@ export function IdeaDetail({ id, tab, isAdmin }: { id: string; tab: string; isAd
           <div className="idea-meta">
             <IdeaStatus status={idea.status} />
             {idea.forwardOnly && <StatusPill status="forward-only" label="forward only" />}
+            <span className="profile-chip">{profileOf(theoryProfileId(t)).label}</span>
             <span>{t.family}</span>
-            <span>{t.direction.replace('_', ' / ')}</span>
             <span>{t.horizonDays}-day horizon</span>
             <span>
               gates v{idea.gates.version}

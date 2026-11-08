@@ -126,7 +126,13 @@ test('caps come from the research settings', { skip: skipReason }, async () => {
     { $set: { maxRevisions: 1 } },
     { upsert: true },
   );
-  const t = await T.createTheory(S, { ...CONTENT, title: 'Second theory' }, theorist, { submit: true });
+  // An options idea (#323): its instrument and structure round-trip with the record.
+  const t = await T.createTheory(
+    S,
+    { ...CONTENT, title: 'Second theory', instrument: 'options', structure: 'covered_call' },
+    theorist,
+    { submit: true },
+  );
   await T.transitionTheory(S, t._id, 'revise', judge, 'One revision');
   await T.transitionTheory(S, t._id, 'pre_review', theorist, 'Revised');
   await assert.rejects(T.transitionTheory(S, t._id, 'revise', judge, 'Again'), /used all 1 revisions/);
@@ -141,6 +147,7 @@ test(
     assert.equal(count, 2);
     assert.match(yaml, /kind: Theory/);
     assert.match(yaml, /reasoning: Say how “beat estimates” is measured point-in-time\./);
+    assert.match(yaml, /instrument: options\n\s+structure: covered_call/);
     assert.ok(!SECRET_FIELD_PATTERN.test(yaml) && !/ownerId/.test(yaml));
     const plan = await planObjectImport(who(D), yaml, 'merge');
     assert.deepEqual(plan.errors, []);

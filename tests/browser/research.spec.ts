@@ -147,12 +147,23 @@ test('the Research Lab shows a cycle: KPIs, board, activity, debate, steering, p
   await expect(page.getByText(/changing a threshold creates gates v2/i)).toBeVisible();
   await expect(page.getByLabel('Gate minSharpe')).toHaveValue('0.5');
   await page.getByRole('radio', { name: 'S&P 500 proxy (top 500)' }).click();
+  // #323: idea profiles, in the Theorists' order; options wait for the options evaluator.
+  const profiles = page.getByRole('region', { name: 'Idea profiles' });
+  await profiles.getByLabel('Short', { exact: true }).check();
+  await profiles.getByLabel('Long', { exact: true }).check();
+  await expect(profiles.locator('label', { has: page.locator('.order-badge') })).toHaveText([
+    'LongTheorist 2',
+    'ShortTheorist 1',
+  ]);
+  await expect(profiles.getByLabel('Covered call', { exact: true })).toBeDisabled();
+  await expect(profiles.getByText(/open when the options evaluator is ready/)).toBeVisible();
   await page.getByRole('button', { name: 'Save' }).click();
   await expect(page.getByRole('status')).toHaveText(/Saved/);
   await expect
     .poll(async () => (await api('/research/settings')).scope)
     .toEqual({ kind: 'top_market_cap', top: 500 });
-  await api('/research/settings', { scope: { kind: 'symbols', top: 500 } }, 'PUT');
+  expect((await api('/research/settings')).profiles).toEqual(['equity_short', 'equity_long']);
+  await api('/research/settings', { scope: { kind: 'symbols', top: 500 }, profiles: [] }, 'PUT');
   if (process.env.SCREENSHOT)
     await page.screenshot({ path: 'test-results/research-setup.png', fullPage: true });
   // #302: How it works — the pipeline, and each agent's model, skills and tools.

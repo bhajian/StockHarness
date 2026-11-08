@@ -195,3 +195,22 @@ within the model provider's rate. Set, in the research settings (or the Research
 `agentEffort: medium`, `agentMaxTurns: 12`, about 10 evaluation symbols and 1 evaluation year, and a concrete `focus`.
 Run one cycle by hand, with no schedule. The defaults (high effort, 30 turns) are for real runs, and the 7-day
 acceptance run (#117) waits until after the development phase.
+
+## Idea profiles (#323)
+
+Every idea has a profile: what it trades and how. Equity ideas are **long**, **short** or **long / short**
+(`direction`). Options ideas set `instrument: options` and a `structure`:
+
+- income: covered call, cash-secured put, the wheel;
+- directional: long call or put, and bull and bear spreads (debit or credit);
+- hedges: protective put, collar;
+- volatility: long straddle or strangle, short strangle, iron condor.
+
+Their direction may be `neutral`. Research → Setup → **Idea profiles** picks the profiles the Theorists explore,
+in order: Theorist 1 takes the first, Theorist 2 the second, counting again from the first. With none ticked
+they cycle through the three equity profiles. The brief lists them, and the Ideas table shows and filters by
+profile.
+
+Options profiles cannot be submitted until the options evaluator exists (#329). Until then `submit_theory`
+refuses them with the reason, and Setup shows them greyed out. Theory YAML carries `instrument` and
+`structure`.
