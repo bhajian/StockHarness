@@ -349,6 +349,15 @@ export function ResearchSetup({
               onChange={(e) => set({ theoristsPerCycle: Number(e.target.value) })}
             />
           </Field>
+          <Field label="Pause Theorists at (ideas waiting for code)">
+            <input
+              type="number"
+              min={1}
+              max={200}
+              value={s.maxCoderBacklog ?? 8}
+              onChange={(e) => set({ maxCoderBacklog: Number(e.target.value) })}
+            />
+          </Field>
           <Field label="Effort">
             <select value={s.agentEffort} onChange={(e) => set({ agentEffort: e.target.value })}>
               {['light', 'medium', 'high', 'extra-high', 'max'].map((v) => (

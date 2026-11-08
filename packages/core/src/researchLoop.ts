@@ -21,6 +21,8 @@ export const researchSettingsSchema = z.object({
   focus: z.string().max(4000).default(''),
   /** Theorists that propose in parallel each cycle (the harness's Parallel step). */
   theoristsPerCycle: z.number().int().min(1).max(8).default(2),
+  /** #336: at this many ideas waiting for code, the Theorists stop proposing new ones (revisions still go). */
+  maxCoderBacklog: z.number().int().min(1).max(200).default(8),
   /** The evaluation scope the Coder uses: symbols and how many years before the holdout. */
   evaluationSymbols: z.array(z.string().min(1).max(20)).max(2000).default(DEFAULT_SYMBOLS),
   /**
@@ -260,8 +262,16 @@ export async function researchBrief(
       paused: true,
       instruction: 'The research loop is paused: do nothing and reply DONE.',
     };
+  const coderQueueSize = await coderBacklog(ownerId);
+  const backlogFull = coderQueueSize >= s.maxCoderBacklog;
   return {
     role: role ?? 'none',
+    ...(role === 'theorist' && backlogFull
+      ? {
+          backlog_full: true,
+          instruction: `The Coder has ${coderQueueSize} ideas waiting for code (the limit is ${s.maxCoderBacklog}): do not propose a new theory this cycle. If your queue has a theory sent back for revision, revise it; otherwise reply DONE.`,
+        }
+      : {}),
     focus: s.focus || 'none set: any family from the strategy-library skill',
     steering: (s.steering ?? []).slice(-3).map((n) => ({ note: n.note, at: n.at })),
     counts,
@@ -276,11 +286,15 @@ export async function researchBrief(
       family: t.family,
     })),
     // The Coder's real queue size, whatever the role asking (#273).
-    coder_queue: await theories().countDocuments({ ownerId, status: { $in: QUEUES.coder } }),
+    coder_queue: coderQueueSize,
+    coder_backlog_limit: s.maxCoderBacklog,
     evaluation_params: await evaluationParams(ownerId, s),
     gates: { version: gates.version, ...gates.gates },
   };
 }
+/** Ideas waiting for the Coder (#336). */
+export const coderBacklog = (ownerId: string) =>
+  theories().countDocuments({ ownerId, status: { $in: QUEUES.coder } });
 export const CLAIM_HOURS = 2;
 export const stale = (at: Date) => Date.now() - new Date(at).getTime() > CLAIM_HOURS * 3600_000;
 
@@ -317,7 +331,7 @@ export const LOOP_DONE = 'NOTHING_TO_CODE';
 const PROMPTS = {
   theorist: (i: number, n: number) =>
     `You are Theorist ${i} of ${n} in the StockHarness research loop. Propose ONE new, testable theory.\n` +
-    '1. Call get_research_brief: read the focus, the human steering notes (follow them), recent theories and your queue.\n' +
+    '1. Call get_research_brief: read the focus, the human steering notes (follow them), recent theories and your queue. If it has an instruction, follow it first.\n' +
     '2. If your queue has a theory sent back for revision, fix exactly what the Judge asked and re-submit it with submit_theory(theory_id=...). Otherwise propose a new one.\n' +
     `3. Pick an idea from the strategy-library skill; Theorist ${i} prefers the family at position ${i} of the library order, so parallel Theorists differ. Combine, condition or refine it; never resubmit a card unchanged.\n` +
     '4. Check search_theories for near-duplicates, and describe_collection for every field you rely on (exact names, known-at rule).\n' +
