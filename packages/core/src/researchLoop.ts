@@ -9,6 +9,7 @@ import { evaluations, evaluatorSettings, latestPriceDate } from './evaluations.j
 import { strategyPluginVersions, strategyPlugins } from './strategyPlugins.js';
 import { activeGates } from './gates.js';
 import { theories, type Theory } from './theories.js';
+import { PROFILE_IDS, profileOf, type ProfileId } from './profiles.js';
 import type { ResearchRole } from './lifecycleTools.js';
 
 /** The small-scale default (owner, 2026-11-05): 50 large caps; wider scopes come later. */
@@ -21,6 +22,8 @@ export const researchSettingsSchema = z.object({
   focus: z.string().max(4000).default(''),
   /** Theorists that propose in parallel each cycle (the harness's Parallel step). */
   theoristsPerCycle: z.number().int().min(1).max(8).default(2),
+  /** #323: the idea profiles the Theorists explore, in order (Theorist i takes the i-th); empty = the equity ones. */
+  profiles: z.array(z.enum(PROFILE_IDS)).max(30).default([]),
   /** #336: at this many ideas waiting for code, the Theorists stop proposing new ones (revisions still go). */
   maxCoderBacklog: z.number().int().min(1).max(200).default(8),
   /** The evaluation scope the Coder uses: symbols and how many years before the holdout. */
@@ -273,6 +276,7 @@ export async function researchBrief(
         }
       : {}),
     focus: s.focus || 'none set: any family from the strategy-library skill',
+    profiles: researchProfiles(s),
     steering: (s.steering ?? []).slice(-3).map((n) => ({ note: n.note, at: n.at })),
     counts,
     queue: await coderQueue(
@@ -327,6 +331,24 @@ export const ROLE_TOOLS: Record<'theorist' | 'judge_pre' | 'coder' | 'judge_post
   ],
   judge_post: ['get_research_brief', 'get_theory', 'get_evaluation', 'set_verdict'],
 };
+/** The profiles the Theorists explore (#323), with whether the evaluator can test them yet. */
+export function researchProfiles(s: Pick<ResearchSettings, 'profiles'>) {
+  const ids = s.profiles?.length
+    ? s.profiles
+    : (['equity_long', 'equity_short', 'equity_long_short'] as ProfileId[]);
+  return ids.map((id) => {
+    const p = profileOf(id);
+    return {
+      id,
+      label: p.label,
+      instrument: p.instrument,
+      direction: p.direction,
+      ...(p.structure ? { structure: p.structure } : {}),
+      ...(p.available ? {} : { available: false, note: 'cannot be tested yet (options evaluator, #329)' }),
+    };
+  });
+}
+
 export const LOOP_DONE = 'NOTHING_TO_CODE';
 const PROMPTS = {
   theorist: (i: number, n: number) =>
@@ -334,6 +356,7 @@ const PROMPTS = {
     '1. Call get_research_brief: read the focus, the human steering notes (follow them), recent theories and your queue. If it has an instruction, follow it first.\n' +
     '2. If your queue has a theory sent back for revision, fix exactly what the Judge asked and re-submit it with submit_theory(theory_id=...). Otherwise propose a new one.\n' +
     `3. Pick an idea from the strategy-library skill; Theorist ${i} prefers the family at position ${i} of the library order, so parallel Theorists differ. Combine, condition or refine it; never resubmit a card unchanged.\n` +
+    `   Its profile: Theorist ${i} takes the profile at position ${i} of the brief's profiles (counting again from the first when there are fewer); set direction, instrument and structure to match it.\n` +
     '4. Check search_theories for near-duplicates, and describe_collection for every field you rely on (exact names, known-at rule).\n' +
     '5. Call submit_theory with a precise hypothesis, the signal logic in words, data_needed (collection.field), horizon_days, direction and a measurable falsification. Reply with the theory id.',
   judge_pre:

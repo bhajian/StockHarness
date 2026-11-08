@@ -32,6 +32,7 @@ ideasRouter.get('/ideas', async (req, res) => {
       status: str(q.status),
       family: str(q.family),
       side: str(q.side),
+      profile: str(q.profile),
       horizonMin: num(q.horizonMin),
       horizonMax: num(q.horizonMax),
       data: str(q.data),

@@ -1,6 +1,7 @@
 // Ideas (#118): the human view of the research loop's theories. An idea is a theory with its evaluations, its debate,
 // its code versions and the gates that decided it. List and filter them, open one, act on it (approve, park,
 // reject, send back with a comment), reproduce an evaluation, compare a few.
+import { profileOf, theoryProfileId } from './profiles.js';
 import { HttpError } from './security.js';
 import { downsample } from './series.js';
 import { evaluations, getEvaluation, startEvaluation, type Evaluation } from './evaluations.js';
@@ -64,6 +65,8 @@ function row(t: Theory, evals: Evaluation[]) {
     status: t.status,
     family: t.family,
     side: t.direction,
+    profile: theoryProfileId(t),
+    profileLabel: profileOf(theoryProfileId(t)).label,
     horizonDays: t.horizonDays,
     dataNeeded: t.dataNeeded,
     forwardOnly: !!t.forwardOnly,
@@ -93,6 +96,8 @@ export type IdeaQuery = {
   status?: string; // comma list, or `in_progress`
   family?: string;
   side?: string;
+  /** #323: a profile id (equity_long, options_covered_call, ...) or `options` for any options idea. */
+  profile?: string;
   horizonMin?: number;
   horizonMax?: number;
   data?: string; // a collection or collection.field the idea uses
@@ -110,6 +115,15 @@ export async function listIdeas(ownerId: string, q: IdeaQuery = {}) {
   }
   if (q.family) filter.family = q.family;
   if (q.side) filter.direction = q.side as Theory['direction'];
+  if (q.profile === 'options') filter.instrument = 'options';
+  else if (q.profile?.startsWith('options_'))
+    Object.assign(filter, { instrument: 'options', structure: q.profile.slice('options_'.length) });
+  else if (q.profile?.startsWith('equity_'))
+    Object.assign(filter, {
+      instrument: { $ne: 'options' },
+      direction:
+        { equity_long: 'long', equity_short: 'short', equity_long_short: 'long_short' }[q.profile] ?? 'none',
+    });
   if (q.horizonMin || q.horizonMax)
     filter.horizonDays = {
       ...(q.horizonMin ? { $gte: q.horizonMin } : {}),

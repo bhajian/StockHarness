@@ -4555,3 +4555,51 @@ button.map-card:hover {
   padding-left: 18px;
   font-size: 13px;
 }
+
+/* Idea profiles (#323) */
+.profile-picker {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  align-items: start;
+  gap: 10px 16px;
+}
+.profile-picker fieldset {
+  border: 1px solid var(--line, #e3e6e1);
+  border-radius: 8px;
+  padding: 8px 12px 10px;
+  margin: 0;
+  display: grid;
+  align-content: start;
+  gap: 4px;
+  min-width: 0;
+}
+.profile-picker legend {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 0 4px;
+}
+.profile-picker label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+.profile-picker label.unavailable {
+  color: var(--muted, #737970);
+}
+.profile-picker .order-badge {
+  margin-left: auto;
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--green-bg, #e2faef);
+  color: var(--green-ink, #316d4b);
+  white-space: nowrap;
+}
+.profile-picker > .muted-line {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+.idea-meta .profile-chip {
+  font-weight: 600;
+}

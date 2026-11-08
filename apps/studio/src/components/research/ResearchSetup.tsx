@@ -6,6 +6,7 @@ import { CirclePause, CirclePlay, Play, Save } from 'lucide-react';
 import { api, send, type Data } from '../../api';
 import { Field } from '../ui';
 import { Skeleton, StatusPill } from '../kit';
+import { ALL_PROFILES } from '../../../../../packages/core/src/profiles.js';
 
 const ROLES = [
   { id: 'theorist', label: 'Theorist', what: 'proposes theories (one per Theorist per cycle)' },
@@ -380,6 +381,15 @@ export function ResearchSetup({
         </Field>
       </section>
 
+      <section className="setup-section" aria-label="Idea profiles">
+        <h3>Idea profiles</h3>
+        <p className="muted-line">
+          What the Theorists propose, in order: Theorist 1 takes the first ticked profile, Theorist 2 the
+          second, and so on (counting again from the first). None ticked: equity long, short and long / short.
+        </p>
+        <ProfilePicker value={s.profiles ?? []} onChange={(profiles) => set({ profiles })} />
+      </section>
+
       <section className="setup-section" aria-label="Budget">
         <h3>Budget</h3>
         <p className="muted-line">
@@ -554,6 +564,47 @@ export function ResearchSetup({
             <Save size={14} /> Save
           </button>
         </div>
+      )}
+    </div>
+  );
+}
+
+const capitalize = (x: string) => x.charAt(0).toUpperCase() + x.slice(1);
+/** #323: pick the idea profiles; the order is the Theorists' order. Options wait for the options evaluator. */
+function ProfilePicker({ value, onChange }: { value: string[]; onChange: (v: string[]) => void }) {
+  const toggle = (id: string) =>
+    onChange(value.includes(id) ? value.filter((x) => x !== id) : [...value, id]);
+  const groups = [
+    { label: 'Equity', items: ALL_PROFILES.filter((p) => p.instrument === 'equity') },
+    ...['income', 'directional', 'hedge', 'volatility'].map((g) => ({
+      label: `Options · ${g}`,
+      items: ALL_PROFILES.filter((p) => p.group === g),
+    })),
+  ];
+  return (
+    <div className="profile-picker">
+      {groups.map((g) => (
+        <fieldset key={g.label}>
+          <legend>{g.label}</legend>
+          {g.items.map((p) => {
+            const at = value.indexOf(p.id);
+            return (
+              <label key={p.id} className={p.available ? '' : 'unavailable'}>
+                <input
+                  type="checkbox"
+                  checked={at >= 0}
+                  disabled={!p.available && at < 0}
+                  onChange={() => toggle(p.id)}
+                />
+                {capitalize(p.label.replace(/^(Equity|Options) · /, ''))}
+                {at >= 0 && <span className="order-badge">Theorist {at + 1}</span>}
+              </label>
+            );
+          })}
+        </fieldset>
+      ))}
+      {!ALL_PROFILES.some((p) => p.instrument === 'options' && p.available) && (
+        <p className="muted-line">Options profiles open when the options evaluator is ready (#329).</p>
       )}
     </div>
   );

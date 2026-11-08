@@ -3,6 +3,7 @@
 // produced. Every transition is stored with its actor, model and reasoning: the debate the Ideas pages show (M5).
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
+import { INSTRUMENTS, STRUCTURE_IDS, profileProblems } from './profiles.js';
 import { collection } from './db.js';
 import { isForwardOnly } from './gates.js';
 import { HttpError } from './security.js';
@@ -28,7 +29,10 @@ export const theoryContent = z.object({
   /** The signal in words: what is ranked, how, and when. */
   signalLogic: z.string().trim().min(10).max(8000),
   horizonDays: z.number().int().min(1).max(1260).default(21),
-  direction: z.enum(['long', 'short', 'long_short']).default('long'),
+  direction: z.enum(['long', 'short', 'long_short', 'neutral']).default('long'),
+  /** #323: what it trades (absent = equity) and, for options, the structure (profiles.ts). */
+  instrument: z.enum(INSTRUMENTS).optional(),
+  structure: z.enum(STRUCTURE_IDS).optional(),
   /** What result would show the hypothesis is wrong. */
   falsification: z.string().trim().min(5).max(4000),
   family: z.string().trim().max(100).default('other'),
@@ -114,6 +118,12 @@ export async function getTheory(ownerId: string, idOrRef: string) {
   return t;
 }
 
+/** #323: instrument, structure and direction agree (an options idea names its structure, …). */
+function assertProfile(c: TheoryContent) {
+  const problems = profileProblems(c);
+  if (problems.length) throw new HttpError(400, problems.join('; '));
+}
+
 export async function createTheory(
   ownerId: string,
   input: unknown,
@@ -123,6 +133,7 @@ export async function createTheory(
   const content = theoryContent.parse(input);
   if (!['theorist', 'human'].includes(actor.role))
     throw new HttpError(403, 'Only the Theorist (or a human) creates theories');
+  assertProfile(content);
   // A submission that is a near-duplicate is refused before anything is created (#111).
   if (opts.submit) {
     const { assertNotDuplicate } = await import('./theoryMemory.js');
@@ -191,6 +202,7 @@ export async function editTheory(
     ...current
   } = t;
   const next = theoryContent.parse({ ...current, ...(patch as object) });
+  assertProfile(next);
   const changed = Object.keys(next).filter(
     (k) => JSON.stringify((next as any)[k]) !== JSON.stringify((current as any)[k]),
   );
@@ -317,6 +329,8 @@ const SPEC_KEYS = [
   'signalLogic',
   'horizonDays',
   'direction',
+  'instrument',
+  'structure',
   'falsification',
   'family',
   'tags',
