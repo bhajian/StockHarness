@@ -3,7 +3,8 @@
     from pipeline.strategy.job import main
     main()
 
-with oh.params = {action, code, params, policies, readable_end?, plugin_ref?, config?}; for action "simulate"
+with oh.params = {action, code, params, policies, readable_end?, plugin_ref?, config?} (action "subset", #325, also
+takes select); for action "simulate"
 (#124) {ideas: [{id, ref, code, plugin_ref}], params, policies, readable_end?, config?, simulation_id}, which writes
 the ledger (sim_orders, sim_trades, sim_portfolio_daily, sim_positions) to the workspace database. The database
 handle stays here; the plugin only gets ctx. Failures come back as a structured error with the plugin's own line numbers.
@@ -52,6 +53,13 @@ def run(params: dict, source, db=None) -> dict:
             record = engine.evaluate(code, source=source, policies=params["policies"], params=params["params"],
                                      config=params.get("config"), readable_end=params.get("readable_end"),
                                      plugin_ref=params.get("plugin_ref"))
+            return {"ok": True, "record": record}
+        if action == "subset":  # #325
+            from .subset import find_subset
+
+            record = find_subset(code, source=source, policies=params["policies"], params=params["params"],
+                                 select=params.get("select"), config=params.get("config"),
+                                 readable_end=params.get("readable_end"), plugin_ref=params.get("plugin_ref"))
             return {"ok": True, "record": record}
         if action == "test":
             from .testing import test_plugin

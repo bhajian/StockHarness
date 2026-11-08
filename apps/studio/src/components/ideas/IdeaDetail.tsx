@@ -24,6 +24,7 @@ import { api, send } from '../../api';
 import { GateChecklist, KpiCard, Skeleton, StatusPill, Tabs } from '../kit';
 import { CodeEditor } from '../../editor/CodeEditor';
 import { EvaluationReport } from '../EvaluationsPage';
+import { SubsetPanel } from '../SubsetPanel';
 import { IdeaStatus } from './IdeaStatus';
 import { STATUS_LABEL, go, num, pct } from './nav';
 
@@ -467,6 +468,9 @@ function Results({ idea }: { idea: any }) {
             </details>
           )}
         </div>
+      )}
+      {explore?.status === 'succeeded' && explore.mode === 'explore' && (
+        <SubsetPanel evaluationId={explore.id} />
       )}
       {explore?.record ? <EvaluationReport record={explore.record} /> : <Skeleton rows={6} />}
     </div>

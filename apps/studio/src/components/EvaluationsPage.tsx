@@ -9,6 +9,7 @@ import { KpiCard, Skeleton, StatusPill } from './kit';
 import { BarChart, TimeSeriesChart } from '../charts/Charts';
 import { fmtNumber } from '../charts/chartData';
 import { ObjectTransfer } from './ObjectTransfer';
+import { SubsetPanel, SubsetResult } from './SubsetPanel';
 
 type Evaluation = {
   id: string;
@@ -24,6 +25,8 @@ type Evaluation = {
   record?: Record<string, any>;
   createdAt: string;
   durationMs?: number;
+  /** #325: a name subset of this evaluation. */
+  subsetOf?: string;
 };
 
 const pct = (v: unknown, digits = 1) =>
@@ -136,8 +139,9 @@ function EvaluationDetail({ id }: { id: string }) {
         </h2>
         <span className="muted-line">
           {e.params.start} → {e.params.end}
-          {e.params.symbols ? ` · ${e.params.symbols.length} symbols` : ' · whole universe'} · trial {e.trial}{' '}
-          · <code title={e.codeHash}>{e.codeHash.slice(0, 19)}</code>
+          {e.params.symbols ? ` · ${e.params.symbols.length} symbols` : ' · whole universe'}
+          {e.subsetOf ? ' · name subset' : ''} · trial {e.trial} ·{' '}
+          <code title={e.codeHash}>{e.codeHash.slice(0, 19)}</code>
           {r && ` · evaluator ${r.evaluator_version} · prices as of ${r.data_snapshot?.prices_as_of ?? '—'}`}
         </span>
         <ObjectTransfer kinds={['Evaluation']} names={[e.id]} onImported={() => undefined} compact />
@@ -163,6 +167,18 @@ function EvaluationDetail({ id }: { id: string }) {
           </div>
         </div>
       )}
+      {r?.subset && (
+        <div className="card-panel subset-panel">
+          <h3>Name subset</h3>
+          <SubsetResult record={r} />
+          {e.subsetOf && (
+            <button type="button" className="link-button" onClick={() => go(`/evaluations/${e.subsetOf}`)}>
+              The evaluation it was picked from
+            </button>
+          )}
+        </div>
+      )}
+      {e.status === 'succeeded' && e.mode === 'explore' && !e.subsetOf && <SubsetPanel evaluationId={e.id} />}
       {r && <EvaluationReport record={r} />}
     </section>
   );
@@ -506,7 +522,7 @@ export function ByNameTable({ byName }: { byName: any }) {
         </table>
       </div>
       {shown.length > 25 ? (
-        <button type="button" className="btn ghost" onClick={() => setAll((v) => !v)}>
+        <button type="button" className="button secondary small" onClick={() => setAll((v) => !v)}>
           {all ? 'Show the first 25' : `Show all ${fmtNumber(shown.length)}`}
         </button>
       ) : null}

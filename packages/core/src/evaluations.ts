@@ -28,6 +28,18 @@ export const evaluationParams = z
     universe: z.object({ top_by_market_cap: z.number().int().min(1).max(5000) }).optional(),
   })
   .refine((p) => p.start <= p.end, 'start must be on or before end');
+/** #325: how a name subset is picked and checked (pipeline/strategy/subset.py has the defaults). */
+export const subsetSelect = z
+  .object({
+    top_k: z.number().int().min(2).max(200).optional(),
+    metric: z.enum(['contribution', 'avg_trade_return', 'hit_rate']).optional(),
+    min_days: z.number().int().min(1).max(5000).optional(),
+    min_trades: z.number().int().min(1).max(1000).optional(),
+    pick_fraction: z.number().min(0.3).max(0.85).optional(),
+    n_random: z.number().int().min(19).max(200).optional(),
+  })
+  .strict();
+export type SubsetSelect = z.infer<typeof subsetSelect>;
 export const evaluationInput = z.object({
   plugin: z.string().min(1),
   version: z.number().int().min(1).optional(),
@@ -60,6 +72,9 @@ export type Evaluation = {
   createdBy?: string;
   /** A re-run of another evaluation (#118): not a new trial; `match` is set when it finishes. */
   reproduces?: { of: string; match?: boolean; originalHash?: string; hash?: string };
+  /** #325: a name subset of this evaluation, picked on its first part and checked on the rest. */
+  subsetOf?: string;
+  select?: SubsetSelect;
 };
 export const evaluations = () => collection<Evaluation>('evaluations');
 const trials = () => collection<{ _id: string; count: number }>('evaluation_trials');
@@ -256,7 +271,8 @@ async function finish(doc: Evaluation, code: string, execute: Execute, readableE
       {
         code: JOB_CODE,
         params: {
-          action: 'evaluate',
+          action: doc.subsetOf ? 'subset' : 'evaluate',
+          ...(doc.subsetOf ? { select: doc.select ?? {} } : {}),
           code,
           params: { ...doc.params, trials },
           policies,
@@ -266,7 +282,9 @@ async function finish(doc: Evaluation, code: string, execute: Execute, readableE
         },
         timeoutSeconds: EVALUATION_TIMEOUT_SECONDS,
         memory: config.EXECUTOR_EVALUATION_MEMORY,
-        purpose: `Evaluate ${doc.pluginName} v${doc.pluginVersion} ${doc.params.start} → ${doc.params.end}`,
+        purpose: doc.subsetOf
+          ? `Find the names ${doc.pluginName} v${doc.pluginVersion} works for, ${doc.params.start} → ${doc.params.end}`
+          : `Evaluate ${doc.pluginName} v${doc.pluginVersion} ${doc.params.start} → ${doc.params.end}`,
       },
     );
   } catch (e) {
@@ -308,19 +326,72 @@ export async function getEvaluation(ownerId: string, id: string) {
 }
 
 /** Newest first, without the series (the list view). */
-export async function listEvaluations(ownerId: string, filter: { plugin?: string; theoryId?: string } = {}) {
+export async function listEvaluations(
+  ownerId: string,
+  filter: { plugin?: string; theoryId?: string; subsetOf?: string } = {},
+) {
   return evaluations()
     .find(
       {
         ownerId,
         ...(filter.plugin ? { pluginName: filter.plugin } : {}),
         ...(filter.theoryId ? { theoryId: filter.theoryId } : {}),
+        ...(filter.subsetOf ? { subsetOf: filter.subsetOf } : {}),
       },
       { projection: { 'record.series': 0, 'record.rebalances': 0, 'record.holdings': 0 } },
     )
     .sort({ createdAt: -1 })
     .limit(200)
     .toArray();
+}
+
+/**
+ * Find the names an evaluation's strategy works for (#325): the same plugin version, scope and window; names are
+ * picked on the first part of the window and checked on the rest against random subsets of the same size. The
+ * record is the check run. It is a new trial.
+ */
+export async function startSubsetEvaluation(
+  ownerId: string,
+  parentId: string,
+  select: unknown,
+  opts: { userId?: string; execute?: Execute } = {},
+) {
+  const parent = await getEvaluation(ownerId, parentId);
+  if (parent.status !== 'succeeded' || parent.mode !== 'explore' || parent.subsetOf)
+    throw new HttpError(
+      409,
+      'Name subsets start from a succeeded exploration (not a holdout or another subset)',
+    );
+  const sel = subsetSelect.parse(select ?? {});
+  const readableEnd = (await evaluatorSettings(ownerId)).readableEnd;
+  if (readableEnd && parent.params.end > readableEnd)
+    throw new HttpError(
+      409,
+      `This evaluation ends inside the locked holdout (from ${addDaysIso(readableEnd, 1)})`,
+    );
+  const { plugin, code, hash, version } = await resolveStrategyPlugin(
+    ownerId,
+    parent.pluginName,
+    parent.pluginVersion,
+  );
+  const doc: Evaluation = {
+    _id: randomUUID(),
+    ownerId,
+    pluginId: plugin._id,
+    pluginName: plugin.name,
+    pluginVersion: version,
+    codeHash: hash,
+    mode: 'explore',
+    params: parent.params,
+    subsetOf: parent._id,
+    select: sel,
+    trial: await nextTrial(ownerId),
+    status: 'running',
+    createdAt: new Date(),
+    ...(opts.userId ? { createdBy: opts.userId } : {}),
+  };
+  await evaluations().insertOne(doc);
+  return { evaluation: doc, done: finish(doc, code, opts.execute ?? runCodeJob, readableEnd) };
 }
 
 export const holdoutInput = z.object({

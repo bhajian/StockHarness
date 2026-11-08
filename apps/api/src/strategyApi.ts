@@ -15,6 +15,7 @@ import {
   setHoldoutMonths,
   startEvaluation,
   startHoldoutEvaluation,
+  startSubsetEvaluation,
   trialCount,
 } from '../../../packages/core/src/evaluations.js';
 
@@ -81,6 +82,20 @@ strategyRouter.post('/evaluations/holdout', async (req, res) => {
   done.catch(() => undefined);
   res.status(202).json(pub(evaluation));
 });
+// Name subsets (#325): which names of the scope this evaluation's strategy works for, checked out of sample.
+strategyRouter.post('/evaluations/:id/subset', async (req, res) => {
+  adminOnly(req.principal!.user.role);
+  const { evaluation, done } = await startSubsetEvaluation(
+    req.principal!.tenantId,
+    String(req.params.id),
+    req.body,
+    {
+      userId: req.principal!.user._id,
+    },
+  );
+  done.catch(() => undefined);
+  res.status(202).json(pub(evaluation));
+});
 // Holdout boundary and the last date exploration may read.
 strategyRouter.get('/evaluator/settings', async (req, res) => {
   res.json(await evaluatorSettings(req.principal!.tenantId));
@@ -94,6 +109,7 @@ strategyRouter.get('/evaluations', async (req, res) => {
   const list = await listEvaluations(ownerId, {
     plugin: typeof req.query.plugin === 'string' ? req.query.plugin : undefined,
     theoryId: typeof req.query.theoryId === 'string' ? req.query.theoryId : undefined,
+    subsetOf: typeof req.query.subsetOf === 'string' ? req.query.subsetOf : undefined,
   });
   res.json({ trials: await trialCount(ownerId), items: list.map(pub) });
 });

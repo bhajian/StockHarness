@@ -100,6 +100,26 @@ still reproduce. `get_evaluation` gives agents the five best and worst names; th
 the full table (sortable, searchable). Picking the best names from this table is not a result by itself: name
 subsets are picked and checked on different periods (#325).
 
+## Name subsets (#325)
+
+Which names of the scope does a strategy work for (say 20 of the S&P 500)? Picking the best names on the data
+that scores them always finds some, so a subset search (`POST /api/evaluations/:id/subset`, or **Find the
+names** on an evaluation or idea page) splits the evaluation's window:
+
+1. **Pick** on the first part (`pick_fraction`, 2/3): the strategy runs on its whole scope; names held at least
+   `min_days` (10) days with a positive contribution are ranked by `metric` (`contribution`, `avg_trade_return`
+   or `hit_rate`) and the best `top_k` (20) are chosen.
+2. **Check** on the rest: the same plugin runs on only the chosen names (holding at most half of them at a time,
+   so the signal still chooses), and also on the whole scope and on `n_random` (40, at least 19) random sets of
+   the same size drawn from the names the pick period held. Random sets are seeded from the plugin hash and
+   params: the same inputs give the same record.
+3. It is **shown** when the chosen names' Sharpe beats the random sets with p ≤ 0.05 (p = (1 + random sets at
+   or above it) / (1 + n)) and is positive.
+
+The record is the check run (out of sample), with `subset` saying how it was picked and how it compares. The
+search is one trial. It must start from a succeeded exploration that ends before the holdout. A subset that is
+shown can then become its own idea, checked once on the holdout on those names (#325, next step).
+
 ## Metrics (#106)
 
 `pipeline/strategy/metrics.py` (numpy only; checked against empyrical and the published deflated-Sharpe example):
