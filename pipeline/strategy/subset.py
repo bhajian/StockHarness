@@ -19,8 +19,10 @@ import json
 import math
 import random
 
-from . import contract
+from . import contract, metrics
+from .config import load_config
 from .engine import EvaluationError, _round, evaluate, record_hash, trading_days
+from .pool_cache import PoolCache
 
 METRICS = ("contribution", "avg_trade_return", "hit_rate")
 DEFAULTS = {"top_k": 20, "metric": "contribution", "min_trades": 1, "min_days": 10, "pick_fraction": 2 / 3, "n_random": 40,
@@ -38,8 +40,29 @@ def _summary(rec: dict) -> dict:
         "excess_cagr": (rec.get("excess") or {}).get("spx", {}).get("excess_cagr")}
 
 
+def _year_split(days: list[str], frac: float) -> int | None:
+    """The index of the first session of a year nearest the pick fraction (a year boundary, so the parent's
+    per-name results by year can be used), keeping at least 40 sessions on each side; None when there is none."""
+    cut = int(len(days) * frac)
+    firsts = [i for i in range(40, len(days) - 40) if days[i][:4] != days[i - 1][:4]]
+    return min(firsts, key=lambda i: (abs(i - cut), i)) if firsts else None
+
+
+def _period_summary(dates: list[str], returns: list, spx: list, start: str, periods: int) -> dict:
+    """Summary numbers of a returns series from `start` on (the whole scope's check period, from the parent)."""
+    idx = [i for i, d in enumerate(dates) if d >= start]
+    ret = [float(returns[i] or 0.0) for i in idx]
+    bench = [float(spx[i]) if isinstance(spx[i], (int, float)) else 0.0 for i in idx]
+    out = metrics.summary(ret, periods)
+    return {k: out.get(k) for k in ("cagr", "sharpe", "max_drawdown", "total_return", "ann_vol")} | {
+        "trades": None, "excess_cagr": metrics.excess(ret, bench, periods).get("excess_cagr")}
+
+
 def find_subset(code: str, *, source, policies: dict, params: dict, select: dict | None = None,
-                config: dict | None = None, readable_end: str | None = None, plugin_ref: dict | None = None) -> dict:
+                config: dict | None = None, readable_end: str | None = None, plugin_ref: dict | None = None,
+                parent: dict | None = None) -> dict:
+    """``parent``: the evaluation's own record (by_name with days_by_year, and its series): the pick and the
+    whole scope's check numbers come from it instead of two more runs."""
     sel = {**DEFAULTS, **{k: v for k, v in (select or {}).items() if v is not None}}
     if sel["metric"] not in METRICS:
         raise EvaluationError(f"select.metric must be one of {', '.join(METRICS)}")
@@ -59,17 +82,35 @@ def find_subset(code: str, *, source, policies: dict, params: dict, select: dict
     days = trading_days(source, start, end) if start and end and start <= end else []
     if len(days) < 120:
         raise EvaluationError("a subset needs at least 120 trading days (a pick period and a check period)")
-    cut = int(len(days) * frac)
+    rows_parent = ((parent or {}).get("by_name") or {}).get("rows") or []
+    use_parent = (bool(rows_parent) and all("days_by_year" in r for r in rows_parent)
+                  and sel["metric"] == "contribution" and not (parent or {}).get("by_name", {}).get("truncated"))
+    cut = _year_split(days, frac) if use_parent else None
+    use_parent = use_parent and cut is not None
+    cut = cut if use_parent else int(len(days) * frac)
     pick_period = {"start": days[0], "end": days[cut - 1]}
     check_period = {"start": days[cut], "end": days[-1]}
-    run = lambda p: evaluate(code, source=source, policies=policies, params=p, config=config,  # noqa: E731
-                             readable_end=readable_end, plugin_ref=plugin_ref)
+    run = lambda p, src=source: evaluate(code, source=src, policies=policies, params=p,  # noqa: E731
+                                         config=config, readable_end=readable_end, plugin_ref=plugin_ref)
     base = {k: v for k, v in params.items() if k not in ("start", "end", "symbols", "trials")}
+    whole_scope = {"symbols": params["symbols"]} if params.get("symbols") else {}
 
-    # 1. Pick, on the whole scope.
-    pick = run({**base, **({"symbols": params["symbols"]} if params.get("symbols") else {}), **pick_period})
+    # 1. Pick, on the whole scope: from the parent's results by year, or by running the pick period.
+    if use_parent:
+        split_year = check_period["start"][:4]
+        pick_rows = []
+        for r in rows_parent:
+            years_ = [y for y in r["by_year"] if y < split_year]
+            held_days = sum(r["days_by_year"].get(y, 0) for y in years_)
+            if held_days:
+                pick_rows.append({**r, "contribution": _round(sum(r["by_year"][y] or 0.0 for y in years_)),
+                                  "days_long": held_days, "days_short": 0})
+        pick_summary, held_names = None, len(pick_rows)
+    else:
+        pick = run({**base, **whole_scope, **pick_period})
+        pick_rows, pick_summary, held_names = pick["by_name"]["rows"], _summary(pick), pick["by_name"]["names"]
     # Enough evidence: held long enough (a name held all along has a single trade, so days count, not trades).
-    pool = [r for r in pick["by_name"]["rows"]
+    pool = [r for r in pick_rows
             if r["trades"] >= int(sel["min_trades"]) and r["days_long"] + r["days_short"] >= int(sel["min_days"])]
     ranked = sorted(pool, key=lambda r: (-_metric(r, sel["metric"]), r["security_id"]))
     chosen = [r for r in ranked if r["contribution"] > 0][:top_k]
@@ -81,17 +122,25 @@ def find_subset(code: str, *, source, policies: dict, params: dict, select: dict
     meta_top = int(contract.load(code).META.get("top_n") or k)
     top_n = max(1, min(int(params.get("top_n") or meta_top), k // 2))
 
-    # 2. Check, out of sample: the subset, the whole scope, random subsets of the same size.
+    # 2. Check, out of sample: the subset, the whole scope, random subsets of the same size. The chosen names and
+    # every random set come from the names the pick period held, so one cache serves all their reads.
     on = lambda ids: {**base, **check_period, "symbols": ids, "top_n": top_n}  # noqa: E731
-    check = run({**on([r["security_id"] for r in chosen]), "trials": params.get("trials")})
-    whole = run({**base, **({"symbols": params["symbols"]} if params.get("symbols") else {}), **check_period})
+    ids = sorted(r["security_id"] for r in pick_rows)
+    cached = PoolCache(source, ids)
+    check = run({**on([r["security_id"] for r in chosen]), "trials": params.get("trials")}, cached)
+    if use_parent:
+        ser = parent["series"]
+        whole_summary = _period_summary(ser["dates"], ser["series"]["returns"],
+                                        ser["series"].get("spx_returns") or [None] * len(ser["dates"]),
+                                        check_period["start"], int(load_config(config)["trading_days_per_year"]))
+    else:
+        whole_summary = _summary(run({**base, **whole_scope, **check_period}))
     seed = int(hashlib.sha256(json.dumps([check["plugin"]["hash"], {k: v for k, v in params.items() if k != "trials"},
                                           sel], sort_keys=True, default=str).encode()).hexdigest()[:12], 16)
     rng = random.Random(seed)
-    ids = sorted(r["security_id"] for r in pick["by_name"]["rows"])
     randoms = []
     for _ in range(n_random if len(ids) > k else 0):
-        r = run(on(sorted(rng.sample(ids, k))))
+        r = run(on(sorted(rng.sample(ids, k))), cached)
         randoms.append(r["summary"].get("sharpe"))
     got = check["summary"].get("sharpe")
     valid = [x for x in randoms if isinstance(x, (int, float))]
@@ -103,10 +152,11 @@ def find_subset(code: str, *, source, policies: dict, params: dict, select: dict
     check["subset"] = {
         "select": {**sel, "pick_fraction": _round(frac, 6)},
         "pick_period": pick_period, "check_period": check_period, "top_n": top_n,
-        "pool": len(pool), "names_held_in_pick": pick["by_name"]["names"],
+        "pool": len(pool), "names_held_in_pick": held_names,
+        "picked_from": "the evaluation's results by year" if use_parent else "a run over the pick period",
         "chosen": [{k2: r.get(k2) for k2 in ("security_id", "ticker", "sector", "contribution", "trades", "hit_rate",
                                             "avg_trade_return")} for r in chosen],
-        "pick": _summary(pick), "check": _summary(check), "whole": _summary(whole),
+        "pick": pick_summary, "check": _summary(check), "whole": whole_summary,
         "random": {"n": len(valid), "sharpes": sorted(_round(x, 6) for x in valid),
                    "mean_sharpe": _round(sum(valid) / len(valid), 6) if valid else None,
                    "beaten": beaten, "p_value": _round(p_value, 6) if p_value is not None else None},

@@ -252,6 +252,22 @@ export async function startEvaluation(
   return { evaluation: doc, done };
 }
 
+/** #325: what a subset search reuses from its evaluation (per-name results by year, the daily returns). */
+async function subsetParent(id: string) {
+  const p = await evaluations().findOne(
+    { _id: id },
+    {
+      projection: {
+        'record.by_name': 1,
+        'record.series.dates': 1,
+        'record.series.series.returns': 1,
+        'record.series.series.spx_returns': 1,
+      },
+    },
+  );
+  return p?.record?.by_name ? { by_name: p.record.by_name, series: p.record.series } : null;
+}
+
 async function finish(doc: Evaluation, code: string, execute: Execute, readableEnd?: string) {
   let outcome: CodeJobOutcome;
   const set = async (patch: Partial<Evaluation>) => {
@@ -272,7 +288,7 @@ async function finish(doc: Evaluation, code: string, execute: Execute, readableE
         code: JOB_CODE,
         params: {
           action: doc.subsetOf ? 'subset' : 'evaluate',
-          ...(doc.subsetOf ? { select: doc.select ?? {} } : {}),
+          ...(doc.subsetOf ? { select: doc.select ?? {}, parent: await subsetParent(doc.subsetOf) } : {}),
           code,
           params: { ...doc.params, trials },
           policies,

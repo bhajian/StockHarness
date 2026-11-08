@@ -262,7 +262,7 @@ def evaluate(code: str, *, source, policies: dict, params: dict, config: dict | 
 
     def name_acc(s):
         return names_acc.setdefault(s, {"contribution": 0.0, "days_long": 0, "days_short": 0, "abs_weight": 0.0,
-                                        "trades": [], "by_year": {}})
+                                        "trades": [], "by_year": {}, "days_by_year": {}})
 
     def close_trade(s, side, growth):
         trade_returns.append(side * (growth - 1))
@@ -290,6 +290,7 @@ def evaluate(code: str, *, source, policies: dict, params: dict, config: dict | 
             a["abs_weight"] += abs(wt)
             a["days_long" if wt > 0 else "days_short"] += 1
             a["by_year"][d[:4]] = a["by_year"].get(d[:4], 0.0) + wt * r
+            a["days_by_year"][d[:4]] = a["days_by_year"].get(d[:4], 0) + 1
             bench += wt * sector_ew.get(sec, r)
             if s in open_trades:
                 open_trades[s][1] *= 1 + r
@@ -454,6 +455,7 @@ def _by_name(acc: dict, ticker: dict, sector: dict, n_days: int) -> dict:
             "hit_rate": _round(sum(1 for x in t if x > 0) / len(t), 6) if t else None,
             "avg_trade_return": _round(sum(t) / len(t)) if t else None,
             "by_year": {y: _round(v) for y, v in sorted(a["by_year"].items())},
+            "days_by_year": dict(sorted(a["days_by_year"].items())),
         })
     rows.sort(key=lambda r: (-r["contribution"], r["security_id"]))
     gains = sorted((r["contribution"] for r in rows if r["contribution"] > 0), reverse=True)

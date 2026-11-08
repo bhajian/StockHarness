@@ -170,8 +170,8 @@ export function SubsetResult({ record: r, evaluationId }: { record: any; evaluat
       <SharpeStrip random={s.random.sharpes} chosen={s.check.sharpe} whole={s.whole.sharpe} />
       <p className="muted-line">
         Picked on {s.pick_period.start} → {s.pick_period.end} (by {String(s.select.metric)}, held at least{' '}
-        {String(s.select.min_days)} days; {s.pool} of {s.names_held_in_pick} names held qualified). The
-        strategy holds {s.top_n} of them at a time.
+        {String(s.select.min_days)} days; {s.pool} of {s.names_held_in_pick} names held qualified
+        {s.picked_from ? `; from ${s.picked_from}` : ''}). The strategy holds {s.top_n} of them at a time.
       </p>
       <div className="chips" aria-label="Chosen names">
         {s.chosen.map((c: any) => (

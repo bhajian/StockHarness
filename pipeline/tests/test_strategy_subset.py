@@ -4,6 +4,8 @@ import unittest
 
 from pipeline.strategy import synthetic
 from pipeline.strategy.engine import EvaluationError
+from pipeline.strategy import engine
+from pipeline.strategy.pool_cache import PoolCache
 from pipeline.strategy.subset import find_subset
 
 COSTS = {"commission_bps": 1, "slippage_bps": 5, "borrow_cost_bps_default": 50, "delisting_return": -0.3,
@@ -39,6 +41,33 @@ def subset(src, days, **select):
 
 
 class Subsets(unittest.TestCase):
+    def test_the_pool_cache_gives_identical_records(self):
+        src, days = market_with_winners()
+        pool = [f"SEC_{k:06d}" for k in range(0, 80, 3)]
+        cached = PoolCache(src, pool)
+        for names in (pool[:6], pool[5:11], pool[:6]):
+            params = {"start": days[200], "end": days[-1], "symbols": names, "top_n": 3}
+            a = engine.evaluate(REVERSAL, source=src, policies=synthetic.POLICIES, config=COSTS, params=params)
+            b = engine.evaluate(REVERSAL, source=cached, policies=synthetic.POLICIES, config=COSTS, params=params)
+            self.assertEqual(a["record_hash"], b["record_hash"])
+            self.assertEqual(a["by_name"], b["by_name"])
+        self.assertGreater(cached.stats["hits"], 0, "the second and third runs read from the cache")
+
+    def test_picks_from_the_parent_evaluation_when_it_has_results_by_year(self):
+        src, days = market_with_winners()
+        params = {"start": days[70], "end": days[-1]}
+        parent = engine.evaluate(REVERSAL, source=src, policies=synthetic.POLICIES, config=COSTS, params=params)
+        r = find_subset(REVERSAL, source=src, policies=synthetic.POLICIES, config=COSTS, params=params,
+                        select={"top_k": 6, "n_random": 19}, parent=parent)
+        s = r["subset"]
+        self.assertEqual(s["picked_from"], "the evaluation's results by year")
+        self.assertEqual(s["check_period"]["start"][:4], "2021", "split at a year boundary")
+        self.assertEqual(s["pick_period"]["end"][:4], "2020")
+        self.assertEqual(sorted(c["security_id"] for c in s["chosen"]), WINNERS)
+        self.assertTrue(s["passed"], s["random"])
+        self.assertIsNone(s["pick"])
+        self.assertIsNotNone(s["whole"]["sharpe"])
+
     def test_finds_the_names_that_work_and_checks_them_out_of_sample(self):
         src, days = market_with_winners()
         r = subset(src, days)
