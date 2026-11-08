@@ -369,6 +369,7 @@ export function EvaluationReport({ record: r }: { record: Record<string, any> })
           height={Math.max(160, 26 * (r.by_sector ?? []).length)}
         />
       </div>
+      {r.by_name?.rows?.length ? <ByNameTable byName={r.by_name} /> : null}
       <details className="provenance">
         <summary>Provenance</summary>
         <pre>
@@ -392,5 +393,123 @@ export function EvaluationReport({ record: r }: { record: Record<string, any> })
         {fmtNumber(series.dates.length)} trading days · {r.rebalances?.length} rebalances
       </p>
     </div>
+  );
+}
+
+type NameRow = {
+  security_id: string;
+  ticker?: string | null;
+  sector?: string;
+  contribution: number;
+  days_long: number;
+  days_short: number;
+  avg_weight: number;
+  trades: number;
+  hit_rate: number | null;
+  avg_trade_return: number | null;
+  by_year: Record<string, number>;
+};
+const NAME_SORTS: Record<string, { label: string; key: (x: NameRow) => number }> = {
+  contribution: { label: 'Contribution', key: (x) => x.contribution },
+  trades: { label: 'Trades', key: (x) => x.trades },
+  hit_rate: { label: 'Hit rate', key: (x) => x.hit_rate ?? -1 },
+  avg_trade_return: { label: 'Avg trade', key: (x) => x.avg_trade_return ?? -Infinity },
+  days: { label: 'Days held', key: (x) => x.days_long + x.days_short },
+};
+/** How each name held did (#324): which of the universe the strategy works for. */
+export function ByNameTable({ byName }: { byName: any }) {
+  const rows: NameRow[] = byName.rows ?? [];
+  const [sort, setSort] = useState<{ by: string; desc: boolean }>({ by: 'contribution', desc: true });
+  const [q, setQ] = useState('');
+  const [all, setAll] = useState(false);
+  const years = useMemo(() => [...new Set(rows.flatMap((x) => Object.keys(x.by_year ?? {})))].sort(), [rows]);
+  const shown = useMemo(() => {
+    const f = q.trim().toLowerCase();
+    const k = NAME_SORTS[sort.by].key;
+    return rows
+      .filter((x) => !f || `${x.ticker ?? ''} ${x.sector ?? ''} ${x.security_id}`.toLowerCase().includes(f))
+      .sort((a, b) => (sort.desc ? k(b) - k(a) : k(a) - k(b)));
+  }, [rows, q, sort]);
+  const head = (id: string) => (
+    <th aria-sort={sort.by === id ? (sort.desc ? 'descending' : 'ascending') : 'none'}>
+      <button
+        type="button"
+        className="th-sort"
+        onClick={() => setSort((s) => ({ by: id, desc: s.by === id ? !s.desc : true }))}
+      >
+        {NAME_SORTS[id].label}
+        {sort.by === id ? (sort.desc ? ' ↓' : ' ↑') : ''}
+      </button>
+    </th>
+  );
+  const limit = all ? shown.length : 25;
+  return (
+    <section className="by-name" aria-label="Results by name">
+      <div className="by-name-head">
+        <h3>Results by name</h3>
+        <p className="muted-line">
+          {fmtNumber(byName.names)} names held · {fmtNumber(byName.positive)} added to the return,{' '}
+          {fmtNumber(byName.negative)} took away
+          {byName.top_decile_share_of_gains != null
+            ? ` · the best 10% of names made ${pct(byName.top_decile_share_of_gains, 0)} of the gains`
+            : ''}
+          {byName.truncated ? ` · showing the best and worst ${fmtNumber(rows.length / 2)}` : ''}.
+          Contribution is before costs.
+        </p>
+        <input
+          type="search"
+          placeholder="Find a ticker or sector"
+          aria-label="Find a ticker or sector"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+        />
+      </div>
+      <div className="table-wrap">
+        <table aria-label="Results by name">
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Sector</th>
+              {head('contribution')}
+              {years.map((y) => (
+                <th key={y}>{y}</th>
+              ))}
+              {head('trades')}
+              {head('hit_rate')}
+              {head('avg_trade_return')}
+              <th>Avg weight</th>
+              {head('days')}
+            </tr>
+          </thead>
+          <tbody>
+            {shown.slice(0, limit).map((x) => (
+              <tr key={x.security_id}>
+                <td title={x.security_id}>
+                  <strong>{x.ticker ?? x.security_id}</strong>
+                </td>
+                <td>{x.sector}</td>
+                <td className={x.contribution >= 0 ? 'pos' : 'neg'}>{pct(x.contribution, 2)}</td>
+                {years.map((y) => (
+                  <td key={y}>{x.by_year?.[y] != null ? pct(x.by_year[y], 2) : '—'}</td>
+                ))}
+                <td>{x.trades}</td>
+                <td>{x.hit_rate != null ? pct(x.hit_rate, 0) : '—'}</td>
+                <td>{x.avg_trade_return != null ? pct(x.avg_trade_return) : '—'}</td>
+                <td>{pct(x.avg_weight, 2)}</td>
+                <td>
+                  {x.days_long + x.days_short}
+                  {x.days_short ? ` (${x.days_short} short)` : ''}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {shown.length > 25 ? (
+        <button type="button" className="btn ghost" onClick={() => setAll((v) => !v)}>
+          {all ? 'Show the first 25' : `Show all ${fmtNumber(shown.length)}`}
+        </button>
+      ) : null}
+    </section>
   );
 }

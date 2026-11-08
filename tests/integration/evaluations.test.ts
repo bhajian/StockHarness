@@ -155,6 +155,17 @@ test('an evaluation runs in the executor and is reproducible', async () => {
   assert.ok(!('SEC_000000' in r.holdings.weights), 'scope applied');
   assert.equal(r.series.dates.length, r.series.series.equity.length);
   assert.ok(r.reader.reads > 0 && r.reader.lookahead_attempts === 0);
+  // #324: how each name held did, only names in scope, with their tickers.
+  assert.ok(
+    r.by_name.names >= 3 && r.by_name.rows.length === r.by_name.names,
+    JSON.stringify(r.by_name).slice(0, 300),
+  );
+  assert.ok(r.by_name.rows.every((x: any) => x.security_id !== 'SEC_000000' && x.ticker && x.by_year));
+  assert.equal(
+    r.by_name.rows.reduce((n: number, x: any) => n + x.trades, 0),
+    r.trade_stats.count,
+    'every trade belongs to a name',
+  );
   const b = await evaluate(body);
   assert.equal(b.record.record_hash, r.record_hash, 'same inputs, identical record');
   assert.ok(b.trial > a.trial, 'every evaluation is a trial');

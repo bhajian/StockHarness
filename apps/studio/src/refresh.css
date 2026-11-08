@@ -4425,3 +4425,52 @@ button.map-card:hover {
   max-width: 260px;
   font-size: 13px;
 }
+
+/* Results by name (#324) */
+.by-name {
+  margin-top: 16px;
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+.by-name-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 16px;
+}
+.by-name-head h3 {
+  margin: 0;
+  font-size: 14px;
+}
+.by-name-head .muted-line {
+  flex: 1 1 320px;
+  margin: 0;
+}
+.by-name-head input[type='search'] {
+  width: 220px;
+  max-width: 100%;
+}
+.by-name table td,
+.by-name table th {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.by-name td.pos {
+  color: var(--green-ink, #316d4b);
+}
+.by-name td.neg {
+  color: var(--danger, #b42318);
+}
+.by-name > .btn {
+  justify-self: start;
+}
+.th-sort {
+  all: unset;
+  cursor: pointer;
+  font: inherit;
+}
+.th-sort:focus-visible {
+  outline: 2px solid var(--accent, #2563eb);
+  outline-offset: 2px;
+}

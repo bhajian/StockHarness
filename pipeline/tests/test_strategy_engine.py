@@ -88,6 +88,35 @@ class Engine(unittest.TestCase):
             run(MOMENTUM, src, days[20], days[10])
 
 
+class ByName(unittest.TestCase):
+    """#324: how each name held did."""
+
+    def test_per_name_results_add_up(self):
+        src, days = synthetic.market(n_sec=30, n_days=300, seed=3)
+        r = run(MOMENTUM, src, days[70], days[-1])
+        b = r["by_name"]
+        rows = b["rows"]
+        self.assertEqual(b["names"], len(rows))
+        self.assertEqual(b["truncated"], 0)
+        self.assertEqual(b["positive"] + b["negative"] + sum(1 for x in rows if x["contribution"] == 0), len(rows))
+        # Contributions are the same daily weight × return as the sector table: they add up to it.
+        self.assertAlmostEqual(sum(x["contribution"] for x in rows), sum(x["contribution"] for x in r["by_sector"]), places=6)
+        for x in rows:
+            self.assertAlmostEqual(sum(x["by_year"].values()), x["contribution"], places=6)
+            self.assertEqual(x["days_short"], 0)
+            self.assertTrue(x["ticker"])
+        self.assertEqual(sum(x["trades"] for x in rows), r["trade_stats"]["count"])
+        self.assertEqual([x["contribution"] for x in rows], sorted((x["contribution"] for x in rows), reverse=True))
+        # Outside the hash: an evaluation from before #324 still reproduces.
+        self.assertEqual(r["record_hash"], engine.record_hash({k: v for k, v in r.items() if k not in ("record_hash", "trial_context", "by_name")}))
+
+    def test_a_short_name_counts_short_days(self):
+        flat = {(f"SEC_00000{k}", d): 0.0 for k in range(4) for d in synthetic.weekdays("2020-01-01", 30)}
+        src, days = synthetic.market(n_sec=4, n_days=30, overrides=flat)
+        rows = run(constant(side="short"), src, days[0], days[9])["by_name"]["rows"]
+        self.assertEqual([(x["security_id"], x["days_long"] > 0, x["days_short"] > 0) for x in rows], [("SEC_000003", False, True)])
+
+
 class WalkForward(unittest.TestCase):
     def test_folds_per_calendar_year_and_warnings(self):
         src, days = synthetic.market(n_sec=20, n_days=600, seed=5, start="2021-06-01")

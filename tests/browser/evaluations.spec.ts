@@ -123,6 +123,19 @@ test('an evaluation record renders on the dev evaluation page', async ({ page })
   await expect(page.getByRole('table', { name: 'Factor exposures' }).getByText('market')).toBeVisible();
   await expect(page.getByRole('table', { name: 'Regimes' }).getByText('VIX high')).toBeVisible();
   await expect(page.locator('canvas').first()).toBeVisible();
+  // #324: results by name, best first; sortable; searchable.
+  const byName = page.getByRole('table', { name: 'Results by name' });
+  const best = e.record.by_name.rows[0];
+  await expect(byName.getByRole('row')).toHaveCount(1 + e.record.by_name.rows.length);
+  await expect(byName.getByRole('row').nth(1).getByText(best.ticker, { exact: true })).toBeVisible();
+  await byName.getByRole('button', { name: 'Trades' }).click();
+  await expect(byName.getByRole('columnheader', { name: /Trades/ })).toHaveAttribute(
+    'aria-sort',
+    'descending',
+  );
+  await page.getByLabel('Find a ticker or sector').fill(best.ticker);
+  await expect(byName.getByRole('row')).toHaveCount(2);
+  await page.getByLabel('Find a ticker or sector').fill('');
   await page.getByText('Provenance').click();
   await expect(page.getByText(e.record.record_hash)).toBeVisible();
   if (process.env.SCREENSHOT)
