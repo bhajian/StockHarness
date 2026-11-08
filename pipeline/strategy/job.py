@@ -59,7 +59,8 @@ def run(params: dict, source, db=None) -> dict:
 
             record = find_subset(code, source=source, policies=params["policies"], params=params["params"],
                                  select=params.get("select"), config=params.get("config"),
-                                 readable_end=params.get("readable_end"), plugin_ref=params.get("plugin_ref"))
+                                 readable_end=params.get("readable_end"), plugin_ref=params.get("plugin_ref"),
+                                 parent=params.get("parent"))
             return {"ok": True, "record": record}
         if action == "test":
             from .testing import test_plugin
