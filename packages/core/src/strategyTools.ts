@@ -26,6 +26,13 @@ const pick = (o: Record<string, unknown> | undefined, keys: string[]) =>
   Object.fromEntries(keys.filter((k) => o && k in o).map((k) => [k, r4(o![k])]));
 
 /** What the agent sees: numbers, never the series. */
+const nameLines = (rows: Array<Record<string, any>>) =>
+  rows.map((x) => ({
+    name: x.ticker ?? x.security_id,
+    contribution: r4(x.contribution),
+    trades: x.trades,
+    hit_rate: r4(x.hit_rate),
+  }));
 export function agentSummary(e: Evaluation) {
   const r = e.record;
   return {
@@ -65,6 +72,19 @@ export function agentSummary(e: Evaluation) {
             t: Object.fromEntries(Object.entries(r.factors?.t ?? {}).map(([k, v]) => [k, r4(v)])),
           },
           deflated_sharpe: r4(r.trial_context?.dsr),
+          // #324: which names carried it (contribution before costs).
+          ...(r.by_name
+            ? {
+                by_name: {
+                  names: r.by_name.names,
+                  added: r.by_name.positive,
+                  took_away: r.by_name.negative,
+                  top_decile_share_of_gains: r4(r.by_name.top_decile_share_of_gains),
+                  best: nameLines(r.by_name.rows.slice(0, 5)),
+                  worst: nameLines(r.by_name.rows.slice(-5).reverse()),
+                },
+              }
+            : {}),
           warnings: (r.warnings ?? []).map((w: { code: string; count?: number; hint?: string }) => ({
             code: w.code,
             count: w.count,

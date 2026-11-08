@@ -86,6 +86,20 @@ Run one with `POST /api/evaluations` `{ plugin, version?, params }` (202; poll `
   (409) even if the first one failed. A new code version is a new shot. The holdout length can change only until
   the first holdout run.
 
+## Results by name (#324)
+
+Every record has `by_name`: for each security the book held, its contribution to the book's return (daily weight ×
+return, before costs; the names add up to `by_sector`), its contribution by calendar year, days held long and
+short, average weight, trades with their hit rate and average return, ticker and sector. Rows are sorted best
+first; above 1,000 names only the best and worst 500 are kept (`truncated` says how many were left out). The
+summary says how many names added to and took away from the return, and `top_decile_share_of_gains`: the share
+of the gains made by the best 10% of names (near 1 means a few names carry the result).
+
+`by_name` is derived from the same inputs but sits outside `record_hash`, so evaluations made before it existed
+still reproduce. `get_evaluation` gives agents the five best and worst names; the evaluation and idea pages show
+the full table (sortable, searchable). Picking the best names from this table is not a result by itself: name
+subsets are picked and checked on different periods (#325).
+
 ## Metrics (#106)
 
 `pipeline/strategy/metrics.py` (numpy only; checked against empyrical and the published deflated-Sharpe example):

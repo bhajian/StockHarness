@@ -235,9 +235,11 @@ def evaluate(code: str, *, source, policies: dict, params: dict, config: dict | 
         last_price[s] = max(last_price.get(s, d), d)
         if isinstance(v, (int, float)) and math.isfinite(v):
             rets.setdefault(d, {})[s] = float(v)
-    sec_rows = source.find("securities", {"security_id": {"$in": load}}, ["security_id", "is_active", "sector_history"]) if load else []
+    sec_rows = source.find("securities", {"security_id": {"$in": load}},
+                           ["security_id", "is_active", "sector_history", "identifiers"]) if load else []
     inactive = {r["security_id"] for r in sec_rows if r.get("is_active") is False}
     sector = {r["security_id"]: _current(r.get("sector_history")) or "Unknown" for r in sec_rows}
+    ticker = {r["security_id"]: _ticker(r) for r in sec_rows}
     macro = {r["date"]: r for r in source.find(
         "macro_daily", {"date": {"$gte": (date.fromisoformat(first_exec) - timedelta(days=420)).isoformat(), "$lte": end}},
         ["date", "spx_ret_1d", "spx_close", "vix"])}
@@ -256,6 +258,16 @@ def evaluate(code: str, *, source, policies: dict, params: dict, config: dict | 
     exposure: dict[str, float] = {}  # sector -> summed |weight| (for the average)
     open_trades: dict[str, list] = {}  # security -> [side, growth]
     trade_returns: list[float] = []
+    names_acc: dict[str, dict] = {}  # security -> per-name results (#324)
+
+    def name_acc(s):
+        return names_acc.setdefault(s, {"contribution": 0.0, "days_long": 0, "days_short": 0, "abs_weight": 0.0,
+                                        "trades": [], "by_year": {}})
+
+    def close_trade(s, side, growth):
+        trade_returns.append(side * (growth - 1))
+        name_acc(s)["trades"].append(side * (growth - 1))
+
     for d in days[days.index(first_exec):]:
         day = rets.get(d, {})
         extreme += [(d, s, day[s]) for s in w if s in day and abs(day[s]) > 0.5]
@@ -273,14 +285,18 @@ def evaluate(code: str, *, source, policies: dict, params: dict, config: dict | 
             sec = sector.get(s, "Unknown")
             contrib[sec] = contrib.get(sec, 0.0) + wt * r
             exposure[sec] = exposure.get(sec, 0.0) + abs(wt)
+            a = name_acc(s)
+            a["contribution"] += wt * r
+            a["abs_weight"] += abs(wt)
+            a["days_long" if wt > 0 else "days_short"] += 1
+            a["by_year"][d[:4]] = a["by_year"].get(d[:4], 0.0) + wt * r
             bench += wt * sector_ew.get(sec, r)
             if s in open_trades:
                 open_trades[s][1] *= 1 + r
         borrow = sum(-wt for wt in w.values() if wt < 0) * borrow_daily
         w = {s: v / (1 + port) for s, v in moved.items() if s not in delisted} if 1 + port > 0 else {}
         for s in [s for s in open_trades if s in delisted]:
-            side, growth = open_trades.pop(s)
-            trade_returns.append(side * (growth - 1))
+            close_trade(s, *open_trades.pop(s))
         ret = port - borrow
         turnover = 0.0
         if d in targets:
@@ -295,8 +311,7 @@ def evaluate(code: str, *, source, policies: dict, params: dict, config: dict | 
                 old_side = (open_trades.get(s) or [0])[0]
                 new_side = (tgt.get(s, 0.0) > 0) - (tgt.get(s, 0.0) < 0)
                 if old_side and old_side != new_side:
-                    side, growth = open_trades.pop(s)
-                    trade_returns.append(side * (growth - 1))
+                    close_trade(s, *open_trades.pop(s))
                 if new_side and s not in open_trades:
                     open_trades[s] = [new_side, 1.0]
             w = dict(tgt)
@@ -308,7 +323,8 @@ def evaluate(code: str, *, source, policies: dict, params: dict, config: dict | 
         out_gross.append(sum(abs(v) for v in w.values()))
         out_turn.append(turnover)
     open_at_end = len(open_trades)
-    trade_returns += [side * (growth - 1) for side, growth in open_trades.values()]  # marked to market
+    for s, (side, growth) in list(open_trades.items()):  # marked to market
+        close_trade(s, side, growth)
 
     summary = metrics.summary(out_ret, periods)
     spx_clean = [x if isinstance(x, (int, float)) else 0.0 for x in out_spx]
@@ -354,6 +370,9 @@ def evaluate(code: str, *, source, policies: dict, params: dict, config: dict | 
         "reader": dict(reader.stats),
     }
     record["record_hash"] = record_hash(record)
+    # Per-name results (#324) are derived from the same inputs; they sit outside the hash so evaluations made
+    # before they existed still reproduce.
+    record["by_name"] = _by_name(names_acc, ticker, sector, n_days)
     # The deflated Sharpe depends on how many trials the whole swarm has run, so it lives outside the hash.
     trials = params.get("trials") or {}
     record["trial_context"] = _rounded(metrics.deflated_sharpe(out_ret, int(trials.get("count") or 1), trials.get("sharpe_variance")))
@@ -410,6 +429,46 @@ def _by_regime(dates, returns, macro, periods) -> dict:
     return {g: {k: _rounded({"days": len(v), "total_return": metrics.total_return(v),
                              "ann_return": sum(v) / len(v) * periods, "sharpe": metrics.sharpe(v, periods)})
                 for k, v in sorted(groups[g].items())} for g in groups}
+
+
+BY_NAME_KEEP = 1000
+
+
+def _ticker(sec_row: dict) -> str | None:
+    for i in sec_row.get("identifiers") or []:
+        if i.get("type") == "ticker":
+            return i.get("value")
+    return None
+
+
+def _by_name(acc: dict, ticker: dict, sector: dict, n_days: int) -> dict:
+    """How each name held did: its contribution to the book's return (before costs), days held, average weight,
+    trades and their hit rate, and its contribution by year. Sorted best first."""
+    rows = []
+    for s, a in acc.items():
+        t = a["trades"]
+        rows.append({
+            "security_id": s, "ticker": ticker.get(s), "sector": sector.get(s, "Unknown"),
+            "contribution": _round(a["contribution"]), "days_long": a["days_long"], "days_short": a["days_short"],
+            "avg_weight": _round(a["abs_weight"] / max(1, n_days), 8), "trades": len(t),
+            "hit_rate": _round(sum(1 for x in t if x > 0) / len(t), 6) if t else None,
+            "avg_trade_return": _round(sum(t) / len(t)) if t else None,
+            "by_year": {y: _round(v) for y, v in sorted(a["by_year"].items())},
+        })
+    rows.sort(key=lambda r: (-r["contribution"], r["security_id"]))
+    gains = sorted((r["contribution"] for r in rows if r["contribution"] > 0), reverse=True)
+    total_gain = sum(gains)
+    top_decile = gains[: max(1, len(rows) // 10)] if gains else []
+    return {
+        "names": len(rows),
+        "positive": sum(1 for r in rows if r["contribution"] > 0),
+        "negative": sum(1 for r in rows if r["contribution"] < 0),
+        # How much of the gains came from the best 10% of the names held: near 1 = a few names carry it.
+        "top_decile_share_of_gains": _round(sum(top_decile) / total_gain, 6) if total_gain > 0 else None,
+        # The best and worst BY_NAME_KEEP / 2 when more names were held (keeps the record small).
+        "rows": rows if len(rows) <= BY_NAME_KEEP else rows[: BY_NAME_KEEP // 2] + rows[-(BY_NAME_KEEP // 2):],
+        "truncated": max(0, len(rows) - BY_NAME_KEEP),
+    }
 
 
 def _trade_stats(trade_returns: list[float], open_at_end: int) -> dict:
