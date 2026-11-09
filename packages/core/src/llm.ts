@@ -96,9 +96,29 @@ async function failedResponse(response: Response, attempts = 1) {
   } catch {
     // Not JSON; keep the raw body text.
   }
+  const hint = providerHint(response.status, detail, body);
   return new Error(
-    `Model provider returned HTTP ${response.status}${detail ? `: ${detail.slice(0, 500)}` : ''}${attempts > 1 ? ` (after ${attempts} attempts)` : ''}. Check the endpoint, model, credentials and quota.`,
+    `Model provider returned HTTP ${response.status}${detail ? `: ${detail.slice(0, 500)}` : ''}${attempts > 1 ? ` (after ${attempts} attempts)` : ''}. ${hint ?? 'Check the endpoint, model, credentials and quota.'}`,
   );
+}
+/**
+ * What to change for the Google errors that do not say it themselves (#347): a Vertex model that exists only in
+ * the global location, and a Vertex express-mode key sent to the Gemini API.
+ */
+export function providerHint(status: number, detail: string, body = '') {
+  const missing =
+    /Publisher model `projects\/([^/]+)\/locations\/([^/]+)\/publishers\/google\/models\/([^`]+)` was not found/.exec(
+      detail,
+    );
+  if (status === 404 && missing && missing[2] !== 'global')
+    return `The model ${missing[3]} is not served in ${missing[2]}. Preview models are often only in the global location: set the provider's base URL to https://aiplatform.googleapis.com/v1/projects/${missing[1]}/locations/global/publishers/google.`;
+  if (
+    status === 403 &&
+    /generativelanguage\.googleapis\.com/.test(detail) &&
+    /API_KEY_SERVICE_BLOCKED|are blocked/.test(`${detail} ${body}`)
+  )
+    return 'This key may not call the Gemini API (generativelanguage.googleapis.com); a Vertex AI key needs a Vertex base URL: https://aiplatform.googleapis.com/v1/publishers/google (or …/v1/projects/<project>/locations/global/publishers/google for preview models).';
+  return undefined;
 }
 /** Responses worth another attempt: the provider is busy or a hop in front of it failed, not our request. */
 const RETRYABLE_STATUS = new Set([408, 409, 425, 429, 500, 502, 503, 504]);

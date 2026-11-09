@@ -421,3 +421,22 @@ test('gemini answers parallel function calls in one content', async (t) => {
     ['quote', 'news'],
   );
 });
+
+test('Google errors that do not say what to change get a hint (#347)', async () => {
+  const { providerHint } = await import('../../packages/core/src/llm.js');
+  const vertex404 =
+    'Publisher model `projects/185804219254/locations/europe-west1/publishers/google/models/gemini-4-argon` was not found or your project does not have access to it.';
+  assert.match(
+    providerHint(404, vertex404) ?? '',
+    /gemini-4-argon is not served in europe-west1.*https:\/\/aiplatform\.googleapis\.com\/v1\/projects\/185804219254\/locations\/global\/publishers\/google/,
+  );
+  assert.equal(
+    providerHint(404, vertex404.replace('europe-west1', 'global')),
+    undefined,
+    'already global: no hint',
+  );
+  const blocked =
+    'Requests to this API generativelanguage.googleapis.com method google.ai.generativelanguage.v1beta.GenerativeService.GenerateContent are blocked.';
+  assert.match(providerHint(403, blocked, '"reason": "API_KEY_SERVICE_BLOCKED"') ?? '', /Vertex base URL/);
+  assert.equal(providerHint(500, 'Internal error'), undefined);
+});
