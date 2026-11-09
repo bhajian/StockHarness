@@ -146,6 +146,18 @@ const presets: Preset[] = [
     keyHint: 'Create a key in Google AI Studio. It is stored encrypted.',
   },
   {
+    id: 'gemini-vertex',
+    kind: 'gemini',
+    name: 'Google Gemini on Vertex AI',
+    baseUrl: 'https://aiplatform.googleapis.com/v1/publishers/google',
+    hint:
+      'Gemini on Vertex AI with an express-mode key. Preview models (for example gemini-4-argon) are often served ' +
+      'only in the global location: then use https://aiplatform.googleapis.com/v1/projects/<project>/locations/global/publishers/google.',
+    chatModels: ['gemini-3.8-flash', 'gemini-4-argon'],
+    embeddingModels: ['gemini-embedding-001'],
+    keyHint: 'A Vertex AI express-mode key (it starts with AQ.). It is stored encrypted.',
+  },
+  {
     id: 'ollama',
     kind: 'ollama',
     name: 'Ollama (local)',
