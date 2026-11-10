@@ -491,14 +491,18 @@ def _factor_returns(source, policies, cfg, targets, eligible_at, rets, out_dates
     fields = cfg.get("factors") or {}
     if "features_ranked" not in policies or not fields:
         return None
-    reader = PitReader(source, policies, end=readable_end, start=start)
+    # One read over every name ever eligible (the reader caches it), then each date's names in memory: a filter
+    # per date would be a new cache entry each time, loading the whole window again (#350: 45 min, then OOM).
+    every = sorted({s for _, names in eligible_at.values() for s in names})
+    reader = PitReader(source, policies, end=readable_end, start=start, scope_ids=every or None)
     legs: dict[str, dict[str, tuple[list, list]]] = {f: {} for f in fields}
     for exec_day, (signal_day, names) in eligible_at.items():
         try:
-            frame = reader.read_df("features_ranked", {"security_id": {"$in": names}}, ["security_id", *fields.values()],
+            frame = reader.read_df("features_ranked", None, ["security_id", *fields.values()],
                                    as_of=signal_day, lookback_days=7)
         except Exception:  # noqa: BLE001 - factors are optional context
             return None
+        frame = frame[frame["security_id"].isin(set(names))] if not frame.empty else frame
         if frame.empty:
             continue
         last = frame.sort_values("as_of_date").groupby("security_id").tail(1)
