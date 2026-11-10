@@ -23,6 +23,7 @@ StockHarness's agents, harnesses, durable runner, Python executor and API are it
   - the research agents, their skills and about 40 strategy ideas, with a worked end-to-end example,
   - what each layer does in the app.
 - **Roadmap:** [ROADMAP.md](ROADMAP.md) describes the 5-layer architecture, the gaps and the ordered plan. The ordered checklist is pinned as [#139](https://github.com/bhajian/StockHarness/issues/139).
+- **User guide:** [docs/user-guide.md](docs/user-guide.md) explains every page, tab and control of the studio, how to use and configure it, and how it works, with examples.
 - **Platform reference:** [docs/platform.md](docs/platform.md) covers StockHarness's agents, harnesses, runs, resilience, configuration and the API.
 - **Live instance:** https://openharness.faberiq.ai (AWS EKS; the host name predates the rename).
 
