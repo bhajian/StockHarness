@@ -183,13 +183,28 @@ const remoteAgent = new HttpAgent({
   headersTimeout: 60000,
   bodyTimeout: 120000,
 });
-// Used for MCP discovery, OAuth and model requests. Redirects are rejected.
-export const safeFetch: typeof fetch = async (input, init) => {
+/**
+ * Model requests (#337): a thinking model on a long prompt can take minutes before its first byte, so the
+ * headers may come as late as the request deadline, and a stream may pause for minutes between chunks.
+ */
+let modelAgent: HttpAgent | undefined;
+const modelDispatcher = () =>
+  (modelAgent ??= new HttpAgent({
+    connect: { lookup: guardedLookup, timeout: 10000 },
+    headersTimeout: config.MODEL_REQUEST_TIMEOUT_SECONDS * 1000,
+    bodyTimeout: config.MODEL_STREAM_IDLE_SECONDS * 1000,
+  }));
+// Used for MCP discovery, OAuth and model requests (`model: true`: the longer model timeouts). Redirects are rejected.
+export const safeFetch = async (
+  input: Parameters<typeof fetch>[0],
+  init?: RequestInit,
+  opts: { model?: boolean } = {},
+): Promise<Response> => {
   const target = input instanceof Request ? input.url : String(input);
   await validateRemoteUrl(target);
   const request: RequestInit & { dispatcher: HttpAgent } = {
     ...init,
-    dispatcher: remoteAgent,
+    dispatcher: opts.model ? modelDispatcher() : remoteAgent,
     redirect: 'manual',
     signal: init?.signal ?? AbortSignal.timeout(60000),
   };

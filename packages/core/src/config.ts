@@ -60,6 +60,8 @@ const s = z.object({
   RUN_TIMEOUT_SECONDS: z.coerce.number().int().min(0).max(31_536_000).default(0),
   /** How long one model request (including a streamed reply) may take before it is retried. */
   MODEL_REQUEST_TIMEOUT_SECONDS: z.coerce.number().int().min(10).max(86_400).default(600),
+  /** #337: the longest pause between two chunks of a model's response (a thinking model can pause for minutes). */
+  MODEL_STREAM_IDLE_SECONDS: z.coerce.number().int().min(10).max(86_400).default(300),
   EMBED_ORIGINS: z.string().default(''),
   ALLOW_PRIVATE_URLS: z.string().default('false'),
   ALLOWED_PRIVATE_HOSTS: z.string().default('host.docker.internal,ollama'),
