@@ -41,6 +41,7 @@ export const STATUS_LABEL: Record<string, string> = {
   post_review: 'Post-review',
   revise_code: 'Revising code',
   failed: 'Failed',
+  promising: 'Promising',
   successful: 'Successful',
   approved: 'Approved',
   parked: 'Parked',

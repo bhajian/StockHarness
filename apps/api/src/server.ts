@@ -17,6 +17,7 @@ import {
 import { dispatchBackfills, recoverBackfills } from '../../../packages/core/src/datasetBackfill.js';
 import { dispatchTransforms, recoverTransformRuns } from '../../../packages/core/src/transformRunner.js';
 import { recoverEvaluations } from '../../../packages/core/src/evaluations.js';
+import { relabelPromising } from '../../../packages/core/src/verdictLabels.js';
 import { recoverSimulations } from '../../../packages/core/src/simulations.js';
 import { dispatchTransformTriggers } from '../../../packages/core/src/transformTriggers.js';
 import { dispatchPipelines } from '../../../packages/core/src/pipelineEngine.js';
@@ -33,6 +34,8 @@ const resumed = await recoverBackfills();
 if (resumed) console.warn(`Resuming ${resumed} dataset backfill(s)`);
 const failedTransforms = await recoverTransformRuns();
 if (failedTransforms) console.warn(`Marked ${failedTransforms} interrupted transform run(s) as failed`);
+const relabelled = await relabelPromising();
+if (relabelled) console.warn(`Relabelled ${relabelled} failed verdict(s) as promising (#354)`);
 const failedEvaluations = (await recoverEvaluations()) + (await recoverSimulations());
 if (failedEvaluations)
   console.warn(`Marked ${failedEvaluations} interrupted evaluation / simulation run(s) as failed`);

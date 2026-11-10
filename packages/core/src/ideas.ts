@@ -177,6 +177,7 @@ export async function listIdeas(ownerId: string, q: IdeaQuery = {}) {
   return {
     kpis: {
       successful: count((t) => t.status === 'successful'),
+      promising: count((t) => t.status === 'promising'),
       approved: count((t) => t.status === 'approved'),
       failed: count((t) => t.status === 'failed' || t.status === 'rejected_untestable'),
       inProgress: count((t) => IN_PROGRESS.includes(t.status)),
@@ -238,11 +239,17 @@ export function humanActions(t: Pick<Theory, 'status'>) {
   const s = t.status;
   return {
     approve: s === 'successful',
-    park: s === 'successful' || s === 'approved',
-    reject: s === 'successful' || s === 'approved',
-    sendBack: ['successful', 'approved', 'failed', 'parked', 'rejected_untestable', 'post_review'].includes(
-      s,
-    ),
+    park: s === 'successful' || s === 'approved' || s === 'promising',
+    reject: s === 'successful' || s === 'approved' || s === 'promising',
+    sendBack: [
+      'successful',
+      'promising',
+      'approved',
+      'failed',
+      'parked',
+      'rejected_untestable',
+      'post_review',
+    ].includes(s),
   };
 }
 function summaryOf(e: Evaluation) {

@@ -375,6 +375,43 @@ test('strict gates: the Judge cannot upgrade a failing theory; forward_only theo
   });
   assert.deepEqual([failed.status, failed.mechanical], ['failed', 'failed']);
 
+  // #354: an idea that beat the S&P 500 and failed only the proof gates is promising, whatever the Judge asks.
+  const proofOnly = await ok('/research/gates', {
+    minSharpe: -100,
+    minDeflatedSharpe: 1,
+    minPositiveExcessYears: 0,
+    minTrades: 1,
+    minHoldings: 1,
+    minAlphaT: 100,
+    note: 'test: only the proof gates can fail',
+  });
+  const p = await theorist.call('submit_theory', {
+    title: 'Forty-day leaders keep leading',
+    hypothesis: 'The best 40-day performers keep outperforming over the next month in liquid names.',
+    signal_logic: 'Rank by 40-day compounded tr_1d; long the top 3, rebalanced weekly.',
+    falsification: 'No excess over the S&P 500.',
+    reasoning: 'Momentum, for the promising label',
+  });
+  await judge.call('review_theory', { theory_id: p.theory_id, decision: 'approve', reasoning: 'Testable' });
+  assert.equal((await coder.call('submit_code', { theory_id: p.theory_id, code: GOOD })).passed, true);
+  const pe = await coder.call('evaluate_strategy', { theory_id: p.theory_id, params });
+  assert.ok(
+    pe.excess_vs_spx.excess_cagr > 0,
+    `the synthetic momentum beats the index: ${JSON.stringify(pe.excess_vs_spx)}`,
+  );
+  const promising = await judge.call('set_verdict', {
+    theory_id: p.theory_id,
+    verdict: 'failed',
+    reasoning: 'Not proven over the trials run.',
+  });
+  assert.deepEqual(
+    [promising.status, promising.mechanical, promising.gates_version],
+    ['promising', 'promising', proofOnly.version],
+  );
+  const pIdea = await ok(`/ideas?status=promising&limit=1000`);
+  assert.ok(pIdea.items.some((i: any) => i.ref === p.theory_id));
+  assert.ok(pIdea.kpis.promising >= 1);
+
   const fwd = await theorist.call('submit_theory', {
     title: 'Estimate revisions lead returns',
     hypothesis:

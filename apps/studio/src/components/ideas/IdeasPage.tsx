@@ -11,6 +11,7 @@ import {
   Search,
   Telescope,
   XCircle,
+  TrendingUp,
 } from 'lucide-react';
 import { api } from '../../api';
 import { KpiCard, Skeleton, Sparkline, StatusPill } from '../kit';
@@ -30,6 +31,7 @@ export function IdeasPage({ isAdmin }: { isAdmin: boolean }) {
 
 const STATUS_VIEWS: { key: string; label: string; status?: string }[] = [
   { key: 'winners', label: 'Successful & approved', status: 'successful,approved' },
+  { key: 'promising', label: 'Promising', status: 'promising' },
   { key: 'progress', label: 'In progress', status: 'in_progress' },
   { key: 'failed', label: 'Failed & rejected', status: 'failed,rejected_untestable,parked' },
   { key: 'all', label: 'All' },
@@ -100,6 +102,12 @@ function IdeasList({ search }: { search: string }) {
           label="Successful"
           value={k.successful}
           footnote="passed every gate"
+        />
+        <KpiCard
+          icon={<TrendingUp size={18} />}
+          label="Promising"
+          value={k.promising}
+          footnote="beat the S&P 500, not proven"
         />
         <KpiCard
           icon={<CheckCircle2 size={18} />}

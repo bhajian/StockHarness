@@ -52,7 +52,9 @@ const DOES: Record<string, { reads: string[]; writes: string[] }> = {
   },
   'judge (post-result)': {
     reads: ['theories in post-review with their evaluations', 'the success gates'],
-    writes: ['the verdict: successful (after the one-shot holdout) or failed; or send the code back'],
+    writes: [
+      'the verdict, set by the gates: successful (after the one-shot holdout), promising (beat the S&P 500, failed only the proof gates) or failed; or send the code back',
+    ],
   },
 };
 
@@ -211,7 +213,8 @@ export async function researchCycles(ownerId: string, limit = 50) {
         evaluated: count((x) => x._id.type === 'transition' && x._id.to === 'evaluated'),
         judged: count(
           (x) =>
-            x._id.type === 'transition' && ['successful', 'failed', 'revise_code'].includes(x._id.to ?? ''),
+            x._id.type === 'transition' &&
+            ['successful', 'promising', 'failed', 'revise_code'].includes(x._id.to ?? ''),
         ),
       },
     };

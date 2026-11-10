@@ -273,6 +273,9 @@ export function MapPage() {
               <IdeaStatus status="successful" /> {m.ideas.successful}
             </small>
             <small>
+              <IdeaStatus status="promising" /> {m.ideas.promising ?? 0}
+            </small>
+            <small>
               <IdeaStatus status="failed" /> {m.ideas.failed}
             </small>
             <small>

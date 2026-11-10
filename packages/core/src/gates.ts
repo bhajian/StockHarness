@@ -186,17 +186,31 @@ export function evaluateGates(gates: Gates, explore: Rec | undefined, holdout?: 
   }
   return out;
 }
+/**
+ * The gates that ask "is it proven?" rather than "did it work?" (#354): an idea that fails only these, and beat
+ * the S&P 500, is promising rather than failed.
+ */
+export const PROOF_GATES = ['deflated_sharpe', 'alpha_t'];
+export type Outcome = 'successful' | 'promising' | 'failed';
+/**
+ * The mechanical outcome of a verdict: successful when every gate passes (the holdout included); promising when
+ * the only exploration gates that fail are the proof gates, no holdout gate failed, and the excess over the S&P 500
+ * is positive; failed otherwise.
+ */
+export function outcomeOf(results: GateResult[], excessCagr: number | null | undefined): Outcome {
+  if (allGatesPass(results)) return 'successful';
+  const failing = results.filter((r) => !r.passed && r.gate !== 'holdout');
+  const proofOnly = failing.length > 0 && failing.every((r) => PROOF_GATES.includes(r.gate));
+  return proofOnly && typeof excessCagr === 'number' && excessCagr > 0 ? 'promising' : 'failed';
+}
 /** Every exploration gate passes (everything but the holdout). */
 export const exploreGatesPass = (results: GateResult[]) =>
   results.filter((r) => !r.gate.startsWith('holdout')).every((r) => r.passed);
 export const allGatesPass = (results: GateResult[]) => results.every((r) => r.passed);
 
 /** The Judge's verdict against the mechanical one: a downgrade needs reasons, an upgrade is refused. */
-export function verdictProblem(
-  requested: 'successful' | 'failed',
-  mechanical: 'successful' | 'failed',
-  reasoning: string,
-) {
+export function verdictProblem(requested: 'successful' | 'failed', mechanical: Outcome, reasoning: string) {
+  if (mechanical === 'promising') return undefined; // a label from the gates, whatever was requested (#354)
   if (requested === 'successful' && mechanical === 'failed')
     return 'The gates failed, so the verdict is failed: the Judge can downgrade a passing theory but never upgrade a failing one';
   if (requested === 'failed' && mechanical === 'successful' && reasoning.trim().length < 20)
