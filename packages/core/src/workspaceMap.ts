@@ -164,6 +164,7 @@ export async function workspaceMap(ownerId: string) {
   const ideas = {
     total: byStatus.reduce((a, x) => a + x.n, 0),
     successful: count('successful', 'approved'),
+    promising: count('promising'),
     failed: count('failed', 'rejected_untestable'),
     inProgress: count(
       'draft',
@@ -255,7 +256,7 @@ export async function workspaceMap(ownerId: string) {
       step: 'ideas',
       label: 'Ideas are coming out',
       done: ideas.total > 0,
-      detail: `${plural(ideas.total, 'idea')} · ${ideas.successful} successful · ${ideas.failed} failed · ${ideas.inProgress} in progress`,
+      detail: `${plural(ideas.total, 'idea')} · ${ideas.successful} successful · ${ideas.promising} promising · ${ideas.failed} failed · ${ideas.inProgress} in progress`,
       href: '/ideas?show=all',
     },
     {

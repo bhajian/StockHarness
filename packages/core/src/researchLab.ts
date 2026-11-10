@@ -13,7 +13,14 @@ export const BOARD_COLUMNS: { key: string; label: string; statuses: Theory['stat
   { key: 'evaluating', label: 'Evaluating', statuses: ['evaluated'] },
   { key: 'post_review', label: 'Post-review', statuses: ['post_review'] },
 ];
-const VERDICTS: Theory['status'][] = ['successful', 'failed', 'rejected_untestable', 'approved', 'parked'];
+const VERDICTS: Theory['status'][] = [
+  'successful',
+  'promising',
+  'failed',
+  'rejected_untestable',
+  'approved',
+  'parked',
+];
 const IN_FLIGHT: Theory['status'][] = BOARD_COLUMNS.flatMap((c) => c.statuses).filter((s) => s !== 'draft');
 /** Agent card ids in the research loop harness -> role. */
 export const roleOfNode = (nodeId?: string) =>
@@ -168,7 +175,7 @@ export async function researchCharts(ownerId: string, days = 30) {
   return {
     verdicts: {
       dates,
-      series: { successful, failed, rejected: series('rejected_untestable') },
+      series: { successful, promising: series('promising'), failed, rejected: series('rejected_untestable') },
     },
     successRate: {
       dates,

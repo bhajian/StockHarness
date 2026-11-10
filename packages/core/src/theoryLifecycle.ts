@@ -3,7 +3,8 @@
 //
 //   draft → pre_review → (revise → pre_review)* → rejected_untestable | approved_for_code
 //   approved_for_code → coding → (code_error → coding)* → evaluated → post_review → (revise_code → coding)*
-//   post_review → failed | successful → (human) approved | parked
+//   post_review → failed | promising | successful → (human) approved | parked
+//   promising (#354): beat the S&P 500 out of sample but failed only the proof gates (deflated Sharpe, alpha t)
 //
 // Revisions (revise and revise_code together) are capped per theory (3 by default); code attempts after an error
 // are capped too (5, the #153 fix loop). At a cap the way back is closed and the Judge must decide.
@@ -20,6 +21,7 @@ export const THEORY_STATES = [
   'post_review',
   'revise_code',
   'failed',
+  'promising',
   'successful',
   'approved',
   'parked',
@@ -27,7 +29,13 @@ export const THEORY_STATES = [
 export type TheoryState = (typeof THEORY_STATES)[number];
 export const THEORY_ROLES = ['theorist', 'judge', 'coder', 'evaluator', 'human'] as const;
 export type TheoryRole = (typeof THEORY_ROLES)[number];
-export const TERMINAL_STATES: TheoryState[] = ['rejected_untestable', 'failed', 'approved', 'parked'];
+export const TERMINAL_STATES: TheoryState[] = [
+  'rejected_untestable',
+  'failed',
+  'promising',
+  'approved',
+  'parked',
+];
 
 /** Legal transitions and who may make each one. */
 export const TRANSITIONS: Record<TheoryState, Partial<Record<TheoryState, TheoryRole[]>>> = {
@@ -45,9 +53,17 @@ export const TRANSITIONS: Record<TheoryState, Partial<Record<TheoryState, Theory
   // After the code-attempt cap, the theory goes to the Judge with the failure (#153).
   code_error: { coding: ['coder'], post_review: ['coder', 'judge', 'evaluator'] },
   evaluated: { post_review: ['evaluator', 'coder', 'judge'] },
-  post_review: { revise_code: ['judge'], failed: ['judge'], successful: ['judge'], revise: ['human'] },
+  post_review: {
+    revise_code: ['judge'],
+    failed: ['judge'],
+    promising: ['judge'],
+    successful: ['judge'],
+    revise: ['human'],
+  },
   revise_code: { coding: ['coder'] },
-  failed: { revise: ['human'] },
+  // A verdict given before #354 is relabelled from its recorded gates (the evaluator, once).
+  failed: { revise: ['human'], promising: ['evaluator'] },
+  promising: { parked: ['human'], failed: ['human'], revise: ['human'] },
   successful: { approved: ['human'], parked: ['human'], failed: ['human'], revise: ['human'] },
   approved: { parked: ['human'], failed: ['human'], revise: ['human'] },
   parked: { revise: ['human'] },

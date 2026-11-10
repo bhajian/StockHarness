@@ -92,3 +92,31 @@ test('estimate-based theories are forward_only; analyst_events proxies are not',
   assert.equal(G.isForwardOnly(['analyst_events.revision', 'features_ranked.mom_12_1_pct']), false);
   assert.equal(G.gatesSchema.parse({}).minDeflatedSharpe, 0.95);
 });
+
+test('outcome: successful, promising (beat the S&P 500, failed only the proof gates) or failed (#354)', () => {
+  const r = (failing: string[]) =>
+    [
+      'sharpe',
+      'deflated_sharpe',
+      'positive_excess_years',
+      'trades',
+      'holdings',
+      'alpha_t',
+      'no_blocking_warnings',
+    ]
+      .map((gate) => ({ gate, passed: !failing.includes(gate), value: 0, threshold: 0 }))
+      .concat([{ gate: 'holdout', passed: false, value: null, threshold: 0 } as any]);
+  const all = (failing: string[]) => r(failing).filter((g) => g.gate !== 'holdout');
+  assert.equal(G.outcomeOf(all([]), 0.05), 'successful');
+  assert.equal(G.outcomeOf(r(['deflated_sharpe', 'alpha_t']), 0.082), 'promising');
+  assert.equal(G.outcomeOf(r(['alpha_t']), 0.01), 'promising');
+  assert.equal(G.outcomeOf(r(['deflated_sharpe']), -0.01), 'failed', 'lost to the S&P 500');
+  assert.equal(G.outcomeOf(r(['deflated_sharpe', 'sharpe']), 0.05), 'failed', 'a performance gate failed');
+  assert.equal(G.outcomeOf(r(['alpha_t', 'positive_excess_years']), 0.05), 'failed');
+  assert.equal(G.outcomeOf(r(['deflated_sharpe']), null), 'failed', 'no excess known');
+  const holdoutFailed = all([]).concat([
+    { gate: 'holdout_excess', passed: false, value: -0.02, threshold: 0 },
+  ]);
+  assert.equal(G.outcomeOf(holdoutFailed, 0.05), 'failed', 'a failed holdout stays failed');
+  assert.equal(G.verdictProblem('successful', 'promising', ''), undefined, 'promising is the gates’ label');
+});

@@ -48,14 +48,21 @@ test('illegal transitions are refused with the legal next states', () => {
   assert.match(transitionProblem('pre_review', 'successful', 'judge', zero)!, /cannot move/);
   assert.match(transitionProblem('coding', 'successful', 'judge', zero)!, /cannot move/);
   // Terminal for the agents; a human can only send them back to the Theorist (#122).
+  // A promising idea (#354) may also be parked or failed by a person.
+  const humanMay = (s: string, to: string) =>
+    to === 'revise' || (s === 'promising' && ['parked', 'failed'].includes(to));
   for (const s of TERMINAL_STATES.filter((s) => s !== 'approved'))
     for (const to of THEORY_STATES)
-      if (to === 'revise') assert.equal(transitionProblem(s, to, 'human', zero), undefined, `${s} → revise`);
-      else assert.match(transitionProblem(s, to, 'human', zero)!, /cannot move/, `${s} → ${to}`);
+      if (humanMay(s, to)) assert.equal(transitionProblem(s, to, 'human', zero), undefined, `${s} → ${to}`);
+      else assert.match(transitionProblem(s, to, 'human', zero)!, /cannot move|Only the/, `${s} → ${to}`);
+  // A verdict from before #354 is relabelled by the evaluator only.
+  assert.equal(transitionProblem('failed', 'promising', 'evaluator', zero), undefined);
+  assert.match(transitionProblem('failed', 'promising', 'judge', zero)!, /Only the evaluator/);
   for (const s of TERMINAL_STATES)
     for (const role of ['theorist', 'judge', 'coder', 'evaluator'] as const)
       for (const to of THEORY_STATES)
-        assert.ok(transitionProblem(s, to, role, zero), `${role}: ${s} → ${to}`);
+        if (!(s === 'failed' && to === 'promising' && role === 'evaluator'))
+          assert.ok(transitionProblem(s, to, role, zero), `${role}: ${s} → ${to}`);
   assert.equal(transitionProblem('successful', 'failed', 'human', zero), undefined, 'a human can reject');
   assert.equal(
     transitionProblem('failed', 'revise', 'human', { revisions: 9, codeAttempts: 0 }),

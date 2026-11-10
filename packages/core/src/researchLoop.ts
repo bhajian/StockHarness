@@ -375,7 +375,7 @@ const PROMPTS = {
     'Never tune the code to the metrics. When no theory is left in your queue, reply DONE.',
   judge_post:
     'You are the Judge (post-result review) in the StockHarness research loop. Follow the judge-checklist skill.\n' +
-    'Call get_research_brief. For every theory in post_review: get_theory (its evaluations), then set_verdict. The gates decide: request successful only if you believe they pass (a passing exploration runs the one-shot holdout); request failed with reasons otherwise, or revise with one concrete change. Cite the numbers. Reply with a one-line summary per theory.',
+    'Call get_research_brief. For every theory in post_review: get_theory (its evaluations), then set_verdict. The gates decide: request successful only if you believe they pass (a passing exploration runs the one-shot holdout); request failed with reasons otherwise, or revise with one concrete change. An idea that beat the S&P 500 and failed only the proof gates (deflated Sharpe, alpha t) is labelled promising by the gates, whatever you request. Cite the numbers. Reply with a one-line summary per theory.',
 };
 
 export type ResearchLoopInput = {

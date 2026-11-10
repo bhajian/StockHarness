@@ -23,6 +23,7 @@ import {
   evaluateGates,
   exploreGatesPass,
   lockGates,
+  outcomeOf,
   verdictProblem,
 } from './gates.js';
 import { startHoldoutEvaluation } from './evaluations.js';
@@ -538,10 +539,16 @@ async function mechanicalVerdict(
       holdout_evaluation_id: holdout._id,
       next: 'The holdout run is still going: call set_verdict again in a minute.',
     };
-  const mechanical = allGatesPass(results) ? 'successful' : 'failed';
+  const mechanical = outcomeOf(results, explore?.record?.excess?.spx?.excess_cagr);
   const problem = verdictProblem(requested, mechanical, reasoning);
   if (problem) throw new HttpError(409, `${problem}. Gates v${gates.version}: ${failing(results)}`);
-  t = await transitionTheory(ownerId, t._id, requested, actorOf('judge', meta), reasoning, {
+  // Promising (#354) is the gates' label: it beat the S&P 500 but is not proven, whatever the Judge asked for.
+  const to = mechanical === 'promising' ? 'promising' : requested;
+  const why =
+    mechanical === 'promising' && requested !== 'successful'
+      ? `${reasoning}\n\nPromising by the gates: it beat the S&P 500; it failed only ${failingProof(results)}.`
+      : reasoning;
+  t = await transitionTheory(ownerId, t._id, to, actorOf('judge', meta), why, {
     gatesVersion: gates.version,
     mechanical,
     gates: results,
@@ -551,6 +558,11 @@ async function mechanicalVerdict(
   await lockGates(gates);
   return { ...brief(t), mechanical, gates_version: gates.version, gates: results };
 }
+const failingProof = (results: { gate: string; passed: boolean }[]) =>
+  results
+    .filter((r) => !r.passed && r.gate !== 'holdout')
+    .map((r) => r.gate.replace('_', ' '))
+    .join(' and ');
 const failing = (results: { gate: string; passed: boolean; value: unknown; threshold: unknown }[]) =>
   results
     .filter((r) => !r.passed)

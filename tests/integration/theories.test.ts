@@ -301,3 +301,71 @@ test('ResearchSettings YAML: models and skills by name, round trip', { skip: ski
   await collection<any>('providers').deleteMany({ ownerId: { $in: [A, B] } });
   await collection<any>('research_settings').deleteMany({ _id: { $in: [A, B] } });
 });
+
+test(
+  'verdicts from before #354 are relabelled promising from their recorded gates, once',
+  { skip: skipReason },
+  async () => {
+    const { relabelPromising } = await import('../../packages/core/src/verdictLabels.js');
+    const W = `th-relabel-${randomUUID()}`;
+    const gates = (failing: string[]) =>
+      [
+        'sharpe',
+        'deflated_sharpe',
+        'positive_excess_years',
+        'trades',
+        'holdings',
+        'alpha_t',
+        'no_blocking_warnings',
+      ]
+        .map((gate) => ({ gate, passed: !failing.includes(gate), value: 0, threshold: 0 }))
+        .concat([{ gate: 'holdout', passed: false, value: null, threshold: 'x' } as any]);
+    const decide = async (title: string, excess: number, failing: string[], mechanical = 'failed') => {
+      const t = await T.createTheory(
+        W,
+        { ...CONTENT, title, differsFrom: `relabel case: ${title}` },
+        theorist,
+        {
+          submit: true,
+        },
+      );
+      for (const [to, who] of [
+        ['approved_for_code', judge],
+        ['coding', coder],
+        ['evaluated', evaluator],
+        ['post_review', evaluator],
+      ] as const)
+        await T.transitionTheory(W, t._id, to, who, 'step');
+      const evaluationId = randomUUID();
+      await collection<any>('evaluations').insertOne({
+        _id: evaluationId,
+        ownerId: W,
+        status: 'succeeded',
+        mode: 'explore',
+        record: { excess: { spx: { excess_cagr: excess } } },
+      });
+      await T.transitionTheory(W, t._id, 'failed', judge, 'Not proven', {
+        gates: gates(failing),
+        mechanical,
+        evaluationId,
+      });
+      return t._id;
+    };
+    const beat = await decide('Beat the index, not proven', 0.082, ['deflated_sharpe', 'alpha_t']);
+    const lost = await decide('Lost to the index', -0.03, ['deflated_sharpe']);
+    const weak = await decide('Beat it, weak Sharpe', 0.02, ['deflated_sharpe', 'sharpe']);
+    const downgraded = await decide('Passed, the Judge downgraded', 0.05, [], 'successful');
+    assert.equal(await relabelPromising(W), 1);
+    assert.equal((await T.getTheory(W, beat)).status, 'promising');
+    const move = (await T.getTheory(W, beat)).history.at(-1)!;
+    assert.deepEqual([move.from, move.to, move.actor.role], ['failed', 'promising', 'evaluator']);
+    assert.match(
+      move.reasoning,
+      /beat the S&P 500 by 8\.2% a year and failed only the proof gates \(deflated sharpe and alpha t\)/,
+    );
+    for (const id of [lost, weak, downgraded]) assert.equal((await T.getTheory(W, id)).status, 'failed');
+    assert.equal(await relabelPromising(W), 0, 'once');
+    await collection('theories').deleteMany({ ownerId: W });
+    await collection('evaluations').deleteMany({ ownerId: W });
+  },
+);

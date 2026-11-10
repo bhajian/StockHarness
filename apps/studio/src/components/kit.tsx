@@ -13,6 +13,7 @@ import {
   PauseCircle,
   X,
   XCircle,
+  TrendingUp,
 } from 'lucide-react';
 
 type PillTone = 'green' | 'amber' | 'red' | 'blue' | 'gray' | 'outline' | 'magenta' | 'green-solid';
@@ -24,6 +25,8 @@ const PILL: Record<string, { tone: PillTone; icon: typeof Circle; spin?: boolean
   completed: { tone: 'green', icon: CheckCircle2 },
   ready: { tone: 'green', icon: CheckCircle2 },
   successful: { tone: 'green', icon: CheckCircle2 },
+  // #354: beat the S&P 500, not yet proven.
+  promising: { tone: 'amber', icon: TrendingUp },
   approved: { tone: 'green-solid', icon: CheckCircle2 },
   stale: { tone: 'amber', icon: AlertTriangle },
   warn: { tone: 'amber', icon: AlertTriangle },
