@@ -187,12 +187,16 @@ async function post(url: string, payload: unknown, headers: Record<string, strin
     let response: Response;
     try {
       const deadline = deadlineSignal(config.MODEL_REQUEST_TIMEOUT_SECONDS * 1000);
-      response = await safeFetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...headers },
-        body: JSON.stringify(payload),
-        signal: signal ? AbortSignal.any([deadline, signal]) : deadline,
-      });
+      response = await safeFetch(
+        url,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...headers },
+          body: JSON.stringify(payload),
+          signal: signal ? AbortSignal.any([deadline, signal]) : deadline,
+        },
+        { model: true },
+      );
     } catch (error) {
       if (signal?.aborted || !transientNetworkError(error)) throw error;
       if (last)
