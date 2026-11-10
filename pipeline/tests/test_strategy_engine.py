@@ -117,6 +117,20 @@ class ByName(unittest.TestCase):
         self.assertEqual([(x["security_id"], x["days_long"] > 0, x["days_short"] > 0) for x in rows], [("SEC_000003", False, True)])
 
 
+class FactorReads(unittest.TestCase):
+    def test_factor_data_is_read_once_however_often_the_eligible_names_change(self):
+        """#350: one features_ranked read per evaluation; a read per changed eligible list ran out of memory."""
+        days = synthetic.weekdays("2020-01-01", 300)
+        src, days = synthetic.market(n_sec=30, n_days=300, seed=3,
+                                     delist={"SEC_000004": days[150], "SEC_000009": days[200]})
+        calls = []
+        orig = src.find
+        src.find = lambda c, q=None, f=None: (calls.append(c), orig(c, q, f))[1]
+        r = run(MOMENTUM, src, days[70], days[-1])
+        self.assertEqual(calls.count("features_ranked"), 1)
+        self.assertIn("momentum", r["factors"]["factors"])
+
+
 class WalkForward(unittest.TestCase):
     def test_folds_per_calendar_year_and_warnings(self):
         src, days = synthetic.market(n_sec=20, n_days=600, seed=5, start="2021-06-01")
