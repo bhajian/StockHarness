@@ -27,6 +27,21 @@ class DataAccessError(PermissionError):
     """A read the point-in-time policy refuses (an unknown, current-only or out-of-range read)."""
 
 
+def _split_ids(flt):
+    """A filter that selects names (``security_id`` or ``symbol`` ``$in`` a list, the rest plain) -> (field, names,
+    the rest or None); else (None, None, flt)."""
+    if not isinstance(flt, dict):
+        return None, None, flt
+    for k in ("security_id", "symbol"):
+        v = flt.get(k)
+        if isinstance(v, dict) and set(v) == {"$in"} and isinstance(v["$in"], list):
+            rest = {x: y for x, y in flt.items() if x != k}
+            if any(x.startswith("$") for x in rest):
+                return None, None, flt
+            return k, v["$in"], rest or None
+    return None, None, flt
+
+
 def _minus_days(iso: str, n: int) -> str:
     return (date.fromisoformat(iso) - timedelta(days=n)).isoformat()
 
@@ -65,6 +80,7 @@ class PitReader:
         self.scope_tickers = list(scope_tickers) if scope_tickers else None
         self.max_lookback_days = max_lookback_days
         self._cache: dict[str, tuple] = {}
+        self._ids_cache: dict[str, dict] = {}
         self.stats = {"reads": 0, "rows": 0, "lookahead_attempts": 0, "refused": 0}
         self.columns_seen: dict[str, list[str]] = {}  # collection -> columns its rows have (for clear errors)
         self.missing_columns: dict[str, list[str]] = {}  # collection -> requested columns no row has (#251)
@@ -163,7 +179,11 @@ class PitReader:
         _check_filter(filter)
         if filter and _future_dates(filter, as_of):
             self.stats["lookahead_attempts"] += 1
-        frame, as_ofs, pit = self._load(collection, filter, columns)
+        ids_key, ids, rest = _split_ids(filter)
+        if ids is not None:
+            frame, as_ofs, pit = self._load_ids(collection, ids_key, ids, rest, columns)
+        else:
+            frame, as_ofs, pit = self._load(collection, filter, columns)
         self.stats["reads"] += 1
         if collection not in self.columns_seen or len(frame.columns) > len(self.columns_seen[collection]):
             self.columns_seen[collection] = sorted(str(c) for c in frame.columns)
@@ -173,5 +193,36 @@ class PitReader:
             hi = int(np.searchsorted(as_ofs, as_of, side="right"))
             lo = int(np.searchsorted(as_ofs, _minus_days(as_of, lookback_days), side="left")) if lookback_days else 0
             out = frame.iloc[lo:hi].reset_index(drop=True)
+        if ids is not None:
+            out = out[out[ids_key].isin(set(ids))].reset_index(drop=True) if ids_key in out.columns else out.iloc[0:0]
+            if columns and ids_key not in columns:
+                out = out.drop(columns=[ids_key])
         self.stats["rows"] += len(out)
         return out
+
+    def _load_ids(self, collection: str, ids_key: str, ids: list, rest: dict | None, columns: list[str] | None):
+        """Reads that select names (#356): one cache per collection and filter, grown by the names not loaded yet.
+
+        A filter of each date's universe (``security_id $in ctx.universe_ids``) changes every rebalance; as its own
+        cache entry each one reloaded the whole window and kept it (out of memory at top-500 scale).
+        """
+        import pandas as pd
+
+        cols = None if columns is None else list(dict.fromkeys([*columns, ids_key]))
+        key = json.dumps([collection, rest, cols, ids_key], sort_keys=True, default=str)
+        entry = self._ids_cache.setdefault(key, {"names": set(), "frame": None, "as_ofs": None, "pit": False})
+        missing = sorted(set(ids) - entry["names"])
+        if missing:
+            flt = {**(rest or {}), ids_key: {"$in": missing}}
+            part_key = json.dumps([collection, flt, cols], sort_keys=True, default=str)
+            frame, _, pit = self._load(collection, flt, cols)
+            self._cache.pop(part_key, None)  # the part lives on in the grown frame only
+            entry["names"].update(missing)
+            entry["pit"] = pit
+            grown = frame if entry["frame"] is None else pd.concat([entry["frame"], frame], ignore_index=True)
+            if pit and len(grown):
+                grown = grown.sort_values("as_of_date", kind="mergesort").reset_index(drop=True)
+            entry["frame"] = grown
+            entry["as_ofs"] = grown["as_of_date"].to_numpy(dtype=str) if pit and len(grown) else None
+        frame = entry["frame"] if entry["frame"] is not None else pd.DataFrame(columns=cols or [])
+        return frame, entry["as_ofs"], entry["pit"]

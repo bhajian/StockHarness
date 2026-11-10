@@ -90,6 +90,13 @@ def _universe_on(source, d: str, scope: list[str] | None, days: list[str], top: 
     return sorted(scope) if scope else []
 
 
+def ensure_indexes(source) -> None:
+    """universe_daily is read by date on every rebalance (twice): without this index each read scanned every row."""
+    ensure = getattr(source, "ensure_index", None)
+    if ensure:
+        ensure("universe_daily", [("date", 1), ("in_universe", 1)])
+
+
 def universe_top(params: dict) -> int | None:
     """params.universe.top_by_market_cap (#300), validated."""
     top = (params.get("universe") or {}).get("top_by_market_cap")
@@ -203,6 +210,7 @@ def evaluate(code: str, *, source, policies: dict, params: dict, config: dict | 
         raise EvaluationError("params.start and params.end (YYYY-MM-DD, start <= end) are required")
     if readable_end and end > readable_end:
         raise EvaluationError(f"end {end} is past the readable end {readable_end} (holdout)")
+    ensure_indexes(source)
     days = trading_days(source, start, end)
     if len(days) < 3:
         raise EvaluationError(f"fewer than 3 trading days between {start} and {end}")

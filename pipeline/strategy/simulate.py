@@ -27,8 +27,8 @@ from . import EVALUATOR_VERSION, contract, metrics
 from .broker import PaperBroker
 from .config import load_config
 from .context import StrategyContext
-from .engine import (EvaluationError, _current, _universe_on, plan_books, resolve_scope, top_scope, trading_days,
-                     universe_top)
+from .engine import (EvaluationError, _current, _universe_on, ensure_indexes, plan_books, resolve_scope, top_scope,
+                     trading_days, universe_top)
 from .reader import PitReader
 
 SIMULATOR_VERSION = "1.0.0"
@@ -95,6 +95,7 @@ def simulate(ideas: list[dict], *, source, policies: dict, params: dict, config:
         raise EvaluationError("params.start and params.end (YYYY-MM-DD, start <= end) are required")
     if readable_end and end > readable_end:
         raise EvaluationError(f"end {end} is past the readable end {readable_end} (holdout)")
+    ensure_indexes(source)
     days = trading_days(source, start, end)
     if len(days) < 3:
         raise EvaluationError(f"fewer than 3 trading days between {start} and {end}")

@@ -86,6 +86,13 @@ class MongoSource:
         proj["_id"] = 0
         return list(self._db[collection].find(flt or {}, proj))
 
+    def ensure_index(self, collection: str, keys: list[tuple[str, int]]) -> None:
+        """The indexes the evaluator's own queries need (#356: universe_daily by date was a 5M-row scan)."""
+        try:
+            self._db[collection].create_index(keys)
+        except Exception:  # noqa: BLE001 - an index is an optimisation; the query still works without it
+            pass
+
     def sample_fields(self, collection: str) -> list[str]:
         row = self._db[collection].find_one({}, {"_id": 0})
         return sorted(row) if row else []
