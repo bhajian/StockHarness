@@ -14,7 +14,7 @@ import {
   type TheoryActor,
 } from './theories.js';
 import { searchTheories } from './theoryMemory.js';
-import { getEvaluation, startEvaluation, type Evaluation } from './evaluations.js';
+import { evaluations, getEvaluation, startEvaluation, type Evaluation } from './evaluations.js';
 import { agentSummary, testStrategy } from './strategyTools.js';
 import type { TheoryRole } from './theoryLifecycle.js';
 import {
@@ -436,6 +436,21 @@ export async function evaluateForTheory(
   if (args.plugin && args.plugin !== t.plugin.name)
     throw new HttpError(400, `T-${t.number}'s plugin is ${t.plugin.name}`);
   const version = Number(args.version) || Math.max(...t.plugin.versions);
+  // #373: one evaluation per code version at a time. A call that comes back while the first is still running
+  // (the 50 s wait ran out) gets that evaluation, not a second one: a duplicate is a wasted trial.
+  const running = await evaluations().findOne({
+    ownerId,
+    theoryId: t._id,
+    pluginVersion: version,
+    mode: 'explore',
+    status: 'running',
+  });
+  if (running)
+    return {
+      ...agentSummary(running),
+      theory: brief(t),
+      next: `T-${t.number} v${version} is already being evaluated (${running._id}): call get_evaluation with that id in a minute; do not start another.`,
+    };
   const { evaluation, done } = await startEvaluation(ownerId, {
     plugin: t.plugin.name,
     version,

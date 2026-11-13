@@ -553,3 +553,33 @@ test('idea profiles: equity long / short / long-short now, options once they can
   assert.match(exported, /profiles:\n\s+- equity_short\n\s+- options_covered_call/);
   await ok('/research/settings', { profiles: [], maxCoderBacklog: 8 }, 'PUT');
 });
+
+test('a second evaluate_strategy while the first is still running returns it, not a new trial (#373)', async () => {
+  const { theorist, judge, coder } = clients;
+  await ok('/research/settings', { maxCoderBacklog: 200 }, 'PUT');
+  const t = await theorist.call('submit_theory', {
+    title: 'Thirty-day leaders, evaluated once',
+    hypothesis: 'The best 30-day performers keep outperforming over the next month in liquid names.',
+    signal_logic: 'Rank by 30-day compounded tr_1d; long the top 3, rebalanced weekly.',
+    falsification: 'No excess over the S&P 500.',
+    data_needed: ['prices_daily.tr_1d'],
+    reasoning: 'Duplicate evaluation test',
+  });
+  await judge.call('review_theory', { theory_id: t.theory_id, decision: 'approve', reasoning: 'Testable' });
+  const code = GOOD.replace('lookback_days=40', 'lookback_days=30');
+  assert.equal((await coder.call('submit_code', { theory_id: t.theory_id, code })).passed, true);
+  const before = (await ok('/evaluations')).trials;
+  const first = coder.call('evaluate_strategy', { theory_id: t.theory_id, params });
+  let again: any;
+  for (let i = 0; i < 40 && !again?.next; i++) {
+    await new Promise((r) => setTimeout(r, 250));
+    again = await coder.call('evaluate_strategy', { theory_id: t.theory_id, params });
+    if (again?.theory?.status && again.theory.status !== 'coding') break;
+  }
+  assert.match(again.next ?? '', /already being evaluated/, JSON.stringify(again).slice(0, 300));
+  const done = await first;
+  assert.equal(done.status, 'succeeded', JSON.stringify(done).slice(0, 300));
+  assert.equal(again.evaluation_id, done.evaluation_id, 'the same evaluation');
+  assert.equal((await ok('/evaluations')).trials, before + 1, 'one trial, not two');
+  await ok('/research/settings', { maxCoderBacklog: 8 }, 'PUT');
+});
