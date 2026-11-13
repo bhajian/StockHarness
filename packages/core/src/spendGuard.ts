@@ -17,6 +17,11 @@ export const MODEL_PRICES: Record<string, { input: number; output: number }> = {
   'gemini-3.1-flash-lite': { input: 0.25, output: 1.5 },
   'gemini-2.5-flash': { input: 0.3, output: 2.5 },
   'gemini-2.5-flash-lite': { input: 0.1, output: 0.4 },
+  // DeepSeek on Baseten Model APIs (baseten.co/pricing, 2026-11-13); keys are the model ids, lowercased.
+  'deepseek-ai/deepseek-v4-pro-0813': { input: 1.32, output: 3.96 },
+  'deepseek-ai/deepseek-v4.1-flash-1017': { input: 0.3, output: 1.2 },
+  'deepseek-ai/deepseek-v4.1-flash': { input: 0.3, output: 1.2 },
+  'deepseek-ai/deepseek-v4-flash-0731': { input: 0.13, output: 0.26 },
 };
 /** A model missing from the table is priced high, so a cap errs on the safe side. */
 export const UNKNOWN_PRICE = { input: 3, output: 15 };

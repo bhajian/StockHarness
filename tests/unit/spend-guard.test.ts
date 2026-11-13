@@ -29,3 +29,8 @@ test("a day of yesterday's dev cycles: 2.35M in, 82k out on Gemini 3.8 Flash is 
   const usd = usdOf(2_351_024, 81_634, priceOf('gemini-3.8-flash'));
   assert.ok(Math.abs(usd - 2.07) < 0.01, String(usd));
 });
+
+test('DeepSeek on Baseten is priced from the table, case-insensitively', async () => {
+  const { priceOf } = await import('../../packages/core/src/spendGuard.js');
+  assert.deepEqual(priceOf('deepseek-ai/DeepSeek-V4-Pro-0813'), { input: 1.32, output: 3.96 });
+});
