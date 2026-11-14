@@ -583,3 +583,28 @@ test('a second evaluate_strategy while the first is still running returns it, no
   assert.equal((await ok('/evaluations')).trials, before + 1, 'one trial, not two');
   await ok('/research/settings', { maxCoderBacklog: 8 }, 'PUT');
 });
+
+test('a person parks an idea in progress and resumes it (#379)', async () => {
+  const { theorist, judge } = clients;
+  await ok('/research/settings', { maxCoderBacklog: 200 }, 'PUT');
+  const t = await theorist.call('submit_theory', {
+    title: 'Fifteen-day leaders, set aside',
+    hypothesis: 'The best 15-day performers keep outperforming over the next two weeks in liquid names.',
+    signal_logic: 'Rank by 15-day compounded tr_1d; long the top 3, rebalanced weekly.',
+    falsification: 'No excess over the S&P 500.',
+    data_needed: ['prices_daily.tr_1d'],
+    reasoning: 'Park test',
+  });
+  await judge.call('review_theory', { theory_id: t.theory_id, decision: 'approve', reasoning: 'Testable' });
+  const parked = await ok(`/ideas/${t.theory_id}/actions`, {
+    action: 'park',
+    comment: 'Set aside for a model comparison',
+  });
+  assert.equal(parked.status, 'parked');
+  assert.equal(parked.actions.resume, true);
+  const queue = (await clients.coder.call('get_research_brief', {})).queue.map((q: any) => q.theory_id);
+  assert.ok(!queue.includes(t.theory_id), 'a parked idea leaves the Coder queue');
+  const back = await ok(`/ideas/${t.theory_id}/actions`, { action: 'resume' });
+  assert.equal(back.status, 'approved_for_code');
+  await ok('/research/settings', { maxCoderBacklog: 8 }, 'PUT');
+});

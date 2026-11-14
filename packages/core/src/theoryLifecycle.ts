@@ -40,18 +40,20 @@ export const TERMINAL_STATES: TheoryState[] = [
 /** Legal transitions and who may make each one. */
 export const TRANSITIONS: Record<TheoryState, Partial<Record<TheoryState, TheoryRole[]>>> = {
   draft: { pre_review: ['theorist', 'human'] },
+  // #379: a person may set any idea in progress aside (parked), e.g. to start a fresh comparison, and bring it back.
   pre_review: {
     revise: ['judge'],
     rejected_untestable: ['judge'],
     approved_for_code: ['judge'],
+    parked: ['human'],
   },
-  revise: { pre_review: ['theorist', 'human'] },
+  revise: { pre_review: ['theorist', 'human'], parked: ['human'] },
   // Humans may send any reviewed theory back to the Theorist with a comment (#122), and reject a successful one.
   rejected_untestable: { revise: ['human'] },
-  approved_for_code: { coding: ['coder'] },
-  coding: { code_error: ['coder', 'evaluator'], evaluated: ['evaluator', 'coder'] },
+  approved_for_code: { coding: ['coder'], parked: ['human'] },
+  coding: { code_error: ['coder', 'evaluator'], evaluated: ['evaluator', 'coder'], parked: ['human'] },
   // After the code-attempt cap, the theory goes to the Judge with the failure (#153).
-  code_error: { coding: ['coder'], post_review: ['coder', 'judge', 'evaluator'] },
+  code_error: { coding: ['coder'], post_review: ['coder', 'judge', 'evaluator'], parked: ['human'] },
   evaluated: { post_review: ['evaluator', 'coder', 'judge'] },
   post_review: {
     revise_code: ['judge'],
@@ -59,14 +61,15 @@ export const TRANSITIONS: Record<TheoryState, Partial<Record<TheoryState, Theory
     promising: ['judge'],
     successful: ['judge'],
     revise: ['human'],
+    parked: ['human'],
   },
-  revise_code: { coding: ['coder'] },
+  revise_code: { coding: ['coder'], parked: ['human'] },
   // A verdict given before #354 is relabelled from its recorded gates (the evaluator, once).
   failed: { revise: ['human'], promising: ['evaluator'] },
   promising: { parked: ['human'], failed: ['human'], revise: ['human'] },
   successful: { approved: ['human'], parked: ['human'], failed: ['human'], revise: ['human'] },
   approved: { parked: ['human'], failed: ['human'], revise: ['human'] },
-  parked: { revise: ['human'] },
+  parked: { revise: ['human'], approved_for_code: ['human'] },
 };
 
 export type LifecycleCaps = { maxRevisions: number; maxCodeAttempts: number };

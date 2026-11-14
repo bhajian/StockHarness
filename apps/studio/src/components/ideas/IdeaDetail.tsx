@@ -74,7 +74,7 @@ export function IdeaDetail({ id, tab, isAdmin }: { id: string; tab: string; isAd
     try {
       setIdea(await send(`/ideas/${t.id}/actions`, { action, comment }));
       setNotice(
-        `${idea.ref} is now ${STATUS_LABEL[{ approve: 'approved', park: 'parked', reject: 'failed', send_back: 'revise' }[action]!]?.toLowerCase()}.`,
+        `${idea.ref} is now ${STATUS_LABEL[{ approve: 'approved', park: 'parked', reject: 'failed', send_back: 'revise', resume: 'approved_for_code' }[action]!]?.toLowerCase()}.`,
       );
       setDialog(null);
     } catch (e: any) {
@@ -151,6 +151,11 @@ export function IdeaDetail({ id, tab, isAdmin }: { id: string; tab: string; isAd
           {isAdmin && idea.actions.approve && (
             <button type="button" className="button primary" disabled={!!busy} onClick={() => act('approve')}>
               <Check size={14} /> Approve
+            </button>
+          )}
+          {isAdmin && idea.actions.resume && (
+            <button type="button" className="button" disabled={!!busy} onClick={() => act('resume')}>
+              <PlayCircle size={14} /> Resume
             </button>
           )}
           {isAdmin && idea.actions.park && (
