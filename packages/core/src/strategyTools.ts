@@ -198,6 +198,14 @@ type TestArgs = {
  * a sanity summary. Never metrics, and never a trial. With `plugin`, the code is saved as that plugin's next
  * version and the outcome recorded on it, so every attempt is in the version history.
  */
+/** The holdings gate and the research scope (top N, or the symbols list); the job resolves its real size. */
+async function testChecks(ownerId: string) {
+  const { activeGates } = await import('./gates.js');
+  const { researchSettings } = await import('./researchLoop.js');
+  const [g, s] = await Promise.all([activeGates(ownerId), researchSettings(ownerId)]);
+  const scope = s.scope?.kind === 'top_market_cap' ? { top: s.scope.top } : { symbols: s.evaluationSymbols };
+  return { min_holdings: g.gates.minHoldings, scope };
+}
 export async function testStrategy(ownerId: string, args: TestArgs, execute: typeof runCodeJob = runCodeJob) {
   if (typeof args?.code !== 'string' || !args.code.trim()) throw new HttpError(400, 'code is required');
   const readableEnd = (await evaluatorSettings(ownerId)).readableEnd ?? (await latestPriceDate(ownerId));
@@ -239,6 +247,8 @@ export async function testStrategy(ownerId: string, args: TestArgs, execute: typ
           ...(args.symbols ? { symbols: args.symbols } : {}),
           ...(args.dates ? { dates: args.dates } : {}),
           ...(args.plugin_params ? { plugin_params: args.plugin_params } : {}),
+          // #377: what the evaluation will need, so the test fails a book that would fail its gates.
+          checks: await testChecks(ownerId),
         },
       },
       timeoutSeconds: 240,
