@@ -77,3 +77,61 @@ class TestStrategy(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def run_checked(code, checks):
+    src, days = synthetic.market(n_sec=30, n_days=300, seed=2)
+    return job.run({"action": "test", "code": code, "policies": synthetic.POLICIES, "readable_end": days[-1],
+                    "params": {"checks": checks}}, src)
+
+
+class BookChecks(unittest.TestCase):
+    """#377: a book the evaluation would fail on holdings or empty dates fails the test, before a trial."""
+
+    CHECKS = {"min_holdings": 10, "scope_size": 500}
+
+    def codes(self, r):
+        return [w["code"] for w in r["test"]["warnings"]]
+
+    def test_a_broad_book_passes(self):
+        r = run_checked(GOOD.replace('"top_n": 5', '"top_n": 12'), self.CHECKS)
+        self.assertTrue(r["test"]["ok"], r["test"]["warnings"])
+
+    def test_top_n_below_the_holdings_gate_fails(self):
+        r = run_checked(GOOD, self.CHECKS)  # top_n 5 < 10
+        self.assertFalse(r["test"]["ok"])
+        self.assertIn("book_below_holdings_gate", self.codes(r))
+        both = run_checked(GOOD.replace('"side": "long"', '"side": "long_short"'), self.CHECKS)
+        self.assertNotIn("book_below_holdings_gate", self.codes(both), "long/short holds 2 × top_n")
+
+    def test_a_signal_that_scores_too_few_names_fails(self):
+        # One name of the sample scores: about 25 of the scope's 500, not enough for a 30-name book.
+        thin = GOOD.replace('"top_n": 5', '"top_n": 30').replace(
+            "for s, g in f.groupby(\"security_id\")}", "for s, g in f.groupby(\"security_id\") if s == \"SEC_000000\"}")
+        r = run_checked(thin, self.CHECKS)
+        codes = self.codes(r)
+        self.assertFalse(r["test"]["ok"], codes)
+        self.assertTrue("thin_signal" in codes or "empty_on_some_dates" in codes, codes)
+
+    def test_an_empty_date_now_fails(self):
+        gated = GOOD.replace('"top_n": 5', '"top_n": 12').replace(
+            "    f = ctx.read_df", "    if ctx.date.endswith(\"5\"):\n        return {}\n    f = ctx.read_df")
+        r = run_checked(gated, self.CHECKS)
+        if any(d["usable"] == 0 for d in r["test"]["dates"]):
+            self.assertFalse(r["test"]["ok"])
+            self.assertIn("empty_on_some_dates", self.codes(r))
+
+    def test_a_tiny_scope_is_not_held_to_the_holdings_gate(self):
+        r = run_checked(GOOD, {"min_holdings": 10, "scope_size": 8})
+        self.assertNotIn("book_below_holdings_gate", self.codes(r))
+
+    def test_the_scope_is_sized_from_the_data(self):
+        # Top 500 of a 30-name market is 30 names; symbols this database does not have count for nothing.
+        top = run_checked(GOOD, {"min_holdings": 10, "scope": {"top": 500}})
+        self.assertIn("book_below_holdings_gate", self.codes(top))
+        none = run_checked(GOOD, {"min_holdings": 10, "scope": {"symbols": ["AAPL", "MSFT"]}})
+        self.assertTrue(none["test"]["ok"], none["test"]["warnings"])
+
+    def test_without_checks_the_old_rules_apply(self):
+        r = run(GOOD)[0]
+        self.assertTrue(r["test"]["ok"])
