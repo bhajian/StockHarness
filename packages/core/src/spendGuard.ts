@@ -22,6 +22,9 @@ export const MODEL_PRICES: Record<string, { input: number; output: number }> = {
   'deepseek-ai/deepseek-v4.1-flash-1017': { input: 0.3, output: 1.2 },
   'deepseek-ai/deepseek-v4.1-flash': { input: 0.3, output: 1.2 },
   'deepseek-ai/deepseek-v4-flash-0731': { input: 0.13, output: 0.26 },
+  // Kimi on Baseten Model APIs (baseten.co/pricing, 2026-11-14).
+  'moonshotai/kimi-k3.1-pro': { input: 2, output: 10 },
+  'moonshotai/kimi-k3': { input: 3, output: 15 },
 };
 /** A model missing from the table is priced high, so a cap errs on the safe side. */
 export const UNKNOWN_PRICE = { input: 3, output: 15 };
