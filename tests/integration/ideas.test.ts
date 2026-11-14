@@ -245,7 +245,7 @@ test('ideas: list, detail, debate, code, actions, reproduce, compare, export', a
   assert.equal(idea.explore.recordHash.startsWith('sha256:'), true);
   assert.equal(idea.holdoutEvaluation.mode, 'holdout');
   assert.ok(idea.models.judge?.includes('fixture:judge'));
-  assert.deepEqual(idea.actions, { approve: true, park: true, reject: true, sendBack: true });
+  assert.deepEqual(idea.actions, { approve: true, park: true, reject: true, sendBack: true, resume: false });
 
   const debate = await ok('/ideas/T-1/debate');
   const verdict = debate.find((d: any) => d.to === 'successful');

@@ -65,7 +65,7 @@ ideasRouter.get('/ideas/:id/code', async (req, res) => {
   res.json(await ideaCode(req.principal!.tenantId, String(req.params.id), num(req.query.version)));
 });
 const actionInput = z.object({
-  action: z.enum(['approve', 'park', 'reject', 'send_back']),
+  action: z.enum(['approve', 'park', 'reject', 'send_back', 'resume']),
   comment: z.string().max(8000).default(''),
 });
 ideasRouter.post('/ideas/:id/actions', async (req, res) => {

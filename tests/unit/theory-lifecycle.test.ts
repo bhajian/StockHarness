@@ -50,7 +50,9 @@ test('illegal transitions are refused with the legal next states', () => {
   // Terminal for the agents; a human can only send them back to the Theorist (#122).
   // A promising idea (#354) may also be parked or failed by a person.
   const humanMay = (s: string, to: string) =>
-    to === 'revise' || (s === 'promising' && ['parked', 'failed'].includes(to));
+    to === 'revise' ||
+    (s === 'promising' && ['parked', 'failed'].includes(to)) ||
+    (s === 'parked' && to === 'approved_for_code'); // #379: a parked idea can go back to the Coder's queue
   for (const s of TERMINAL_STATES.filter((s) => s !== 'approved'))
     for (const to of THEORY_STATES)
       if (humanMay(s, to)) assert.equal(transitionProblem(s, to, 'human', zero), undefined, `${s} → ${to}`);
@@ -110,4 +112,19 @@ test('every state appears in the table, and every target is a state', () => {
   assert.deepEqual(Object.keys(TRANSITIONS).sort(), [...THEORY_STATES].sort());
   for (const targets of Object.values(TRANSITIONS))
     for (const to of Object.keys(targets)) assert.ok(THEORY_STATES.includes(to as TheoryState), to);
+});
+
+test('a person may park an idea in progress and bring it back (#379)', () => {
+  for (const s of [
+    'pre_review',
+    'revise',
+    'approved_for_code',
+    'coding',
+    'code_error',
+    'post_review',
+    'revise_code',
+  ] as const)
+    assert.equal(transitionProblem(s, 'parked', 'human', zero), undefined, `${s} → parked`);
+  assert.ok(transitionProblem('approved_for_code', 'parked', 'judge', zero), 'only a person parks');
+  assert.equal(transitionProblem('parked', 'approved_for_code', 'human', zero), undefined);
 });

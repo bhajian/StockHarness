@@ -239,7 +239,20 @@ export function humanActions(t: Pick<Theory, 'status'>) {
   const s = t.status;
   return {
     approve: s === 'successful',
-    park: s === 'successful' || s === 'approved' || s === 'promising',
+    park:
+      s === 'successful' ||
+      s === 'approved' ||
+      s === 'promising' ||
+      [
+        'pre_review',
+        'revise',
+        'approved_for_code',
+        'coding',
+        'code_error',
+        'post_review',
+        'revise_code',
+      ].includes(s),
+    resume: s === 'parked',
     reject: s === 'successful' || s === 'approved' || s === 'promising',
     sendBack: [
       'successful',
@@ -406,7 +419,7 @@ export async function ideaCode(ownerId: string, id: string, version?: number) {
 }
 
 // --- people act on ideas (#122) -------------------------------------------------------------------------------
-export type IdeaAction = 'approve' | 'park' | 'reject' | 'send_back';
+export type IdeaAction = 'approve' | 'park' | 'reject' | 'send_back' | 'resume';
 export async function actOnIdea(
   ownerId: string,
   id: string,
@@ -415,10 +428,16 @@ export async function actOnIdea(
   userId: string,
 ) {
   const t = await getTheory(ownerId, id);
-  const to = ({ approve: 'approved', park: 'parked', reject: 'failed', send_back: 'revise' } as const)[
-    action
-  ];
-  if (!to) throw new HttpError(400, 'action must be approve, park, reject or send_back');
+  const to = (
+    {
+      approve: 'approved',
+      park: 'parked',
+      reject: 'failed',
+      send_back: 'revise',
+      resume: 'approved_for_code', // #379: a parked idea back in the Coder's queue
+    } as const
+  )[action];
+  if (!to) throw new HttpError(400, 'action must be approve, park, reject, send_back or resume');
   const text = comment.trim();
   if ((action === 'send_back' || action === 'reject') && text.length < 5)
     throw new HttpError(

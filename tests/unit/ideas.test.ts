@@ -35,17 +35,21 @@ test('what a person can do depends on the status', () => {
     park: true,
     reject: true,
     sendBack: true,
+    resume: false,
   });
   assert.deepEqual(humanActions({ status: 'failed' }), {
     approve: false,
     park: false,
     reject: false,
     sendBack: true,
+    resume: false,
   });
+  // #379: an idea in progress can be set aside.
   assert.deepEqual(humanActions({ status: 'coding' }), {
     approve: false,
-    park: false,
+    park: true,
     reject: false,
     sendBack: false,
+    resume: false,
   });
 });
