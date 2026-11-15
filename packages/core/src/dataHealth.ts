@@ -105,11 +105,16 @@ const DAILY_MARKET_SERIES = new Set(['treasury_rates', 'sector_performance']);
  * so they are fresh when their producer last succeeded within its cadence.
  */
 export function isDailySeries(
-  e: Pick<CatalogEntry, 'layer' | 'grain' | 'timeSemantics' | 'producedBy'>,
+  e: Pick<CatalogEntry, 'layer' | 'grain' | 'timeSemantics' | 'producedBy'> & { primaryKey?: string[] },
   /** The producing sync's schedule interval (minutes), when it has an enabled schedule. */
   everyMinutes?: number,
 ) {
-  if (e.layer === 2) return e.timeSemantics.status !== 'static' && /trading (day|date)/i.test(e.grain);
+  // Layer 2: documented as one row per trading day, or keyed by `date` (a user transform may not say, #409).
+  if (e.layer === 2)
+    return (
+      e.timeSemantics.status !== 'static' &&
+      (/trading (day|date)/i.test(e.grain) || Boolean(e.primaryKey?.includes('date')))
+    );
   const def = catalogById.get(e.producedBy[0]?.dataset ?? '');
   if (!def || def.snapshotDated || def.scope === 'feed') return false;
   if (def.incremental !== 'timeseries' && !DAILY_MARKET_SERIES.has(def.id)) return false;
