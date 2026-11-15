@@ -75,3 +75,50 @@ test('Layer 2 tables with one row per trading day are; static and other grains a
 test('collections with no known producer are not', () => {
   assert.equal(isDailySeries({ ...l1('x'), layer: null, producedBy: [] }, DAY), false);
 });
+
+test('gap strip: sessions before today, missing and partial ones marked (#395)', async () => {
+  const { gapCells, gapSummary } = await import('../../packages/core/src/dataHealth.js');
+  const expected = ['2026-11-09', '2026-11-10', '2026-11-11', '2026-11-12', '2026-11-13', '2026-11-16'];
+  const rows = new Map<string, number | null>([
+    ['2026-11-09', 3300],
+    ['2026-11-10', 3310],
+    ['2026-11-11', 300], // a run that only reached a tenth of the symbols
+    ['2026-11-13', 3305],
+  ]);
+  const cells = gapCells(expected, rows, '2026-11-16');
+  assert.deepEqual(
+    cells.map((c) => [c.date, c.rows, Boolean(c.partial)]),
+    [
+      ['2026-11-09', 3300, false],
+      ['2026-11-10', 3310, false],
+      ['2026-11-11', 300, true],
+      ['2026-11-12', 0, false],
+      ['2026-11-13', 3305, false],
+    ],
+    "today's session is not a gap yet",
+  );
+  assert.deepEqual(gapSummary(cells), { missing: 1, partial: 1 });
+});
+
+test('coverage basis: listed names for current-only data, everyone for history (#395)', async () => {
+  const { coverageBasis } = await import('../../packages/core/src/schemaCatalog.js');
+  const { catalogById } = await import('../../packages/core/src/datasetCatalog.js');
+  for (const id of [
+    'company_profiles',
+    'shares_float',
+    'stock_peers',
+    'analyst_estimates',
+    'grades_consensus',
+  ])
+    assert.equal(coverageBasis(catalogById.get(id)!), 'active', id);
+  for (const id of [
+    'eod_prices',
+    'historical_market_cap',
+    'income_statement',
+    'dividends_history',
+    'key_metrics',
+  ])
+    assert.equal(coverageBasis(catalogById.get(id)!), 'all', id);
+  assert.match(catalogById.get('dividends_history')!.sparse!, /dividend/);
+  assert.equal(catalogById.get('eod_prices')!.sparse, undefined);
+});

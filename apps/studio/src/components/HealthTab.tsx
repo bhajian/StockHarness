@@ -12,18 +12,20 @@ type Go = (r: DatasetsRoute) => void;
 const PILL = { fresh: 'fresh', stale: 'stale', failed: 'failed', unknown: 'pending' } as const;
 const ORDER = { failed: 0, stale: 1, unknown: 2, fresh: 3 };
 
-function GapStrip({ cells }: { cells: { date: string; rows: number | null }[] }) {
+function GapStrip({ cells }: { cells: { date: string; rows: number | null; partial?: boolean }[] }) {
+  const missing = cells.filter((c) => !c.rows).length;
+  const partial = cells.filter((c) => c.partial).length;
   return (
     <span
       className="gap-strip"
       role="img"
-      aria-label={`${cells.filter((c) => !c.rows).length} missing of ${cells.length} sessions`}
+      aria-label={`${missing} missing and ${partial} partial of ${cells.length} sessions`}
     >
       {cells.map((c) => (
         <i
           key={c.date}
-          className={c.rows ? 'has' : 'gap'}
-          title={`${c.date}: ${c.rows ? `${c.rows.toLocaleString()} rows` : 'no rows'}`}
+          className={!c.rows ? 'gap' : c.partial ? 'partial' : 'has'}
+          title={`${c.date}: ${c.rows ? `${c.rows.toLocaleString()} rows${c.partial ? ' (far fewer than usual)' : ''}` : 'no rows'}`}
         />
       ))}
     </span>
@@ -48,6 +50,8 @@ function GapCell({ row }: { row: HealthRow }) {
     return () => clearInterval(t);
   }, [computing, row.collection]);
   if (cells) return <GapStrip cells={cells} />;
+  // Gaps are about trading sessions: weekly, monthly, period-end and feed data have none (#395).
+  if (row.gapsApplicable === false) return <span className="muted-line">not daily</span>;
   return (
     <Button
       variant="ghost"
@@ -86,7 +90,7 @@ export function HealthTab({ go, isAdmin = false }: { go: Go; isAdmin?: boolean }
             r.freshness !== 'fresh' ||
             r.dq.error ||
             r.caveats.blocking ||
-            (r.gaps ?? []).some((c) => !c.rows),
+            (r.gaps ?? []).some((c) => !c.rows || c.partial),
         )
         .sort(
           (a, b) =>
@@ -136,6 +140,12 @@ export function HealthTab({ go, isAdmin = false }: { go: Go; isAdmin?: boolean }
           label="Drift alerts"
           value={h.kpis.drift}
           footnote="schema changes in synced data"
+        />
+        <KpiCard
+          icon={<AlertTriangle size={18} />}
+          label="Gaps"
+          value={h.kpis.gaps ?? 0}
+          footnote="daily series with missing or partial sessions"
         />
       </div>
       {(h.drift ?? []).length > 0 && (
@@ -302,7 +312,16 @@ export function HealthTab({ go, isAdmin = false }: { go: Go; isAdmin?: boolean }
                   {r.lastUpdated && <div className="muted-line">updated {timestamp(r.lastUpdated)}</div>}
                 </td>
                 <td>
-                  {r.coveragePct !== undefined ? `${r.coveragePct}%` : '—'}
+                  {r.coveragePct !== undefined ? (
+                    <span
+                      title={`${r.coveragePct}% of the ${r.coverageBasis === 'active' ? 'active (listed) universe: this data exists for listed companies only' : 'whole universe, delisted names included'}${r.coverageSparse ? `; ${r.coverageSparse}` : ''}`}
+                    >
+                      {r.coveragePct}%{r.coverageBasis === 'active' ? <small> active</small> : null}
+                    </span>
+                  ) : (
+                    '—'
+                  )}
+                  {r.coverageSparse && <div className="muted-line">{r.coverageSparse}</div>}
                   <div className="muted-line">{fmtNumber(r.rows)} rows</div>
                 </td>
                 <td>

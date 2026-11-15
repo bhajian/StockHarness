@@ -8,7 +8,10 @@ import { freshnessOf, type Freshness } from './lineage.js';
 import { datasetSyncs } from './datasetSync.js';
 import { catalogById } from './datasetCatalog.js';
 
-export type GapCell = { date: string; rows: number | null };
+/** One expected session: its row count; `partial` when far below the usual count (#395). */
+export type GapCell = { date: string; rows: number | null; partial?: boolean };
+/** A session with fewer rows than this share of the window's median is a partial gap (#395). */
+const PARTIAL_SHARE = 0.5;
 export type HealthRow = {
   collection: string;
   layer: CatalogLayer;
@@ -23,9 +26,37 @@ export type HealthRow = {
   caveats: { blocking: number; warn: number };
   producer?: { type: string; name: string };
   error?: string;
-  /** null = coverage not computed yet (Catalog > Coverage computes it). */
+  /** null = not computed yet (a daily series is computed in the background, #395). */
   gaps: GapCell[] | null;
+  /** Whether a gap strip applies: daily observation series only (#395). */
+  gapsApplicable: boolean;
+  /** Missing (no rows) and partial sessions in the strip. */
+  gapSummary?: { missing: number; partial: number };
+  /** What coveragePct is measured against (#395). */
+  coverageBasis?: 'active' | 'all';
+  coverageSparse?: string;
 };
+
+/** The gap strip of one collection: sessions before today, with partial ones marked (pure; tested). */
+export function gapCells(
+  expected: string[],
+  rowsByDate: Map<string, number | null>,
+  today: string,
+): GapCell[] {
+  const cells = expected
+    .filter((d) => d < today)
+    .map((d) => ({ date: d, rows: (rowsByDate.get(d) as number | undefined) ?? 0 }));
+  const counts = cells
+    .map((c) => c.rows ?? 0)
+    .filter((n) => n > 0)
+    .sort((a, b) => a - b);
+  const median = counts.length ? counts[Math.floor(counts.length / 2)] : 0;
+  return cells.map((c) => (c.rows && c.rows < median * PARTIAL_SHARE ? { ...c, partial: true } : c));
+}
+export const gapSummary = (cells: GapCell[]) => ({
+  missing: cells.filter((c) => !c.rows).length,
+  partial: cells.filter((c) => c.partial).length,
+});
 const iso = (d: unknown) =>
   d instanceof Date ? d.toISOString().slice(0, 10) : typeof d === 'string' ? d.slice(0, 10) : undefined;
 
@@ -125,16 +156,17 @@ export async function dataHealth(ownerId: string, opts: { days?: number } = {}) 
   const everyMinutesOf = new Map(
     syncDocs.map((s) => [s._id, s.enabled && s.schedule?.enabled ? s.schedule.everyMinutes : undefined]),
   );
+  const today = new Date().toISOString().slice(0, 10);
   const rows: HealthRow[] = entries.map((e) => {
     const cov = covs.get(e.collection);
-    let gaps: GapCell[] | null = null;
-    if (cov) {
-      const byDate = new Map(cov.daily.dates.map((d, i) => [d, cov.daily.series.rows?.[i] ?? null]));
-      gaps = expected.map((d) => ({ date: d, rows: (byDate.get(d) as number | undefined) ?? 0 }));
-    }
-    let freshness = freshnessOf(e.freshness.lastUpdated, e.freshness.lastStatus, e.freshness.cadence);
     const producerId = e.producedBy[0]?.type === 'sync' ? e.producedBy[0].id : undefined;
     const daily = isDailySeries(e, producerId ? everyMinutesOf.get(producerId) : undefined);
+    let gaps: GapCell[] | null = null;
+    if (cov && daily && e.coverage.dateField) {
+      const byDate = new Map(cov.daily.dates.map((d, i) => [d, cov.daily.series.rows?.[i] ?? null]));
+      gaps = gapCells(expected, byDate, today);
+    }
+    let freshness = freshnessOf(e.freshness.lastUpdated, e.freshness.lastStatus, e.freshness.cadence);
     const lag = e.coverage.dateField && daily ? lagSessions(expected, e.coverage.dateMax) : undefined;
     if (freshness === 'fresh' && lag !== undefined && lag > 3) freshness = 'stale';
     return {
@@ -156,6 +188,10 @@ export async function dataHealth(ownerId: string, opts: { days?: number } = {}) 
       ...(e.producedBy[0] ? { producer: { type: e.producedBy[0].type, name: e.producedBy[0].name } } : {}),
       ...(e.freshness.lastError ? { error: e.freshness.lastError } : {}),
       gaps,
+      gapsApplicable: Boolean(daily && e.coverage.dateField),
+      ...(gaps ? { gapSummary: gapSummary(gaps) } : {}),
+      ...(e.coverage.universeBasis ? { coverageBasis: e.coverage.universeBasis } : {}),
+      ...(e.coverage.sparse ? { coverageSparse: e.coverage.sparse } : {}),
     };
   });
   const syncs = syncDocs.map((s) => ({
@@ -252,6 +288,8 @@ export async function dataHealth(ownerId: string, opts: { days?: number } = {}) 
     stale: rows.filter((r) => r.freshness === 'stale').length,
     failed: rows.filter((r) => r.freshness === 'failed').length + failedTransforms.length,
     drift: drift.length,
+    /** Daily series with a missing or partial session in the strip (#395). */
+    gaps: rows.filter((r) => r.gapSummary && (r.gapSummary.missing || r.gapSummary.partial)).length,
   };
   const eod =
     rows.find((r) => r.collection === 'prices_daily' && r.dateMax) ??
@@ -289,4 +327,63 @@ export async function dataHealth(ownerId: string, opts: { days?: number } = {}) 
     transforms,
     pipelines,
   };
+}
+
+/**
+ * Keeps every daily series' gap strip current (#395): on the dispatcher tick, at most every few minutes, recompute
+ * the coverage of daily observation series whose data changed since it was last computed (or that have none),
+ * one collection at a time, at most every two hours each (a daily series changes once a day).
+ */
+const SWEEP_EVERY_MS = 5 * 60_000;
+const RECOMPUTE_AFTER_MS = 2 * 3600_000;
+let sweeping = false;
+let lastSweep = 0;
+export async function dispatchDailyCoverage(now = Date.now()) {
+  if (sweeping || now - lastSweep < SWEEP_EVERY_MS) return;
+  lastSweep = now;
+  sweeping = true;
+  void sweepDailyCoverage()
+    .catch((e) => console.warn('Coverage sweep will retry:', e instanceof Error ? e.message : e))
+    .finally(() => {
+      sweeping = false;
+    });
+}
+
+/** The daily series of one workspace whose gap strip is missing or out of date (exported for tests). */
+export async function staleDailyCoverage(ownerId: string, now = Date.now()) {
+  const entries = await listCatalog(ownerId);
+  const syncDocs = await datasetSyncs()
+    .find({ ownerId }, { projection: { enabled: 1, schedule: 1 } })
+    .toArray();
+  const everyMinutesOf = new Map(
+    syncDocs.map((s) => [s._id, s.enabled && s.schedule?.enabled ? s.schedule.everyMinutes : undefined]),
+  );
+  const computed = new Map(
+    (
+      await collection<{ _id: string; collection: string; computedAt: Date }>('catalog_coverage')
+        .find({ ownerId }, { projection: { collection: 1, computedAt: 1 } })
+        .toArray()
+    ).map((c) => [c.collection, c.computedAt]),
+  );
+  return entries
+    .filter((e) => {
+      if (!e.coverage.dateField || !e.coverage.rows) return false;
+      const producerId = e.producedBy[0]?.type === 'sync' ? e.producedBy[0].id : undefined;
+      if (!isDailySeries(e, producerId ? everyMinutesOf.get(producerId) : undefined)) return false;
+      const at = computed.get(e.collection);
+      if (!at) return true;
+      const updated = e.freshness.lastUpdated ? new Date(e.freshness.lastUpdated).getTime() : 0;
+      return updated > at.getTime() && now - at.getTime() > RECOMPUTE_AFTER_MS;
+    })
+    .map((e) => e.collection);
+}
+
+async function sweepDailyCoverage() {
+  const { collectionCoverage, coverageSettled } = await import('./catalogCoverage.js');
+  const owners = (await collection('dataset_catalog').distinct('ownerId')) as string[];
+  for (const ownerId of owners)
+    for (const name of await staleDailyCoverage(ownerId)) {
+      await collectionCoverage(ownerId, name, { refresh: true });
+      await coverageSettled(ownerId, name);
+    }
 }

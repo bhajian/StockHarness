@@ -14,6 +14,7 @@ import {
   dispatchDatasetSyncs,
   recoverInterruptedDatasetSyncRuns,
 } from '../../../packages/core/src/datasetSync.js';
+import { dispatchDailyCoverage } from '../../../packages/core/src/dataHealth.js';
 import { dispatchBackfills, recoverBackfills } from '../../../packages/core/src/datasetBackfill.js';
 import { dispatchTransforms, recoverTransformRuns } from '../../../packages/core/src/transformRunner.js';
 import { recoverEvaluations } from '../../../packages/core/src/evaluations.js';
@@ -66,6 +67,7 @@ async function tick() {
     await dispatchReflections();
     await dispatchGuardrailEvaluations();
     await dispatchClusterMonitors();
+    await dispatchDailyCoverage();
   } catch (e) {
     console.error('Dispatcher will retry:', safeError(e));
   } finally {

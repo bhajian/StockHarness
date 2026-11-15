@@ -645,7 +645,12 @@ export type HealthRow = {
   caveats: { blocking: number; warn: number };
   producer?: { type: string; name: string };
   error?: string;
-  gaps: { date: string; rows: number | null }[] | null;
+  gaps: { date: string; rows: number | null; partial?: boolean }[] | null;
+  /** Daily observation series only (#395). */
+  gapsApplicable?: boolean;
+  gapSummary?: { missing: number; partial: number };
+  coverageBasis?: 'active' | 'all';
+  coverageSparse?: string;
 };
 export type DriftAlert = {
   id: string;
@@ -662,7 +667,7 @@ export const resolveDrift = (id: string) =>
   send<{ resolved: boolean }>(`/datasets/drift/${encodeURIComponent(id)}/resolve`, {});
 export type DataHealth = {
   drift: DriftAlert[];
-  kpis: { fresh: number; stale: number; failed: number; drift: number };
+  kpis: { fresh: number; stale: number; failed: number; drift: number; gaps?: number };
   indicator: { level: 'green' | 'amber' | 'red'; text: string };
   expected: string[];
   collections: HealthRow[];
