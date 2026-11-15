@@ -733,6 +733,12 @@ export const COLLECTION_FIELD_DOCS: Record<string, Record<string, FieldDoc>> = {
     resolved: text('True once a later run no longer raises it (or it was resolved by hand).'),
     resolved_at: text('When it was resolved (UTC).'),
     resolution: text('How it was resolved, e.g. "not re-seen".'),
+    in_universe: text(
+      'Whether the row was in the research universe: for prices_daily, the security on that date; otherwise, ever (#428). Health leads with these.',
+    ),
+    in_universe_at: text(
+      'When in_universe was last computed (UTC); recomputed after universe_daily is rebuilt.',
+    ),
   },
   sim_orders: {
     simulation_id: SIM_ID,

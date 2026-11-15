@@ -48,9 +48,11 @@ export function gapCells(
   expected: string[],
   rowsByDate: Map<string, number | null>,
   today: string,
+  /** Sessions this data never has (bond-market holidays for treasury data, #434). */
+  closed: Set<string> = new Set(),
 ): GapCell[] {
   const cells = expected
-    .filter((d) => d < today)
+    .filter((d) => d < today && !closed.has(d))
     .map((d) => ({ date: d, rows: (rowsByDate.get(d) as number | undefined) ?? 0 }));
   const counts = cells
     .map((c) => c.rows ?? 0)
@@ -187,7 +189,8 @@ export async function dataHealth(ownerId: string, opts: { days?: number } = {}) 
     let gaps: GapCell[] | null = null;
     if (cov && daily && e.coverage.dateField) {
       const byDate = new Map(cov.daily.dates.map((d, i) => [d, cov.daily.series.rows?.[i] ?? null]));
-      gaps = gapCells(expected, byDate, today);
+      const def = catalogById.get(e.producedBy[0]?.dataset ?? '');
+      gaps = gapCells(expected, byDate, today, def?.bondMarket ? bondHolidays(expected) : undefined);
     }
     let freshness = freshnessOf(e.freshness.lastUpdated, e.freshness.lastStatus, e.freshness.cadence);
     // Logs and on-demand outputs (DQ issues, simulation ledgers) have no schedule to be late on (#428).
@@ -485,4 +488,22 @@ async function catalogEntryUpdatedAt(ownerId: string, name: string) {
     { projection: { 'freshness.lastUpdated': 1 } },
   );
   return e?.freshness?.lastUpdated ? new Date(e.freshness.lastUpdated) : undefined;
+}
+
+/**
+ * SIFMA bond-market holidays on which the NYSE trades (#434): Columbus Day (second Monday of October) and Veterans
+ * Day (November 11; Monday when it falls on a Sunday; no close when it falls on a Saturday). Pure; tested.
+ */
+export function bondHolidays(sessions: string[]): Set<string> {
+  const out = new Set<string>();
+  const years = new Set(sessions.map((d) => Number(d.slice(0, 4))));
+  for (const y of years) {
+    const oct1 = new Date(Date.UTC(y, 9, 1)).getUTCDay();
+    out.add(new Date(Date.UTC(y, 9, 1 + ((8 - oct1) % 7) + 7)).toISOString().slice(0, 10));
+    const nov11 = new Date(Date.UTC(y, 10, 11));
+    const dow = nov11.getUTCDay();
+    if (dow === 0) out.add(new Date(Date.UTC(y, 10, 12)).toISOString().slice(0, 10));
+    else if (dow !== 6) out.add(nov11.toISOString().slice(0, 10));
+  }
+  return out;
 }

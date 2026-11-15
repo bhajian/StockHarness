@@ -39,6 +39,8 @@ export interface DatasetDef {
   pagesPerSymbol?: number;
   /** Why not every company has rows (#395), shown with the coverage %: e.g. only dividend payers. */
   sparse?: string;
+  /** Bond-market data (#434): no rows on SIFMA holidays the NYSE trades (Columbus Day, Veterans Day). */
+  bondMarket?: boolean;
   defaultCollection: string;
   recommendedEveryMinutes: number;
 }
@@ -174,6 +176,7 @@ export const DATASET_CATALOG: DatasetDef[] = [
     windowDays: 60,
     lookbackDays: 14,
     lookaheadDays: 0,
+    bondMarket: true,
     defaultCollection: 'treasury_rates',
     recommendedEveryMinutes: DAILY,
   },
