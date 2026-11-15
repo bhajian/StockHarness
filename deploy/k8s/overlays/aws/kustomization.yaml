@@ -11,7 +11,7 @@ resources:
 images:
   - name: openharness
     newName: 491085405405.dkr.ecr.us-east-1.amazonaws.com/openharness/app
-    newTag: f630c469efc1
+    newTag: dc3aa7616353
   - name: openharness-gateway
     newName: 491085405405.dkr.ecr.us-east-1.amazonaws.com/openharness/gateway
     newTag: c6f90af9dacf
@@ -20,7 +20,7 @@ images:
     newTag: c6f90af9dacf
   - name: openharness-python-executor
     newName: 491085405405.dkr.ecr.us-east-1.amazonaws.com/openharness/python-executor
-    newTag: f630c469efc1
+    newTag: dc3aa7616353
 patches:
   # Drop the Caddy TLS proxy (the ALB replaces it).
   - patch: |-
@@ -87,6 +87,22 @@ patches:
         GATEWAY_PUBLIC_URL: wss://openharness.faberiq.ai
         # FMP Premium allows 750 calls/min (#387); dataset syncs take 600 and leave room for agents' FMP calls.
         DATASET_SYNC_RPM: "600"
+  # MongoDB memory: 16 GB of data and 1.3 GB of indexes did not fit the 0.54 GB cache a 2 GiB limit gives.
+  - target:
+      kind: StatefulSet
+      name: mongo
+    patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/resources
+        value:
+          requests:
+            cpu: 250m
+            memory: 3Gi
+          limits:
+            memory: 4Gi
+      - op: add
+        path: /spec/template/spec/containers/0/args
+        value: ["--wiredTigerCacheSizeGB", "2"]
   # Persistent EBS for the shared files claim and every StatefulSet volume.
   - target:
       kind: PersistentVolumeClaim
