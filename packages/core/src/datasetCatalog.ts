@@ -37,6 +37,8 @@ export interface DatasetDef {
   replaceStale?: boolean;
   /** Per-symbol history paged with page/limit: a backfill walks up to this many pages per symbol. */
   pagesPerSymbol?: number;
+  /** Why not every company has rows (#395), shown with the coverage %: e.g. only dividend payers. */
+  sparse?: string;
   defaultCollection: string;
   recommendedEveryMinutes: number;
 }
@@ -374,6 +376,7 @@ export const DATASET_CATALOG: DatasetDef[] = [
     supportsDateRange: false,
     perSymbol: true,
     params: { period: 'annual', limit: 10 },
+    sparse: 'only companies analysts cover',
     defaultCollection: 'analyst_estimates',
     recommendedEveryMinutes: WEEKLY,
   },
@@ -389,6 +392,7 @@ export const DATASET_CATALOG: DatasetDef[] = [
     snapshotDated: true,
     supportsDateRange: false,
     perSymbol: true,
+    sparse: 'only companies analysts cover',
     defaultCollection: 'price_target_consensus',
     recommendedEveryMinutes: WEEKLY,
   },
@@ -404,6 +408,7 @@ export const DATASET_CATALOG: DatasetDef[] = [
     snapshotDated: true,
     supportsDateRange: false,
     perSymbol: true,
+    sparse: 'only companies analysts cover',
     defaultCollection: 'grades_consensus',
     recommendedEveryMinutes: WEEKLY,
   },
@@ -578,6 +583,7 @@ export const DATASET_CATALOG: DatasetDef[] = [
     keyFields: ['symbol'],
     supportsDateRange: false,
     perSymbol: true,
+    sparse: 'only companies analysts cover',
     defaultCollection: 'price_target_summary',
     recommendedEveryMinutes: WEEKLY,
   },
@@ -635,6 +641,7 @@ export const DATASET_CATALOG: DatasetDef[] = [
     keyFields: ['symbol', 'fiscalYear', 'period'],
     supportsDateRange: false,
     perSymbol: true,
+    sparse: 'only companies that report product segments',
     defaultCollection: 'revenue_product_segmentation',
     recommendedEveryMinutes: WEEKLY,
   },
@@ -649,6 +656,7 @@ export const DATASET_CATALOG: DatasetDef[] = [
     keyFields: ['symbol', 'fiscalYear', 'period'],
     supportsDateRange: false,
     perSymbol: true,
+    sparse: 'only companies that report geographic segments',
     defaultCollection: 'revenue_geo_segmentation',
     recommendedEveryMinutes: WEEKLY,
   },
@@ -664,6 +672,7 @@ export const DATASET_CATALOG: DatasetDef[] = [
     supportsDateRange: false,
     perSymbol: true,
     params: { limit: 10 },
+    sparse: 'not computed for every company',
     defaultCollection: 'owner_earnings',
     recommendedEveryMinutes: WEEKLY,
   },
@@ -680,6 +689,7 @@ export const DATASET_CATALOG: DatasetDef[] = [
     supportsDateRange: false,
     perSymbol: true,
     params: { limit: 100 },
+    sparse: 'only companies that pay dividends',
     defaultCollection: 'dividends_history',
     recommendedEveryMinutes: WEEKLY,
   },
@@ -696,6 +706,7 @@ export const DATASET_CATALOG: DatasetDef[] = [
     supportsDateRange: false,
     perSymbol: true,
     params: { limit: 100 },
+    sparse: 'only companies that split',
     defaultCollection: 'splits_history',
     recommendedEveryMinutes: WEEKLY,
   },
@@ -904,6 +915,7 @@ export const DATASET_CATALOG: DatasetDef[] = [
     supportsDateRange: false,
     perSymbol: true,
     params: { period: 'quarter', limit: 16 },
+    sparse: 'only companies analysts cover',
     defaultCollection: 'analyst_estimates_quarterly',
     recommendedEveryMinutes: WEEKLY,
   },
@@ -939,6 +951,7 @@ export const DATASET_CATALOG: DatasetDef[] = [
     supportsDateRange: false,
     perSymbol: true,
     params: { limit: 50 },
+    sparse: 'only companies analysts cover',
     defaultCollection: 'analyst_grades_history',
     recommendedEveryMinutes: WEEKLY,
   },
@@ -957,6 +970,7 @@ export const DATASET_CATALOG: DatasetDef[] = [
     supportsDateRange: false,
     perSymbol: true,
     params: { limit: 6 },
+    sparse: 'only companies analysts cover',
     defaultCollection: 'grades_consensus_history',
     recommendedEveryMinutes: WEEKLY,
   },

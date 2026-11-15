@@ -2830,6 +2830,9 @@ textarea::placeholder {
   border: 1px solid #c0392b;
   box-sizing: border-box;
 }
+.gap-strip i.partial {
+  background: #d4a017;
+}
 .health-issues > div {
   display: flex;
   flex-wrap: wrap;

@@ -61,6 +61,11 @@ export type CatalogEntry = {
     rows: number;
     symbols?: number;
     universeCoveragePct?: number;
+    /** What the % is measured against (#395): active universe names, or all of them (delisted included). */
+    universeBasis?: 'active' | 'all';
+    universeSize?: number;
+    /** Why not every company has rows (dividends, splits, analyst coverage): a lower % is expected. */
+    sparse?: string;
     dateField?: string;
     dateMin?: string;
     dateMax?: string;
@@ -247,6 +252,10 @@ export function inferFields(
   return fields.sort((a, b) => a.name.localeCompare(b.name));
 }
 
+/** Current values and snapshots exist for listed companies only; history also for the ones that died (#395). */
+export function coverageBasis(def: DatasetDef): 'active' | 'all' {
+  return def.snapshotDated || (def.incremental === 'snapshot' && !def.dateField) ? 'active' : 'all';
+}
 const grainOf = (key: string[]) => `one row per ${key.join(' × ')}`;
 /** Defs whose rows land in `name` (a sync's targetCollection override wins). */
 function producersOf(name: string, syncs: DatasetSync[]) {
@@ -354,15 +363,26 @@ export async function refreshCatalogEntry(ownerId: string, name: string, syncs?:
     const symbols = await timed(coll.distinct(symbolField, {}, { maxTimeMS: 20000 }), [] as unknown[]);
     coverage.symbols = symbols.length;
     if (def?.perSymbol && symbolField === 'symbol' && name !== UNIVERSE_COLLECTION) {
+      // Measured against the names the dataset can serve (#395): current-only data and snapshots exist for
+      // listed companies only, so the active names; history (prices, statements, actions) the whole universe.
+      const basis = coverageBasis(def);
       const universe = new Set(
         await timed(
-          db.collection(UNIVERSE_COLLECTION).distinct('symbol', {}, { maxTimeMS: 20000 }),
+          db
+            .collection(UNIVERSE_COLLECTION)
+            .distinct('symbol', basis === 'active' ? { is_delisted: { $ne: true } } : {}, {
+              maxTimeMS: 20000,
+            }),
           [] as unknown[],
         ),
       );
-      if (universe.size)
+      if (universe.size) {
         coverage.universeCoveragePct =
           Math.round((symbols.filter((s) => universe.has(s)).length / universe.size) * 1000) / 10;
+        coverage.universeBasis = basis;
+        coverage.universeSize = universe.size;
+        if (def.sparse) coverage.sparse = def.sparse;
+      }
     }
   }
   if (rows && dateField && names.has(dateField)) {
@@ -593,7 +613,7 @@ export function agentView(e: CatalogEntry) {
     e.description,
     `Grain: ${e.grain || 'unknown'}. Key: ${e.primaryKey.join(', ') || 'none'}.`,
     `Point in time: ${e.timeSemantics.status === 'current_only' ? 'CURRENT ONLY (never use historically). ' : ''}${e.timeSemantics.text}`,
-    `Coverage: ${e.coverage.rows.toLocaleString('en-US')} rows${e.coverage.symbols !== undefined ? `, ${e.coverage.symbols} symbols` : ''}${e.coverage.universeCoveragePct !== undefined ? ` (${e.coverage.universeCoveragePct}% of the universe)` : ''}${e.coverage.dateMin ? `, ${e.coverage.dateField} ${e.coverage.dateMin} → ${e.coverage.dateMax}` : ''}.`,
+    `Coverage: ${e.coverage.rows.toLocaleString('en-US')} rows${e.coverage.symbols !== undefined ? `, ${e.coverage.symbols} symbols` : ''}${e.coverage.universeCoveragePct !== undefined ? ` (${e.coverage.universeCoveragePct}% of the ${e.coverage.universeBasis === 'active' ? 'active ' : ''}universe${e.coverage.sparse ? `; ${e.coverage.sparse}` : ''})` : ''}${e.coverage.dateMin ? `, ${e.coverage.dateField} ${e.coverage.dateMin} → ${e.coverage.dateMax}` : ''}.`,
     ...((e.caveats ?? []).length
       ? ['Caveats:', ...e.caveats.map((c) => `- [${c.severity.toUpperCase()}] ${c.text}`)]
       : []),
