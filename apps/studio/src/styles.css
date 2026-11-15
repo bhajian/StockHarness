@@ -7470,8 +7470,12 @@ details.advanced summary {
 
 /* ---- Dataset tab v2: top table + wide grid ---- */
 .dataset-v2 { display: flex; flex-direction: column; gap: 18px; }
-.dataset-table { max-height: 42vh; overflow: auto; }
+/* Ten rows tall (#384): one line per row (wide cells scroll sideways), a sticky header and a sliver of row 11
+   that says "scroll for more". Rows load 20 at a time as the table scrolls (tableKit.useInfiniteRows). */
+.dataset-table { --dataset-row: 40px; max-height: calc(var(--dataset-row) * 11.5); overflow: auto; }
 .dataset-table table { width: 100%; font-size: 13px; }
+.dataset-table th,
+.dataset-table td { white-space: nowrap; padding-top: 0; padding-bottom: 0; height: var(--dataset-row); }
 .dataset-table th { position: sticky; top: 0; z-index: 1; }
 .dataset-table tbody tr { cursor: pointer; }
 .dataset-table tbody tr:hover { background: var(--surface-2, #f3f4f6); }
@@ -7539,3 +7543,7 @@ details.advanced summary {
 .backfill-badge { margin-left: 6px; font-size: 11px; padding: 1px 6px; border-radius: 999px; background: #e8f0fe; color: #1d4ed8; }
 .backfill-badge.paused { background: #f3f4f6; color: #6b7280; }
 .backfill-badge.failed { background: #fff1eb; color: #bb785c; }
+
+/* Paged tables (#384): the last row loads the next page when it scrolls into view. */
+.table-more td { text-align: center; color: var(--muted, #6b7280); cursor: default; }
+.table-more .link-button { margin-left: 6px; }

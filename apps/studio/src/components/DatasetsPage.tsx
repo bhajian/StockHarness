@@ -49,6 +49,7 @@ import { Button, IconButton, Field, Modal, SaveForm, Empty, PageTitle, Status } 
 import { ScheduleFields } from './agentFields';
 import { DataGrid } from './DataGrid';
 import { FilterBar, KpiCard, Tabs } from './kit';
+import { MoreRows, useInfiniteRows } from './tableKit';
 import { fmtNumber } from '../charts/chartData';
 import { TransformsTab } from './TransformsTab';
 import { PipelinesTab } from './PipelinesTab';
@@ -312,6 +313,11 @@ function SyncsTab({
       (!fStatus || statusOf(s) === fStatus) &&
       (!fCadence || cadenceOf(s) === fCadence),
   );
+  // 20 rows at a time, more as the table scrolls (#384); a filter change starts again at the top.
+  const page = useInfiniteRows(visible, {
+    resetKey: [q, fCategory, fPriority, fStatus, fCadence],
+    keepIndex: current ? visible.indexOf(current) : -1,
+  });
   const collections = [...new Set(syncs.map(collectionOf).filter(Boolean))];
   const healthy = syncs.filter((s) => s.enabled && !s.lastError).length;
   const historyOf = (s: Record<string, any>) =>
@@ -663,7 +669,7 @@ function SyncsTab({
                   </IconButton>
                 </div>
               )}
-              <div className="table-wrap dataset-table">
+              <div className="table-wrap dataset-table" ref={page.rootRef}>
                 <table>
                   <thead>
                     <tr>
@@ -693,7 +699,7 @@ function SyncsTab({
                     </tr>
                   </thead>
                   <tbody>
-                    {visible.map((s) => (
+                    {page.shown.map((s) => (
                       <tr
                         key={s.id}
                         className={`${current?.id === s.id ? 'active' : ''} ${checked.has(s.id) ? 'checked' : ''}`}
@@ -799,6 +805,13 @@ function SyncsTab({
                         )}
                       </tr>
                     ))}
+                    <MoreRows
+                      colSpan={isAdmin ? 13 : 11}
+                      shown={page.shown.length}
+                      total={page.total}
+                      onMore={page.more}
+                      sentinelRef={page.sentinelRef}
+                    />
                   </tbody>
                 </table>
               </div>
