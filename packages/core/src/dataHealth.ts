@@ -37,6 +37,9 @@ export type HealthRow = {
   gapSummary?: { missing: number; partial: number };
   /** What coveragePct is measured against (#395). */
   coverageBasis?: 'active' | 'all';
+  /** History datasets (#431): listed and delisted coverage. */
+  coverageListed?: number;
+  coverageDelisted?: number;
   coverageSparse?: string;
 };
 
@@ -214,6 +217,9 @@ export async function dataHealth(ownerId: string, opts: { days?: number } = {}) 
       gapsApplicable: Boolean(daily && e.coverage.dateField),
       ...(gaps ? { gapSummary: gapSummary(gaps) } : {}),
       ...(e.coverage.universeBasis ? { coverageBasis: e.coverage.universeBasis } : {}),
+      ...(e.coverage.listedCoveragePct !== undefined
+        ? { coverageListed: e.coverage.listedCoveragePct, coverageDelisted: e.coverage.delistedCoveragePct }
+        : {}),
       ...(e.coverage.sparse ? { coverageSparse: e.coverage.sparse } : {}),
     };
   });

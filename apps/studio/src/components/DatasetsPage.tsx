@@ -284,7 +284,9 @@ function SyncsTab({
   const [stats, setStats] = useState<{ runs: number; failed: number; calls: number; rows: number } | null>(
     null,
   );
-  const [coverage, setCoverage] = useState<Map<string, { pct?: number; rows: number }>>(new Map());
+  const [coverage, setCoverage] = useState<
+    Map<string, { pct?: number; rows: number; delisted?: number; basis?: string; sparse?: string }>
+  >(new Map());
   useEffect(() => {
     const d = new Date();
     d.setHours(0, 0, 0, 0);
@@ -293,7 +295,17 @@ function SyncsTab({
       (c) =>
         setCoverage(
           new Map(
-            c.map((e) => [e.collection, { pct: e.coverage.universeCoveragePct, rows: e.coverage.rows }]),
+            c.map((e) => [
+              e.collection,
+              {
+                // #431: listed names are the headline for history datasets; delisted shown in the tooltip.
+                pct: e.coverage.listedCoveragePct ?? e.coverage.universeCoveragePct,
+                rows: e.coverage.rows,
+                delisted: e.coverage.delistedCoveragePct,
+                basis: e.coverage.universeBasis,
+                sparse: e.coverage.sparse,
+              },
+            ]),
           ),
         ),
       () => undefined,
@@ -761,12 +773,20 @@ function SyncsTab({
                           {(() => {
                             const c = coverage.get(collectionOf(s));
                             return c?.pct !== undefined ? (
-                              <span className="coverage-bar" title={`${c.pct}% of the universe`}>
+                              <span
+                                className="coverage-bar"
+                                title={`${c.pct}% of listed universe names${c.delisted !== undefined ? `; ${c.delisted}% of delisted ones` : ''}${c.sparse ? ` (${c.sparse})` : ''}`}
+                              >
                                 <span style={{ width: `${Math.min(100, c.pct)}%` }} />
                                 <small>{c.pct}%</small>
                               </span>
                             ) : (
-                              <span className="muted-line">{c ? fmtNumber(c.rows) : '—'}</span>
+                              <span
+                                className="muted-line"
+                                title="Coverage is per company: this dataset is market-wide (rates, indexes, feeds, calendars), so it does not apply"
+                              >
+                                —
+                              </span>
                             );
                           })()}
                         </td>

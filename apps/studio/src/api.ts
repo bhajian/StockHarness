@@ -386,6 +386,11 @@ export type CatalogListItem = {
     rows: number;
     symbols?: number;
     universeCoveragePct?: number;
+    universeBasis?: 'active' | 'all';
+    /** History datasets (#431): listed and delisted coverage. */
+    listedCoveragePct?: number;
+    delistedCoveragePct?: number;
+    sparse?: string;
     dateField?: string;
     dateMin?: string;
     dateMax?: string;
@@ -651,6 +656,8 @@ export type HealthRow = {
   gapsApplicable?: boolean;
   gapSummary?: { missing: number; partial: number };
   coverageBasis?: 'active' | 'all';
+  coverageListed?: number;
+  coverageDelisted?: number;
   coverageSparse?: string;
 };
 export type DriftAlert = {

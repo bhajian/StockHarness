@@ -55,6 +55,14 @@ before(async () => {
   for (let i = 0; i < 30; i++)
     for (const symbol of ['AAA', 'BBB']) bars.push({ symbol, date: day(i), close: 10 });
   await db().collection('eod_prices').insertMany(bars);
+  // AAA listed with prices, BBB delisted with prices, CCC listed without prices (#431).
+  await db()
+    .collection('universe')
+    .insertMany([
+      { symbol: 'AAA', is_delisted: false },
+      { symbol: 'BBB', is_delisted: true, delisted_date: '2026-10-20' },
+      { symbol: 'CCC', is_delisted: false },
+    ]);
   await db()
     .collection('grades_consensus')
     .insertOne({ symbol: 'AAA', snapshot_date: day(29), buy: 3 });
@@ -85,4 +93,13 @@ test('the sweep picks daily series without a gap strip, and only them', { skip: 
   const gc = h.collections.find((c) => c.collection === 'grades_consensus')!;
   assert.equal(gc.gapsApplicable, false);
   assert.equal(gc.gaps, null);
+});
+
+test('history coverage is split into listed and delisted names (#431)', { skip: skipReason }, async () => {
+  const { catalogEntries } = await import('../../packages/core/src/schemaCatalog.js');
+  const e = (await catalogEntries().findOne({ ownerId: owner, collection: 'eod_prices' }))!;
+  assert.equal(e.coverage.universeBasis, 'all');
+  assert.equal(e.coverage.universeCoveragePct, 66.7);
+  assert.equal(e.coverage.listedCoveragePct, 50);
+  assert.equal(e.coverage.delistedCoveragePct, 100);
 });
