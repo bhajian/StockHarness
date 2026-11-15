@@ -109,6 +109,8 @@ export type DatasetSync = DatasetSyncInput & {
   /** Failed runs in a row, and whether the last one hit a plan limit (#291): drives the retry backoff. */
   consecutiveFailures?: number;
   lastFailureKind?: 'plan_limit' | 'error';
+  /** Claimed or queued but not started yet (#439): a restart re-queues it. */
+  queuedAt?: Date;
   /** Set when the scheduler paused the schedule after repeated plan-limit failures (#291). */
   pausedReason?: string;
   lastRows?: number;
@@ -836,6 +838,8 @@ export async function runDatasetSync(
     },
   };
   await datasetSyncRuns().insertOne(run);
+  // The run has started: it is no longer only queued (#439).
+  await datasetSyncs().updateOne({ _id: sync._id }, { $unset: { queuedAt: '' } });
   return executeSyncRun(sync, def, run, opts.symbols);
 }
 
@@ -1123,8 +1127,9 @@ export async function dispatchDatasetSyncs() {
       ...(sync.nextRunAt ? { nextRunAt: sync.nextRunAt } : { nextRunAt: { $exists: false } }),
     };
     // Claim this slot first so a long sync doesn't get re-fired by the next tick.
+    // queuedAt marks the claimed-but-not-started run, so a restart before it starts re-queues it (#439).
     const claimed = await datasetSyncs().updateOne(filter, {
-      $set: { nextRunAt: nextScheduledAt(schedule) },
+      $set: { nextRunAt: nextScheduledAt(schedule), queuedAt: new Date() },
     });
     if (!claimed.matchedCount) continue;
     // Enqueue, never await: a multi-hour universe sync must not stall the server's dispatcher tick (#78).
@@ -1173,11 +1178,36 @@ export function retryAt(failures: number, planLimit: boolean, regular: Date, now
 
 /** Queue a manual run (Run now, bulk Run). Returns false when the sync is already queued or running. */
 export function enqueueManualRun(sync: DatasetSync) {
-  return syncQueue.enqueue(sync._id, effectivePriority(sync), async () => {
+  const queued = syncQueue.enqueue(sync._id, effectivePriority(sync), async () => {
     const fresh = await datasetSyncs().findOne({ _id: sync._id });
     if (!fresh) return; // deleted while queued
     await runDatasetSync(fresh, { trigger: 'manual' }).catch(() => undefined);
   });
+  if (queued) void datasetSyncs().updateOne({ _id: sync._id }, { $set: { queuedAt: new Date() } });
+  return queued;
+}
+
+/**
+ * At startup (#439): syncs claimed or queued by the previous process but never started (queuedAt still set) are
+ * due again. A sync whose run is in progress (resumed by #416) is left to that run.
+ */
+export async function requeueLostDatasetSyncs() {
+  const lost = await datasetSyncs()
+    .find({ queuedAt: { $exists: true } }, { projection: { _id: 1 } })
+    .toArray();
+  let n = 0;
+  for (const { _id } of lost) {
+    const live = await datasetSyncRuns().findOne(
+      { syncId: _id, status: 'running' },
+      { projection: { _id: 1 } },
+    );
+    const r = await datasetSyncs().updateOne(
+      { _id },
+      live ? { $unset: { queuedAt: '' } } : { $set: { nextRunAt: new Date() }, $unset: { queuedAt: '' } },
+    );
+    if (r.modifiedCount && !live) n++;
+  }
+  return n;
 }
 
 export type { Stored };
