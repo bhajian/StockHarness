@@ -85,8 +85,8 @@ patches:
         # Nodes are 2 vCPU and shared; a full-CPU request never schedules. No CPU limit, so Jobs still burst.
         EXECUTOR_JOB_CPU: 500m
         GATEWAY_PUBLIC_URL: wss://openharness.faberiq.ai
-        # FMP Premium allows 750 calls/min (#387); dataset syncs take 600 and leave room for agents' FMP calls.
-        DATASET_SYNC_RPM: "600"
+        # FMP Premium allows 750 calls/min (#387, #425): dataset syncs take 700 and leave 50 for agents' FMP tools.
+        DATASET_SYNC_RPM: "700"
   # MongoDB on its own memory-optimized node (#415; scripts/eks-mongo-node.sh creates it): r7i.xlarge, 4 vCPU and
   # 32 GiB, in the volume's zone. The data stays on the same 200 GiB volume (data-mongo-0); only the pod moves.
   - target:
