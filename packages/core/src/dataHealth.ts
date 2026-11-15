@@ -3,14 +3,15 @@
 // pipelines' latest runs, and the top-bar indicator (fresh / N late / Layer 2 blocked).
 import { collection, mongo } from './db.js';
 import { workspaceDatabase } from './mongoMcp.js';
-import { listCatalog } from './schemaCatalog.js';
+import { listCatalog, type CatalogEntry, type CatalogLayer } from './schemaCatalog.js';
 import { freshnessOf, type Freshness } from './lineage.js';
 import { datasetSyncs } from './datasetSync.js';
+import { catalogById } from './datasetCatalog.js';
 
 export type GapCell = { date: string; rows: number | null };
 export type HealthRow = {
   collection: string;
-  layer: 1 | 2 | null;
+  layer: CatalogLayer;
   freshness: Freshness;
   /** Expected sessions without data since the latest date (daily, dated collections). */
   lagSessions?: number;
@@ -62,6 +63,28 @@ export function lagSessions(
   return expected.filter((d) => d > dateMax && d < today).length;
 }
 
+/** Daily market series that are not `timeseries` datasets but still carry one row per business day. */
+const DAILY_MARKET_SERIES = new Set(['treasury_rates', 'sector_performance']);
+
+/**
+ * Whether a collection is a daily observation series, the only kind judged by trading-session lag (#386):
+ * Layer 1 time series (prices, index levels, rates) synced at least daily, and Layer 2 tables with one row per
+ * trading day. Period-end data (statements, ratios, segments), monthly or quarterly macro, feeds (transaction or
+ * disclosure dates) and weekly snapshots are not: their latest date says nothing about whether the sync is late,
+ * so they are fresh when their producer last succeeded within its cadence.
+ */
+export function isDailySeries(
+  e: Pick<CatalogEntry, 'layer' | 'grain' | 'timeSemantics' | 'producedBy'>,
+  /** The producing sync's schedule interval (minutes), when it has an enabled schedule. */
+  everyMinutes?: number,
+) {
+  if (e.layer === 2) return e.timeSemantics.status !== 'static' && /trading (day|date)/i.test(e.grain);
+  const def = catalogById.get(e.producedBy[0]?.dataset ?? '');
+  if (!def || def.snapshotDated || def.scope === 'feed') return false;
+  if (def.incremental !== 'timeseries' && !DAILY_MARKET_SERIES.has(def.id)) return false;
+  return everyMinutes !== undefined && everyMinutes <= 1440;
+}
+
 export async function dataHealth(ownerId: string, opts: { days?: number } = {}) {
   const days = opts.days ?? 60;
   const expected = await sessions(ownerId, days);
@@ -93,6 +116,15 @@ export async function dataHealth(ownerId: string, opts: { days?: number } = {}) 
         .toArray()
     ).map((c) => [c.collection, c]),
   );
+  const syncDocs = await datasetSyncs()
+    .find(
+      { ownerId },
+      { projection: { name: 1, enabled: 1, lastError: 1, lastRunAt: 1, nextRunAt: 1, schedule: 1 } },
+    )
+    .toArray();
+  const everyMinutesOf = new Map(
+    syncDocs.map((s) => [s._id, s.enabled && s.schedule?.enabled ? s.schedule.everyMinutes : undefined]),
+  );
   const rows: HealthRow[] = entries.map((e) => {
     const cov = covs.get(e.collection);
     let gaps: GapCell[] | null = null;
@@ -101,7 +133,8 @@ export async function dataHealth(ownerId: string, opts: { days?: number } = {}) 
       gaps = expected.map((d) => ({ date: d, rows: (byDate.get(d) as number | undefined) ?? 0 }));
     }
     let freshness = freshnessOf(e.freshness.lastUpdated, e.freshness.lastStatus, e.freshness.cadence);
-    const daily = /day|daily|after/i.test(e.freshness.cadence ?? '') && e.timeSemantics.status !== 'static';
+    const producerId = e.producedBy[0]?.type === 'sync' ? e.producedBy[0].id : undefined;
+    const daily = isDailySeries(e, producerId ? everyMinutesOf.get(producerId) : undefined);
     const lag = e.coverage.dateField && daily ? lagSessions(expected, e.coverage.dateMax) : undefined;
     if (freshness === 'fresh' && lag !== undefined && lag > 3) freshness = 'stale';
     return {
@@ -125,11 +158,7 @@ export async function dataHealth(ownerId: string, opts: { days?: number } = {}) 
       gaps,
     };
   });
-  const syncs = (
-    await datasetSyncs()
-      .find({ ownerId }, { projection: { name: 1, enabled: 1, lastError: 1, lastRunAt: 1, nextRunAt: 1 } })
-      .toArray()
-  ).map((s) => ({
+  const syncs = syncDocs.map((s) => ({
     id: s._id,
     name: s.name,
     enabled: s.enabled,

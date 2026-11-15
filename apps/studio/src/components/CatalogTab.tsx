@@ -31,7 +31,8 @@ const TIME_PILL: Record<string, [string, string]> = {
   static: ['outline', 'static'],
   unknown: ['warn', 'time rule unknown'],
 };
-const layerName = (l: 1 | 2 | null) => (l === 1 ? 'Layer 1 · raw' : l === 2 ? 'Layer 2 · prepared' : 'Other');
+const layerName = (l: 1 | 2 | 4 | null) =>
+  l === 1 ? 'Layer 1 · raw' : l === 2 ? 'Layer 2 · prepared' : l === 4 ? 'Layer 4 · simulations' : 'Other';
 
 export function CatalogTab({
   item,
@@ -62,7 +63,7 @@ export function CatalogTab({
     const f = (list ?? []).filter(
       (c) => !q || `${c.collection} ${c.description}`.toLowerCase().includes(q.toLowerCase()),
     );
-    return ([1, 2, null] as const)
+    return ([1, 2, 4, null] as const)
       .map((layer) => {
         const items = f
           .filter((c) => c.layer === layer)

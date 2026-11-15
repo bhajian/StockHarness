@@ -3,14 +3,14 @@
 import { collection } from './db.js';
 import { catalogById } from './datasetCatalog.js';
 import { datasetSyncs } from './datasetSync.js';
-import { listCatalog } from './schemaCatalog.js';
+import { listCatalog, type CatalogLayer } from './schemaCatalog.js';
 
 export type Freshness = 'fresh' | 'stale' | 'failed' | 'unknown';
 export type LineageNode = {
   id: string; // sync:<name> | collection:<name> | transform:<name>
   kind: 'sync' | 'collection' | 'transform';
   name: string;
-  layer?: 1 | 2 | null;
+  layer?: CatalogLayer;
   freshness: Freshness;
   rows?: number;
   lastRun?: { at?: string; status?: string; rows?: number; error?: string };
@@ -58,7 +58,7 @@ export async function lineage(ownerId: string): Promise<Lineage> {
         ? { lastRun: { at: new Date(e.freshness.lastUpdated).toISOString(), status: e.freshness.lastStatus } }
         : {}),
     });
-  const coll = (name: string, layer: 1 | 2 | null) => {
+  const coll = (name: string, layer: CatalogLayer) => {
     const id = `collection:${name}`;
     if (!nodes.has(id)) nodes.set(id, { id, kind: 'collection', name, layer, freshness: 'unknown' });
     return id;

@@ -6,6 +6,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from datetime import datetime, timezone
 
 DESCRIBE = os.path.join(tempfile.mkdtemp(), "describe.json")
 os.environ.setdefault("OH_OUTPUTS", json.dumps([
@@ -84,6 +85,7 @@ class DataQuality(unittest.TestCase):
         self.assertEqual(DB["dq_issues"].count_documents({"security_id": "S1", "issue_type": {"$in": ["stale_price", "zero_volume"]}}), 2)
         stale = DB["dq_issues"].find_one({"issue_type": "stale_price"})
         self.assertEqual((stale["collection"], stale["severity"], stale["resolved"]), ("prices_t", "error", False))
+        self.assertTrue(DB["dq_issues"].index_information()["oh_dq_key"]["unique"], "one issue per key (#386)")
         with self.assertRaises(ValueError):
             oh.dq("x", "fatal")
 
@@ -91,6 +93,85 @@ class DataQuality(unittest.TestCase):
         code = "import oh; oh.dq('exit_flush', 'warn', security_id='S9', date='2026-11-03')"
         subprocess.run([sys.executable, "-c", code], check=True, env={**os.environ})
         self.assertEqual(DB["dq_issues"].count_documents({"issue_type": "exit_flush"}), 1)
+
+
+class Reconciliation(unittest.TestCase):
+    """#386: a successful run resolves the open issues it recomputed and did not see again, only in its scope."""
+
+    OLD = datetime(2026, 1, 1, tzinfo=timezone.utc)
+
+    def _seed(self, out):
+        DB["dq_issues"].delete_many({"collection": out})
+        DB[out].drop()
+        issue = lambda t, d, **kw: {"collection": out, "issue_type": t, "security_id": "S1", "date": d,
+                                     "severity": "warn", "detected_at": self.OLD, "last_seen_at": self.OLD,
+                                     "resolved": False, **kw}
+        legacy = issue("legacy", "2026-11-02")
+        legacy.pop("last_seen_at")  # rows from older pipeline versions have no last_seen_at
+        DB["dq_issues"].insert_many([
+            issue("gone", "2026-11-02"),                     # in the window, not re-seen: resolved
+            issue("still", "2026-11-02"),                    # in the window, re-seen: stays open
+            issue("outside", "2026-10-15"),                  # outside the window: untouched
+            issue("undated", None),                          # no date: only a full run touches it
+            issue("back", "2026-11-03", resolved=True, resolution="not re-seen"),  # re-seen: reopened
+            legacy,
+        ])
+
+    def _run(self, out, code, window=True, check=True):
+        env = {**os.environ, "OH_OUTPUTS": json.dumps([{"collection": out, "key": ["security_id", "date"],
+                                                         "write_mode": "upsert"}]),
+               "OH_DQ_COLLECTION": out}
+        env.pop("OH_PREVIEW", None)
+        if window:
+            env["OH_WINDOW"] = json.dumps({"start": "2026-11-01", "end": "2026-11-03", "lookback_start": "2026-10-20"})
+        else:
+            env.pop("OH_WINDOW", None)
+        subprocess.run([sys.executable, "-c", code], check=check, env=env, capture_output=True)
+        return {d["issue_type"]: d for d in DB["dq_issues"].find({"collection": out})}
+
+    WRITE = ("import oh\n"
+             "oh.output('{out}').upsert([{{'security_id': 'S1', 'date': '2026-11-02', 'close': 1}}])\n"
+             "oh.dq('still', security_id='S1', date='2026-11-02')\n"
+             "oh.dq('back', security_id='S1', date='2026-11-03')\n")
+
+    def test_windowed_run_resolves_only_inside_its_window(self):
+        self._seed("rc_win")
+        got = self._run("rc_win", self.WRITE.format(out="rc_win"))
+        self.assertTrue(got["gone"]["resolved"])
+        self.assertEqual(got["gone"]["resolution"], "not re-seen")
+        self.assertIn("resolved_at", got["gone"])
+        self.assertTrue(got["legacy"]["resolved"])
+        self.assertFalse(got["still"]["resolved"])
+        self.assertFalse(got["outside"]["resolved"])
+        self.assertFalse(got["undated"]["resolved"])
+        self.assertFalse(got["back"]["resolved"], "an issue seen again is open again")
+        self.assertNotIn("resolution", got["back"])
+
+    def test_full_run_resolves_everything_it_did_not_see(self):
+        self._seed("rc_full")
+        got = self._run("rc_full", self.WRITE.format(out="rc_full"), window=False)
+        for t in ("gone", "legacy", "outside", "undated"):
+            self.assertTrue(got[t]["resolved"], t)
+        self.assertFalse(got["still"]["resolved"])
+        self.assertFalse(got["back"]["resolved"])
+
+    def test_failed_runs_and_untouched_outputs_resolve_nothing(self):
+        self._seed("rc_fail")
+        got = self._run("rc_fail", self.WRITE.format(out="rc_fail") + "raise RuntimeError('boom')\n", check=False)
+        self.assertFalse(got["gone"]["resolved"], "a failed run must not resolve")
+        self._seed("rc_idle")
+        got = self._run("rc_idle", "import oh\noh.read('rc_idle')\n", window=False)
+        self.assertFalse(any(d["resolved"] for t, d in got.items() if t != "back"), "nothing was recomputed")
+
+    def test_preview_resolves_nothing(self):
+        self._seed("rc_prev")
+        env_code = self.WRITE.format(out="rc_prev")
+        env = {**os.environ, "OH_PREVIEW": "1", "OH_PREVIEW_PATH": os.path.join(tempfile.mkdtemp(), "p.json"),
+               "OH_OUTPUTS": json.dumps([{"collection": "rc_prev", "key": ["security_id", "date"], "write_mode": "upsert"}]),
+               "OH_DQ_COLLECTION": "rc_prev"}
+        env.pop("OH_WINDOW", None)
+        subprocess.run([sys.executable, "-c", env_code], check=True, env=env, capture_output=True)
+        self.assertEqual(DB["dq_issues"].count_documents({"collection": "rc_prev", "resolved": True}), 1)  # only "back"
 
 
 class ReadsDescribeDuckdbPit(unittest.TestCase):
