@@ -21,6 +21,7 @@ import {
 import { WebhooksPanel } from './WebhooksPanel';
 import { ObjectTransfer } from './ObjectTransfer';
 import { ConfigBackupCard } from './ConfigBackupCard';
+import { SortHead, useSort } from './tableKit';
 import { PythonSecretsPanel } from './PythonSecrets';
 import {
   api,
@@ -81,6 +82,13 @@ export function SettingsPage({ user, setUser, data, refresh, edit, act }: Settin
   useEffect(() => {
     if (tab === 'users') void act(loadUsers);
   }, [tab]);
+  // Click a header to sort (#385).
+  const userSort = useSort(users, {
+    name: { value: (u) => u.name },
+    email: { value: (u) => u.email },
+    role: { value: (u) => u.role },
+    status: { value: (u) => (u.enabled ? 0 : 1) },
+  });
   return (
     <>
       <PageTitle title="Settings" />
@@ -365,17 +373,19 @@ export function SettingsPage({ user, setUser, data, refresh, edit, act }: Settin
           </div>
           <div className="table-wrap">
             <table>
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Email</th>
-                  <th>Role</th>
-                  <th>Status</th>
-                  <th />
-                </tr>
-              </thead>
+              <SortHead
+                heads={[
+                  ['name', 'Name'],
+                  ['email', 'Email'],
+                  ['role', 'Role'],
+                  ['status', 'Status'],
+                ]}
+                sort={userSort.sort}
+                toggle={userSort.toggle}
+                extra={<th />}
+              />
               <tbody>
-                {users.map((u) => (
+                {userSort.sorted.map((u) => (
                   <tr key={u.id}>
                     <td>
                       <strong>{u.name}</strong>
@@ -871,6 +881,17 @@ export function IntegrationsPage({
       steps: ['Create an embed for your site’s origin', 'Paste the iframe', 'Revoke any time'],
     },
   ];
+  // Click a header to sort (#385).
+  const targetName = (t: Entity) =>
+    t.scopes?.includes('harness')
+      ? 'Whole workspace · Open Harness API'
+      : (targets.find((a) => a.id === (t.agentId ?? t.workflowId ?? t.agentIds?.[0] ?? t.workflowIds?.[0]))
+          ?.name ?? 'Target unavailable');
+  const tokenSort = useSort(tab === 'api' ? tokens : embeds, {
+    name: { value: (t) => t.name },
+    target: { value: (t) => targetName(t) },
+    expires: { value: (t) => (t.expiresAt ? new Date(t.expiresAt) : null) },
+  });
   return (
     <>
       <PageTitle title="Integrations" />
@@ -921,28 +942,23 @@ export function IntegrationsPage({
           </div>
           <div className="table-wrap">
             <table>
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Target</th>
-                  <th>Expires</th>
-                  <th />
-                </tr>
-              </thead>
+              <SortHead
+                heads={[
+                  ['name', 'Name'],
+                  ['target', 'Target'],
+                  ['expires', 'Expires'],
+                ]}
+                sort={tokenSort.sort}
+                toggle={tokenSort.toggle}
+                extra={<th />}
+              />
               <tbody>
-                {(tab === 'api' ? tokens : embeds).map((t) => (
+                {tokenSort.sorted.map((t) => (
                   <tr key={t.id}>
                     <td>
                       <strong>{t.name}</strong>
                     </td>
-                    <td>
-                      {t.scopes?.includes('harness')
-                        ? 'Whole workspace · Open Harness API'
-                        : (targets.find(
-                            (a) =>
-                              a.id === (t.agentId ?? t.workflowId ?? t.agentIds?.[0] ?? t.workflowIds?.[0]),
-                          )?.name ?? 'Target unavailable')}
-                    </td>
+                    <td>{targetName(t)}</td>
                     <td>{timestamp(t.expiresAt)}</td>
                     <td>
                       <Button

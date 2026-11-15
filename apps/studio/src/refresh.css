@@ -4477,6 +4477,24 @@ button.map-card:hover {
   outline: 2px solid var(--accent, #2563eb);
   outline-offset: 2px;
 }
+/* Sortable headers (#385): a faint ↕ until the column is sorted, then ↑ or ↓. */
+.th-sort {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+.th-sort-arrow {
+  font-size: 0.85em;
+  opacity: 0.35;
+}
+.th-sort-arrow.active {
+  opacity: 1;
+  color: var(--accent, #2563eb);
+}
+th.num .th-sort {
+  justify-content: flex-end;
+}
 
 /* Name subsets (#325) */
 .subset-panel {

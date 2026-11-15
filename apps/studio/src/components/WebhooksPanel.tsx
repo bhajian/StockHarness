@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Plus, Trash2 } from 'lucide-react';
 import { api, errorMessage, send, timestamp, type Data, type Entity } from '../api';
 import { Button, CopyButton, ErrorNotice, Field, Modal, SaveForm } from './ui';
+import { SortHead, useSort } from './tableKit';
 export function WebhooksPanel({ data }: { data: Data }) {
   const [hooks, setHooks] = useState<Entity[]>([]),
     [error, setError] = useState(''),
@@ -27,6 +28,12 @@ export function WebhooksPanel({ data }: { data: Data }) {
   useEffect(() => {
     void load();
   }, []);
+  // Click a header to sort (#385).
+  const { sorted, sort, toggle } = useSort(hooks, {
+    name: { value: (h) => h.name },
+    endpoint: { value: (h) => h.url },
+    expires: { value: (h) => (h.expiresAt ? new Date(h.expiresAt) : null) },
+  });
   return (
     <>
       <div className="section-toolbar">
@@ -42,16 +49,18 @@ export function WebhooksPanel({ data }: { data: Data }) {
       <ErrorNotice error={error} />
       <div className="table-wrap">
         <table>
-          <thead>
-            <tr>
-              <th>Name</th>
-              <th>Endpoint</th>
-              <th>Expires</th>
-              <th />
-            </tr>
-          </thead>
+          <SortHead
+            heads={[
+              ['name', 'Name'],
+              ['endpoint', 'Endpoint'],
+              ['expires', 'Expires'],
+            ]}
+            sort={sort}
+            toggle={toggle}
+            extra={<th />}
+          />
           <tbody>
-            {hooks.map((h) => (
+            {sorted.map((h) => (
               <tr key={h.id}>
                 <td>
                   <strong>{h.name}</strong>

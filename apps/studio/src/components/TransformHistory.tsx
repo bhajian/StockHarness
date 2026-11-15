@@ -18,6 +18,7 @@ import {
 } from '../api';
 import { Button } from './ui';
 import { Drawer, Skeleton, StatusPill } from './kit';
+import { SortHead, rankOf, useSort } from './tableKit';
 import { CodeEditor } from '../editor/CodeEditor';
 
 const fmtMs = (ms?: number) =>
@@ -74,26 +75,40 @@ export function BackfillProgress({ runs }: { runs: TransformRun[] }) {
 
 export function RunHistory({ runs }: { runs: TransformRun[] }) {
   const [open, setOpen] = useState<TransformRun | null>(null);
+  // Click a header to sort (#385); unsorted, newest first as the server sends them.
+  const { sorted, sort, toggle } = useSort(runs, {
+    started: { value: (r) => new Date(r.startedAt ?? r.createdAt), firstDesc: true },
+    version: { value: (r) => r.version, firstDesc: true },
+    trigger: { value: (r) => r.trigger },
+    window: { value: (r) => r.window?.start ?? '' },
+    status: { value: (r) => rankOf(['failed', 'running', 'queued', 'succeeded'])(r.status) },
+    read: { value: (r) => sumReads(r.reads), firstDesc: true },
+    written: { value: (r) => sum(r.outputs, 'written'), firstDesc: true },
+    dq: { value: (r) => sum(r.outputs, 'dq') || null, firstDesc: true },
+    duration: { value: (r) => r.durationMs, firstDesc: true },
+  });
   if (!runs.length) return <p className="muted-line">No runs yet.</p>;
   return (
     <>
       <div className="table-wrap">
         <table className="run-history">
-          <thead>
-            <tr>
-              <th>Started</th>
-              <th>Version</th>
-              <th>Trigger</th>
-              <th>Window</th>
-              <th>Status</th>
-              <th>Read</th>
-              <th>Written</th>
-              <th>DQ</th>
-              <th>Duration</th>
-            </tr>
-          </thead>
+          <SortHead
+            heads={[
+              ['started', 'Started'],
+              ['version', 'Version'],
+              ['trigger', 'Trigger'],
+              ['window', 'Window'],
+              ['status', 'Status'],
+              ['read', 'Read'],
+              ['written', 'Written'],
+              ['dq', 'DQ'],
+              ['duration', 'Duration'],
+            ]}
+            sort={sort}
+            toggle={toggle}
+          />
           <tbody>
-            {runs.map((r) => (
+            {sorted.map((r) => (
               <tr
                 key={r.id}
                 className="clickable"
@@ -142,61 +157,9 @@ function RunDrawer({ run, onClose }: { run: TransformRun; onClose: () => void })
         </p>
         {r.error && <div className="notice error">{r.error}</div>}
         <h4>Outputs</h4>
-        <table>
-          <thead>
-            <tr>
-              <th>Collection</th>
-              <th>Read</th>
-              <th>Written</th>
-              <th>Unchanged</th>
-              <th>DQ</th>
-            </tr>
-          </thead>
-          <tbody>
-            {[...new Set([...Object.keys(r.reads ?? {}), ...Object.keys(r.outputs ?? {})])].map((c) => (
-              <tr key={c}>
-                <td>
-                  <code>{c}</code>
-                </td>
-                <td>{r.reads?.[c]?.toLocaleString() ?? '—'}</td>
-                <td>{r.outputs?.[c]?.written?.toLocaleString() ?? '—'}</td>
-                <td>{r.outputs?.[c]?.unchanged?.toLocaleString() ?? '—'}</td>
-                <td>{r.outputs?.[c]?.dq || '—'}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <OutputsTable run={r} />
         <h4>DQ issues{dq ? ` (${dq.length})` : ''}</h4>
-        {!dq ? (
-          <Skeleton rows={2} />
-        ) : !dq.length ? (
-          <p className="muted-line">None.</p>
-        ) : (
-          <table>
-            <thead>
-              <tr>
-                <th>Issue</th>
-                <th>Severity</th>
-                <th>Collection</th>
-                <th>Symbol</th>
-                <th>Date</th>
-              </tr>
-            </thead>
-            <tbody>
-              {dq.map((d, i) => (
-                <tr key={i}>
-                  <td>{d.issue_type}</td>
-                  <td>{d.severity}</td>
-                  <td>
-                    <code>{d.collection}</code>
-                  </td>
-                  <td>{d.security_id ?? '—'}</td>
-                  <td>{d.date ?? '—'}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
+        {!dq ? <Skeleton rows={2} /> : !dq.length ? <p className="muted-line">None.</p> : <DqTable dq={dq} />}
         <h4>stdout</h4>
         <pre className="run-log">{detail ? detail.stdout || '(empty)' : '…'}</pre>
         <h4>stderr</h4>
@@ -241,6 +204,11 @@ export function VersionsPanel({
           () => undefined,
         );
   }, [a, b, specs, transform.id]);
+  const versionSort = useSort(versions ?? [], {
+    version: { value: (v) => v.version, firstDesc: true },
+    saved: { value: (v) => new Date(v.createdAt), firstDesc: true },
+    note: { value: (v) => v.note },
+  });
   async function restore(v: number) {
     if (!confirm(`Restore v${v}? This saves its content as a new version (v${transform.version + 1}).`))
       return;
@@ -275,16 +243,18 @@ export function VersionsPanel({
       {error && <div className="notice error">{error}</div>}
       <div className="versions-list">
         <table>
-          <thead>
-            <tr>
-              <th>Version</th>
-              <th>Saved</th>
-              <th>Note</th>
-              <th />
-            </tr>
-          </thead>
+          <SortHead
+            heads={[
+              ['version', 'Version'],
+              ['saved', 'Saved'],
+              ['note', 'Note'],
+            ]}
+            sort={versionSort.sort}
+            toggle={versionSort.toggle}
+            extra={<th />}
+          />
           <tbody>
-            {versions.map((v) => (
+            {versionSort.sorted.map((v) => (
               <tr key={v.version} className={v.version === a || v.version === b ? 'selected' : ''}>
                 <td>
                   <strong>v{v.version}</strong>
@@ -358,5 +328,88 @@ export function VersionsPanel({
         />
       </div>
     </div>
+  );
+}
+
+function OutputsTable({ run: r }: { run: TransformRun }) {
+  const rows = [...new Set([...Object.keys(r.reads ?? {}), ...Object.keys(r.outputs ?? {})])].map((c) => ({
+    c,
+    read: r.reads?.[c],
+    written: r.outputs?.[c]?.written,
+    unchanged: r.outputs?.[c]?.unchanged,
+    dq: r.outputs?.[c]?.dq,
+  }));
+  const { sorted, sort, toggle } = useSort(rows, {
+    collection: { value: (x) => x.c },
+    read: { value: (x) => x.read, firstDesc: true },
+    written: { value: (x) => x.written, firstDesc: true },
+    unchanged: { value: (x) => x.unchanged, firstDesc: true },
+    dq: { value: (x) => x.dq || null, firstDesc: true },
+  });
+  return (
+    <table>
+      <SortHead
+        heads={[
+          ['collection', 'Collection'],
+          ['read', 'Read'],
+          ['written', 'Written'],
+          ['unchanged', 'Unchanged'],
+          ['dq', 'DQ'],
+        ]}
+        sort={sort}
+        toggle={toggle}
+      />
+      <tbody>
+        {sorted.map((x) => (
+          <tr key={x.c}>
+            <td>
+              <code>{x.c}</code>
+            </td>
+            <td>{x.read?.toLocaleString() ?? '—'}</td>
+            <td>{x.written?.toLocaleString() ?? '—'}</td>
+            <td>{x.unchanged?.toLocaleString() ?? '—'}</td>
+            <td>{x.dq || '—'}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+function DqTable({ dq }: { dq: DqIssue[] }) {
+  const { sorted, sort, toggle } = useSort(dq, {
+    issue: { value: (d) => d.issue_type },
+    severity: { value: (d) => rankOf(['error', 'warn', 'info'])(d.severity) },
+    collection: { value: (d) => d.collection },
+    symbol: { value: (d) => d.security_id },
+    date: { value: (d) => d.date },
+  });
+  return (
+    <table>
+      <SortHead
+        heads={[
+          ['issue', 'Issue'],
+          ['severity', 'Severity'],
+          ['collection', 'Collection'],
+          ['symbol', 'Symbol'],
+          ['date', 'Date'],
+        ]}
+        sort={sort}
+        toggle={toggle}
+      />
+      <tbody>
+        {sorted.map((d, i) => (
+          <tr key={i}>
+            <td>{d.issue_type}</td>
+            <td>{d.severity}</td>
+            <td>
+              <code>{d.collection}</code>
+            </td>
+            <td>{d.security_id ?? '—'}</td>
+            <td>{d.date ?? '—'}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
   );
 }

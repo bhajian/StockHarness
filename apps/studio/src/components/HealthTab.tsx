@@ -6,6 +6,7 @@ import { type DataHealth, type HealthRow, fetchDataHealth, fetchGaps, resolveDri
 import type { DatasetsRoute } from '../datasetsRoute';
 import { Button } from './ui';
 import { KpiCard, Skeleton, StatusPill } from './kit';
+import { SortTh, useSort } from './tableKit';
 import { fmtNumber } from '../charts/chartData';
 
 type Go = (r: DatasetsRoute) => void;
@@ -100,6 +101,22 @@ export function HealthTab({ go, isAdmin = false }: { go: Go; isAdmin?: boolean }
         ),
     [h, filter],
   );
+  // Click a header to sort (#385); unsorted, the table keeps its worst-first order.
+  const table = useSort(rows, {
+    collection: { value: (r) => r.collection },
+    layer: { value: (r) => r.layer },
+    freshness: { value: (r) => ORDER[r.freshness] },
+    latest: { value: (r) => r.dateMax?.slice(0, 10), firstDesc: true },
+    coverage: { value: (r) => r.coveragePct, firstDesc: true },
+    gaps: { value: (r) => (r.gaps ? r.gaps.filter((c) => !c.rows).length : null), firstDesc: true },
+    issues: { value: (r) => r.dq.error * 1e9 + r.caveats.blocking * 1e6 + r.dq.warn, firstDesc: true },
+  });
+  const drift = useSort(h?.drift ?? [], {
+    collection: { value: (d) => d.collection },
+    field: { value: (d) => d.field },
+    change: { value: (d) => `${d.breaking ? 0 : 1}${d.kind}` },
+    seen: { value: (d) => new Date(d.lastSeenAt), firstDesc: true },
+  });
   if (!h) return error ? <div className="notice error">{error}</div> : <Skeleton rows={8} />;
   return (
     <div className="health">
@@ -157,15 +174,23 @@ export function HealthTab({ go, isAdmin = false }: { go: Go; isAdmin?: boolean }
             <table>
               <thead>
                 <tr>
-                  <th>Collection</th>
-                  <th>Field</th>
-                  <th>Change</th>
-                  <th>Seen</th>
+                  <SortTh id="collection" sort={drift.sort} onSort={drift.toggle}>
+                    Collection
+                  </SortTh>
+                  <SortTh id="field" sort={drift.sort} onSort={drift.toggle}>
+                    Field
+                  </SortTh>
+                  <SortTh id="change" sort={drift.sort} onSort={drift.toggle}>
+                    Change
+                  </SortTh>
+                  <SortTh id="seen" sort={drift.sort} onSort={drift.toggle}>
+                    Seen
+                  </SortTh>
                   <th />
                 </tr>
               </thead>
               <tbody>
-                {(h.drift ?? []).map((d) => (
+                {drift.sorted.map((d) => (
                   <tr key={d.id}>
                     <td>
                       <button
@@ -280,17 +305,25 @@ export function HealthTab({ go, isAdmin = false }: { go: Go; isAdmin?: boolean }
         <table>
           <thead>
             <tr>
-              <th>Collection</th>
-              <th>Layer</th>
-              <th>Freshness</th>
-              <th>Latest</th>
-              <th>Coverage</th>
-              <th>Gaps</th>
-              <th>Issues</th>
+              {(
+                [
+                  ['collection', 'Collection'],
+                  ['layer', 'Layer'],
+                  ['freshness', 'Freshness'],
+                  ['latest', 'Latest'],
+                  ['coverage', 'Coverage'],
+                  ['gaps', 'Gaps'],
+                  ['issues', 'Issues'],
+                ] as const
+              ).map(([id, label]) => (
+                <SortTh key={id} id={id} sort={table.sort} onSort={table.toggle}>
+                  {label}
+                </SortTh>
+              ))}
             </tr>
           </thead>
           <tbody>
-            {rows.map((r) => (
+            {table.sorted.map((r) => (
               <tr key={r.collection}>
                 <td>
                   <button className="link-button" onClick={() => go({ tab: 'catalog', item: r.collection })}>

@@ -1,5 +1,144 @@
-// Shared table behaviour (#384): infinite-scroll paging, 20 rows per page and more as you scroll.
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+// Shared table behaviour (#384, #385): infinite-scroll paging (20 rows per page, more as you scroll) and
+// click-to-sort column headers that sort by the underlying value, not the displayed text.
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+
+// ---------------------------------------------------------------------------------------------------------
+// Sorting
+
+/** What a column sorts by: numbers numerically, dates by time, text naturally ("L2" before "L10"). */
+export type SortValue = number | string | Date | boolean | null | undefined;
+export type SortState = { by: string; desc: boolean } | null;
+
+const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+const isEmpty = (v: SortValue) =>
+  v === null || v === undefined || v === '' || (typeof v === 'number' && Number.isNaN(v));
+
+/** Compare two values ascending; empty values ("—") are not handled here (see sortRows). */
+export function compareValues(a: SortValue, b: SortValue): number {
+  if (a instanceof Date || b instanceof Date) {
+    const ta = a instanceof Date ? a.getTime() : Date.parse(String(a));
+    const tb = b instanceof Date ? b.getTime() : Date.parse(String(b));
+    return ta - tb;
+  }
+  if (typeof a === 'number' && typeof b === 'number') return a - b;
+  if (typeof a === 'boolean' && typeof b === 'boolean') return Number(a) - Number(b);
+  return collator.compare(String(a), String(b));
+}
+
+/**
+ * Rows sorted by `value` (stable: equal values keep their order). Empty values always go last, in both
+ * directions, so "—" never fills the top of a descending sort.
+ */
+export function sortRows<T>(rows: readonly T[], value: (row: T) => SortValue, desc = false): T[] {
+  return rows
+    .map((row, i) => ({ row, i, v: value(row) }))
+    .sort((x, y) => {
+      const ex = isEmpty(x.v);
+      const ey = isEmpty(y.v);
+      if (ex || ey) return ex === ey ? x.i - y.i : ex ? 1 : -1;
+      const c = compareValues(x.v, y.v);
+      return (desc ? -c : c) || x.i - y.i;
+    })
+    .map((x) => x.row);
+}
+
+/** A value's rank in a logical order (statuses, priorities); unknown values sort after the known ones. */
+export const rankOf =
+  (order: readonly string[]) =>
+  (v: unknown): number | null => {
+    if (v === null || v === undefined || v === '') return null;
+    const i = order.indexOf(String(v));
+    return i === -1 ? order.length : i;
+  };
+
+export type SortColumns<T> = Record<string, { value: (row: T) => SortValue; firstDesc?: boolean }>;
+
+/** The next sort after clicking a column: a new column starts in its first direction, the same one flips. */
+export function nextSort(current: SortState, by: string, firstDesc = false): SortState {
+  return current?.by === by ? { by, desc: !current.desc } : { by, desc: firstDesc };
+}
+
+/**
+ * Sort state plus the sorted rows. Sorting happens on the whole (filtered) list, before any paging, so a
+ * paged table shows the true top rows.
+ */
+export function useSort<T>(rows: readonly T[], columns: SortColumns<T>, initial: SortState = null) {
+  const [sort, setSort] = useState<SortState>(initial);
+  // `columns` is usually an inline object (new every render), and columns can appear later (one per year once
+  // the data loads): read the latest through a ref, and re-sort only when the rows or the sort change.
+  const cols = useRef(columns);
+  cols.current = columns;
+  const sorted = useMemo(() => {
+    const col = sort && cols.current[sort.by];
+    return col ? sortRows(rows, col.value, sort.desc) : [...rows];
+  }, [rows, sort]);
+  const toggle = useCallback(
+    (by: string) => setSort((s) => nextSort(s, by, cols.current[by]?.firstDesc)),
+    [],
+  );
+  return { sorted, sort, toggle, setSort };
+}
+
+/** A sortable column header: a button with an arrow, and aria-sort on the cell. */
+export function SortTh({
+  id,
+  sort,
+  onSort,
+  children,
+  className,
+  title,
+}: {
+  id: string;
+  sort: SortState;
+  onSort: (id: string) => void;
+  children: ReactNode;
+  className?: string;
+  title?: string;
+}) {
+  const active = sort?.by === id;
+  return (
+    <th
+      className={className}
+      aria-sort={active ? (sort!.desc ? 'descending' : 'ascending') : 'none'}
+      title={title}
+    >
+      <button type="button" className="th-sort" onClick={() => onSort(id)}>
+        {children}
+        <span className={`th-sort-arrow${active ? ' active' : ''}`} aria-hidden="true">
+          {active ? (sort!.desc ? '↓' : '↑') : '↕'}
+        </span>
+      </button>
+    </th>
+  );
+}
+
+/** A header row of sortable columns (`label` may be an element). */
+export function SortHead({
+  heads,
+  sort,
+  toggle,
+  extra,
+}: {
+  /** `[id, label, className?]`: `num` right-aligns a numeric column. */
+  heads: readonly (readonly [string, ReactNode, string?])[];
+  sort: SortState;
+  toggle: (id: string) => void;
+  /** Trailing cells that do not sort (actions). */
+  extra?: ReactNode;
+}) {
+  return (
+    <thead>
+      <tr>
+        {heads.map(([id, label, className]) => (
+          <SortTh key={id} id={id} sort={sort} onSort={toggle} className={className}>
+            {label}
+          </SortTh>
+        ))}
+        {extra}
+      </tr>
+    </thead>
+  );
+}
 
 // ---------------------------------------------------------------------------------------------------------
 // Infinite scroll

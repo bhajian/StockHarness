@@ -85,8 +85,11 @@ export function DataGrid({ connectionId, collection }: { connectionId: string; c
     URL.revokeObjectURL(url);
   };
 
-  const toggleSort = (field: string) =>
+  // Sorted server-side over the whole collection (#385); a new sort starts again at the first page.
+  const toggleSort = (field: string) => {
+    setSkip(0);
     setSort((s) => (s?.field === field ? { field, dir: s.dir === 1 ? -1 : 1 } : { field, dir: 1 }));
+  };
 
   const total = page?.total ?? 0;
   const from = total ? skip + 1 : 0;
@@ -146,8 +149,11 @@ export function DataGrid({ connectionId, collection }: { connectionId: string; c
             <thead>
               <tr>
                 {visible.map((col) => (
-                  <th key={col}>
-                    <button className="data-grid-sort" onClick={() => toggleSort(col)}>
+                  <th
+                    key={col}
+                    aria-sort={sort?.field === col ? (sort.dir === 1 ? 'ascending' : 'descending') : 'none'}
+                  >
+                    <button type="button" className="data-grid-sort" onClick={() => toggleSort(col)}>
                       {col}
                       {sort?.field === col &&
                         (sort.dir === 1 ? <ArrowUp size={12} /> : <ArrowDown size={12} />)}

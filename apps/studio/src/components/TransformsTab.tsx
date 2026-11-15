@@ -47,6 +47,7 @@ import { TEMPLATES, readSnippet, type TemplateOutput } from '../transformTemplat
 import type { DatasetsRoute } from '../datasetsRoute';
 import { Button, Empty, Field, IconButton, Modal } from './ui';
 import { KpiCard, Skeleton, StatusPill, Tabs } from './kit';
+import { SortHead, SortTh, rankOf, useSort, type SortColumns } from './tableKit';
 import { BackfillProgress, RunHistory, VersionsPanel } from './TransformHistory';
 import { ScheduleFields } from './agentFields';
 import { ObjectTransfer } from './ObjectTransfer';
@@ -201,6 +202,16 @@ function TransformsList({
     const t = setInterval(() => void reload(), 4000);
     return () => clearInterval(t);
   }, [active, reload]);
+  // Click a header to sort (#385).
+  const { sorted, sort, toggle } = useSort(list ?? [], {
+    name: { value: (t) => t.name },
+    reads: { value: (t) => t.inputs.join(', ') },
+    writes: { value: (t) => t.outputs.map((o) => o.collection).join(', ') },
+    when: { value: (t) => String(whenItRuns(t)) },
+    last: { value: (t) => (t.lastRun ? new Date(t.lastRun.createdAt) : null), firstDesc: true },
+    rows: { value: (t) => (t.lastRun ? rowsWritten(t.lastRun) : null), firstDesc: true },
+    duration: { value: (t) => t.lastRun?.durationMs, firstDesc: true },
+  });
 
   if (!list) return error ? <div className="notice error">{error}</div> : <Skeleton rows={6} />;
   const enabled = list.filter((t) => t.enabled).length;
@@ -285,18 +296,26 @@ function TransformsList({
             <table>
               <thead>
                 <tr>
-                  <th>Name</th>
-                  <th>Reads</th>
-                  <th>Writes (click to see the rows)</th>
-                  <th>When it runs</th>
-                  <th>Last run</th>
-                  <th>Rows</th>
-                  <th>Duration</th>
+                  {(
+                    [
+                      ['name', 'Name'],
+                      ['reads', 'Reads'],
+                      ['writes', 'Writes (click to see the rows)'],
+                      ['when', 'When it runs'],
+                      ['last', 'Last run'],
+                      ['rows', 'Rows'],
+                      ['duration', 'Duration'],
+                    ] as const
+                  ).map(([id, label]) => (
+                    <SortTh key={id} id={id} sort={sort} onSort={toggle}>
+                      {label}
+                    </SortTh>
+                  ))}
                   <th />
                 </tr>
               </thead>
               <tbody>
-                {list.map((t) => (
+                {sorted.map((t) => (
                   <tr key={t.id}>
                     <td>
                       <a
@@ -1161,34 +1180,7 @@ function LatestRun({
       {tab === 'summary' ? (
         <>
           {run.error && <div className="notice error">{run.error}</div>}
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Collection</th>
-                  <th>Read</th>
-                  <th>Written</th>
-                  <th>Unchanged</th>
-                  <th>DQ issues</th>
-                </tr>
-              </thead>
-              <tbody>
-                {[...new Set([...Object.keys(run.reads ?? {}), ...Object.keys(run.outputs ?? {})])].map(
-                  (c) => (
-                    <tr key={c}>
-                      <td>
-                        <code>{c}</code>
-                      </td>
-                      <td>{run.reads?.[c]?.toLocaleString() ?? '—'}</td>
-                      <td>{run.outputs?.[c]?.written?.toLocaleString() ?? '—'}</td>
-                      <td>{run.outputs?.[c]?.unchanged?.toLocaleString() ?? '—'}</td>
-                      <td>{run.outputs?.[c]?.dq || '—'}</td>
-                    </tr>
-                  ),
-                )}
-              </tbody>
-            </table>
-          </div>
+          <RunOutputs run={run} />
         </>
       ) : (
         <pre className="run-log">{(tab === 'stdout' ? run.stdout : run.stderr) || '(empty)'}</pre>
@@ -1387,91 +1379,185 @@ function PreviewPanel({ preview, onClose }: { preview: TransformPreview; onClose
         <p className="muted-line">No output was captured.</p>
       ) : tab === 'rows' ? (
         o.rows.length ? (
-          <div className="table-wrap data-grid-table">
-            <table>
-              <thead>
-                <tr>
-                  {columns.map((c) => (
-                    <th key={c}>{c}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {o.rows.map((r, i) => (
-                  <tr key={i}>
-                    {columns.map((c) => (
-                      <td key={c}>
-                        {r[c] === null || r[c] === undefined ? (
-                          <span className="data-grid-null">—</span>
-                        ) : typeof r[c] === 'object' ? (
-                          JSON.stringify(r[c])
-                        ) : (
-                          String(r[c])
-                        )}
-                      </td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <PreviewRows columns={columns} rows={o.rows} />
         ) : (
           <p className="muted-line">No rows on the sample.</p>
         )
       ) : tab === 'schema' ? (
-        <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Field</th>
-                <th>Type</th>
-                <th>Null %</th>
-              </tr>
-            </thead>
-            <tbody>
-              {Object.entries(o.fields).map(([f, v]) => (
-                <tr key={f}>
-                  <td>
-                    <code>{f}</code>
-                  </td>
-                  <td>{v.type ?? '—'}</td>
-                  <td>{v.null_pct}%</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <PreviewSchema fields={o.fields} />
       ) : o.dq?.length ? (
-        <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Issue</th>
-                <th>Severity</th>
-                <th>Symbol</th>
-                <th>Date</th>
-              </tr>
-            </thead>
-            <tbody>
-              {o.dq.map((d, i) => (
-                <tr key={i}>
-                  <td>{d.issue_type}</td>
-                  <td>
-                    <StatusPill
-                      status={d.severity === 'error' ? 'failed' : d.severity === 'warn' ? 'warn' : 'ok'}
-                      label={d.severity}
-                    />
-                  </td>
-                  <td>{d.security_id ?? '—'}</td>
-                  <td>{d.date ?? '—'}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <PreviewDq dq={o.dq} />
       ) : (
         <p className="muted-line">No data-quality issues on the sample.</p>
       )}
     </section>
+  );
+}
+
+// --- Sortable result tables (#385) --------------------------------------------------------------------
+type Cell = Record<string, unknown>;
+const cellValue = (v: unknown) =>
+  v === null || v === undefined
+    ? null
+    : typeof v === 'number' || typeof v === 'boolean'
+      ? v
+      : typeof v === 'object'
+        ? JSON.stringify(v)
+        : String(v);
+const dqRank = rankOf(['error', 'warn', 'info']);
+
+function PreviewRows({ columns, rows }: { columns: string[]; rows: Cell[] }) {
+  const cols: SortColumns<Cell> = Object.fromEntries(
+    columns.map((c) => [c, { value: (r: Cell) => cellValue(r[c]) }]),
+  );
+  const { sorted, sort, toggle } = useSort(rows, cols);
+  return (
+    <div className="table-wrap data-grid-table">
+      <table>
+        <SortHead heads={columns.map((c) => [c, c])} sort={sort} toggle={toggle} />
+        <tbody>
+          {sorted.map((r, i) => (
+            <tr key={i}>
+              {columns.map((c) => (
+                <td key={c}>
+                  {r[c] === null || r[c] === undefined ? (
+                    <span className="data-grid-null">—</span>
+                  ) : typeof r[c] === 'object' ? (
+                    JSON.stringify(r[c])
+                  ) : (
+                    String(r[c])
+                  )}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function PreviewSchema({ fields }: { fields: Record<string, { type?: string | null; null_pct: number }> }) {
+  const rows = Object.entries(fields).map(([name, v]) => ({ name, ...v }));
+  const { sorted, sort, toggle } = useSort(rows, {
+    field: { value: (r) => r.name },
+    type: { value: (r) => r.type },
+    nulls: { value: (r) => r.null_pct, firstDesc: true },
+  });
+  return (
+    <div className="table-wrap">
+      <table>
+        <SortHead
+          heads={[
+            ['field', 'Field'],
+            ['type', 'Type'],
+            ['nulls', 'Null %'],
+          ]}
+          sort={sort}
+          toggle={toggle}
+        />
+        <tbody>
+          {sorted.map((r) => (
+            <tr key={r.name}>
+              <td>
+                <code>{r.name}</code>
+              </td>
+              <td>{r.type ?? '—'}</td>
+              <td>{r.null_pct}%</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+type DqRow = { issue_type: string; severity: string; security_id?: string | null; date?: string | null };
+function PreviewDq({ dq }: { dq: DqRow[] }) {
+  const { sorted, sort, toggle } = useSort(dq, {
+    issue: { value: (d) => d.issue_type },
+    severity: { value: (d) => dqRank(d.severity) },
+    symbol: { value: (d) => d.security_id },
+    date: { value: (d) => d.date },
+  });
+  return (
+    <div className="table-wrap">
+      <table>
+        <SortHead
+          heads={[
+            ['issue', 'Issue'],
+            ['severity', 'Severity'],
+            ['symbol', 'Symbol'],
+            ['date', 'Date'],
+          ]}
+          sort={sort}
+          toggle={toggle}
+        />
+        <tbody>
+          {sorted.map((d, i) => (
+            <tr key={i}>
+              <td>{d.issue_type}</td>
+              <td>
+                <StatusPill
+                  status={d.severity === 'error' ? 'failed' : d.severity === 'warn' ? 'warn' : 'ok'}
+                  label={d.severity}
+                />
+              </td>
+              <td>{d.security_id ?? '—'}</td>
+              <td>{d.date ?? '—'}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function RunOutputs({ run }: { run: TransformRun }) {
+  const rows = [...new Set([...Object.keys(run.reads ?? {}), ...Object.keys(run.outputs ?? {})])].map(
+    (c) => ({
+      c,
+      read: run.reads?.[c],
+      written: run.outputs?.[c]?.written,
+      unchanged: run.outputs?.[c]?.unchanged,
+      dq: run.outputs?.[c]?.dq,
+    }),
+  );
+  const { sorted, sort, toggle } = useSort(rows, {
+    collection: { value: (r) => r.c },
+    read: { value: (r) => r.read, firstDesc: true },
+    written: { value: (r) => r.written, firstDesc: true },
+    unchanged: { value: (r) => r.unchanged, firstDesc: true },
+    dq: { value: (r) => r.dq || null, firstDesc: true },
+  });
+  return (
+    <div className="table-wrap">
+      <table>
+        <SortHead
+          heads={[
+            ['collection', 'Collection'],
+            ['read', 'Read'],
+            ['written', 'Written'],
+            ['unchanged', 'Unchanged'],
+            ['dq', 'DQ issues'],
+          ]}
+          sort={sort}
+          toggle={toggle}
+        />
+        <tbody>
+          {sorted.map((r) => (
+            <tr key={r.c}>
+              <td>
+                <code>{r.c}</code>
+              </td>
+              <td>{r.read?.toLocaleString() ?? '—'}</td>
+              <td>{r.written?.toLocaleString() ?? '—'}</td>
+              <td>{r.unchanged?.toLocaleString() ?? '—'}</td>
+              <td>{r.dq || '—'}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }

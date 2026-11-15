@@ -344,6 +344,9 @@ app.get('/api/runs', async (req, res) => {
   checkTokenScope(req, 'read');
   const page = z.coerce.number().int().min(0).max(10000).default(0).parse(req.query.page);
   const cycle = z.string().uuid().optional().parse(req.query.cycle);
+  // Column sorting over every run, not one page (#385): a whitelist of fields, newest first by default.
+  const sortBy = z.enum(['createdAt', 'status', 'trigger']).default('createdAt').parse(req.query.sort);
+  const dir = z.enum(['asc', 'desc']).default('desc').parse(req.query.dir) === 'asc' ? 1 : -1;
   const filter = {
     ...(cycle ? { 'monitoring.cycleId': cycle } : {}),
     ownerId: req.principal!.tenantId,
@@ -351,7 +354,7 @@ app.get('/api/runs', async (req, res) => {
   };
   const runs = await collection<Run>('runs')
     .find(filter, { projection: { snapshot: 0, outputs: 0, events: 0, history: 0 } })
-    .sort({ createdAt: -1 })
+    .sort(sortBy === 'createdAt' ? { createdAt: dir } : { [sortBy]: dir, createdAt: -1 })
     .skip(page * 50)
     .limit(50)
     .toArray();

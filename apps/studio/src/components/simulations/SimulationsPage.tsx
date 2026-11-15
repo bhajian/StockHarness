@@ -4,6 +4,7 @@ import React, { useEffect, useState } from 'react';
 import { Plus, Play } from 'lucide-react';
 import { api } from '../../api';
 import { Skeleton, StatusPill } from '../kit';
+import { SortHead, rankOf, useSort } from '../tableKit';
 import { go, num, pct, setQuery, useLocation } from '../ideas/nav';
 import { SimulationDetail } from './SimulationDetail';
 import { ScheduleModal } from './ScheduleModal';
@@ -68,6 +69,18 @@ function SimulationList({ isAdmin }: { isAdmin: boolean }) {
       stop = true;
     };
   }, []);
+  // Click a header to sort (#385); unsorted, newest first.
+  const { sorted, sort, toggle } = useSort(rows ?? [], {
+    name: { value: (r) => r.name },
+    ideas: { value: (r) => r.ideas.join(', ') },
+    period: { value: (r) => r.period.start },
+    status: { value: (r) => rankOf(['failed', 'running', 'queued', 'succeeded'])(r.status) },
+    cagr: { value: (r) => r.cagr, firstDesc: true },
+    sharpe: { value: (r) => r.sharpe, firstDesc: true },
+    maxdd: { value: (r) => r.maxDrawdown, firstDesc: true },
+    nav: { value: (r) => r.finalNav, firstDesc: true },
+    created: { value: (r) => new Date(r.createdAt), firstDesc: true },
+  });
   if (!rows) return <Skeleton rows={8} />;
   return (
     <section className="page-section sims-page">
@@ -100,21 +113,23 @@ function SimulationList({ isAdmin }: { isAdmin: boolean }) {
       ) : (
         <div className="table-wrap sims-table">
           <table aria-label="Simulations">
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Ideas</th>
-                <th>Period</th>
-                <th>Status</th>
-                <th className="num">CAGR</th>
-                <th className="num">Sharpe</th>
-                <th className="num">Max DD</th>
-                <th className="num">Final NAV</th>
-                <th>Created</th>
-              </tr>
-            </thead>
+            <SortHead
+              heads={[
+                ['name', 'Name'],
+                ['ideas', 'Ideas'],
+                ['period', 'Period'],
+                ['status', 'Status'],
+                ['cagr', 'CAGR', 'num'],
+                ['sharpe', 'Sharpe', 'num'],
+                ['maxdd', 'Max DD', 'num'],
+                ['nav', 'Final NAV', 'num'],
+                ['created', 'Created'],
+              ]}
+              sort={sort}
+              toggle={toggle}
+            />
             <tbody>
-              {rows.map((r) => (
+              {sorted.map((r) => (
                 <tr key={r.id} className="clickable" onClick={() => go(`/simulations/${r.id}`)}>
                   <td>
                     <strong>{r.name}</strong>

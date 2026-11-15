@@ -6,6 +6,7 @@ import { CirclePause, CirclePlay, Play, Save } from 'lucide-react';
 import { api, send, type Data } from '../../api';
 import { Field } from '../ui';
 import { Skeleton, StatusPill } from '../kit';
+import { SortHead, useSort } from '../tableKit';
 import { ALL_PROFILES } from '../../../../../packages/core/src/profiles.js';
 
 const ROLES = [
@@ -422,49 +423,7 @@ export function ResearchSetup({
             />
           </Field>
         </div>
-        <table className="compact-table" aria-label="Spend by model">
-          <thead>
-            <tr>
-              <th>Model</th>
-              <th className="num">Price in / out (per 1M)</th>
-              <th className="num">Today</th>
-              <th className="num">Since the cap started</th>
-              <th>Cap (USD)</th>
-              <th>Daily cap (USD)</th>
-            </tr>
-          </thead>
-          <tbody>
-            {modelRows.map((m) => (
-              <tr key={m.model}>
-                <td>
-                  <code>{m.model}</code>
-                  {m.exceeded && <StatusPill status="blocked" label="capped" />}
-                </td>
-                <td className="num">{m.price ? `${usd(m.price.input)} / ${usd(m.price.output)}` : '—'}</td>
-                <td className="num">{usd(m.today)}</td>
-                <td className="num">{usd(m.sinceCap)}</td>
-                <td>
-                  <input
-                    aria-label={`${m.model} cap`}
-                    type="number"
-                    min={0}
-                    value={s.budget?.models?.[m.model]?.capUsd ?? ''}
-                    onChange={(e) => setModelCap(m.model, { capUsd: numOr(e.target.value) })}
-                  />
-                </td>
-                <td>
-                  <input
-                    aria-label={`${m.model} daily cap`}
-                    type="number"
-                    min={0}
-                    value={s.budget?.models?.[m.model]?.dailyCapUsd ?? ''}
-                    onChange={(e) => setModelCap(m.model, { dailyCapUsd: numOr(e.target.value) })}
-                  />
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <SpendTable rows={modelRows} caps={s.budget?.models ?? {}} setModelCap={setModelCap} />
       </section>
 
       <section className="setup-section" aria-label="Schedule">
@@ -607,5 +566,75 @@ function ProfilePicker({ value, onChange }: { value: string[]; onChange: (v: str
         <p className="muted-line">Options profiles open when the options evaluator is ready (#329).</p>
       )}
     </div>
+  );
+}
+
+/** Spend per model (#385: sortable by model, price and spend; the cap inputs do not sort, so rows never jump
+ * while a cap is typed). */
+function SpendTable({
+  rows,
+  caps,
+  setModelCap,
+}: {
+  rows: any[];
+  caps: Record<string, { capUsd?: number; dailyCapUsd?: number }>;
+  setModelCap: (model: string, patch: Record<string, number | undefined>) => void;
+}) {
+  const { sorted, sort, toggle } = useSort(rows, {
+    model: { value: (m) => m.model },
+    price: { value: (m) => m.price?.input, firstDesc: true },
+    today: { value: (m) => m.today, firstDesc: true },
+    since: { value: (m) => m.sinceCap, firstDesc: true },
+  });
+  return (
+    <table className="compact-table" aria-label="Spend by model">
+      <SortHead
+        heads={[
+          ['model', 'Model'],
+          ['price', 'Price in / out (per 1M)', 'num'],
+          ['today', 'Today', 'num'],
+          ['since', 'Since the cap started', 'num'],
+        ]}
+        sort={sort}
+        toggle={toggle}
+        extra={
+          <>
+            <th>Cap (USD)</th>
+            <th>Daily cap (USD)</th>
+          </>
+        }
+      />
+      <tbody>
+        {sorted.map((m) => (
+          <tr key={m.model}>
+            <td>
+              <code>{m.model}</code>
+              {m.exceeded && <StatusPill status="blocked" label="capped" />}
+            </td>
+            <td className="num">{m.price ? `${usd(m.price.input)} / ${usd(m.price.output)}` : '—'}</td>
+            <td className="num">{usd(m.today)}</td>
+            <td className="num">{usd(m.sinceCap)}</td>
+            <td>
+              <input
+                aria-label={`${m.model} cap`}
+                type="number"
+                min={0}
+                value={caps[m.model]?.capUsd ?? ''}
+                onChange={(e) => setModelCap(m.model, { capUsd: numOr(e.target.value) })}
+              />
+            </td>
+            <td>
+              <input
+                aria-label={`${m.model} daily cap`}
+                type="number"
+                min={0}
+                value={caps[m.model]?.dailyCapUsd ?? ''}
+                onChange={(e) => setModelCap(m.model, { dailyCapUsd: numOr(e.target.value) })}
+              />
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
   );
 }

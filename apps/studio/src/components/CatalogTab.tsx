@@ -20,6 +20,7 @@ import {
 import type { DatasetsRoute } from '../datasetsRoute';
 import { Button, Empty, IconButton } from './ui';
 import { KpiCard, Skeleton, StatusPill, Tabs } from './kit';
+import { SortTh, useSort } from './tableKit';
 import { DataGrid } from './DataGrid';
 import { HeatmapChart, TimeSeriesChart } from '../charts/Charts';
 import { fmtNumber } from '../charts/chartData';
@@ -388,6 +389,15 @@ function FieldsTable({
   const [drafts, setDrafts] = useState<Record<string, { description: string; unit: string }>>({});
   const value = (f: CatalogDetail['fields'][number]) =>
     drafts[f.name] ?? { description: f.description ?? '', unit: f.unit ?? '' };
+  // Click a header to sort (#385); unsorted, fields keep the collection's order.
+  const { sorted, sort, toggle } = useSort(entry.fields, {
+    field: { value: (f) => f.name },
+    type: { value: (f) => f.type },
+    nulls: { value: (f) => f.null_pct, firstDesc: true },
+    example: { value: (f) => exampleText(f.example) },
+    description: { value: (f) => f.description },
+    unit: { value: (f) => f.unit },
+  });
   const save = async (f: CatalogDetail['fields'][number]) => {
     const v = drafts[f.name];
     if (!v || (v.description === (f.description ?? '') && v.unit === (f.unit ?? ''))) return;
@@ -402,16 +412,24 @@ function FieldsTable({
       <table>
         <thead>
           <tr>
-            <th>Field</th>
-            <th>Type</th>
-            <th>Null %</th>
-            <th>Example</th>
-            <th>Description</th>
-            <th>Unit</th>
+            {(
+              [
+                ['field', 'Field'],
+                ['type', 'Type'],
+                ['nulls', 'Null %'],
+                ['example', 'Example'],
+                ['description', 'Description'],
+                ['unit', 'Unit'],
+              ] as const
+            ).map(([id, label]) => (
+              <SortTh key={id} id={id} sort={sort} onSort={toggle}>
+                {label}
+              </SortTh>
+            ))}
           </tr>
         </thead>
         <tbody>
-          {entry.fields.map((f) => (
+          {sorted.map((f) => (
             <tr key={f.name}>
               <td>
                 <code>{f.name}</code>
