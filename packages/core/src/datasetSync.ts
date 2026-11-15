@@ -283,7 +283,16 @@ const objToStr = (o: Record<string, string | number>) =>
   Object.fromEntries(Object.entries(o).map(([k, v]) => [k, String(v)]));
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-export async function resolveSymbols(sync: DatasetSync, wsDb: ReturnType<typeof mongo.db>, apikey: string) {
+/** Routine runs skip names delisted more than this many days ago: they produce no new data (#398). */
+export const DEAD_AFTER_DAYS = 30;
+
+export async function resolveSymbols(
+  sync: DatasetSync,
+  wsDb: ReturnType<typeof mongo.db>,
+  apikey: string,
+  /** Backfills pass true: a dead company's history is pulled once, in full. */
+  opts: { includeLongDelisted?: boolean } = {},
+) {
   if (sync.symbolsMode === 'list' && sync.symbols?.length) return sync.symbols;
   if (sync.symbolsMode === 'preset' && sync.preset) {
     const preset = presetById.get(sync.preset);
@@ -311,15 +320,29 @@ export async function resolveSymbols(sync: DatasetSync, wsDb: ReturnType<typeof 
   }
   const rows = await wsDb
     .collection('universe')
-    .find({}, { projection: { symbol: 1, _id: 0 } })
+    .find({}, { projection: { symbol: 1, is_delisted: 1, delisted_date: 1, _id: 0 } })
     .toArray();
-  const symbols = rows.map((r) => r.symbol as string).filter(Boolean);
+  const cutoff = addDays(today(), -DEAD_AFTER_DAYS);
+  const symbols = rows
+    .filter(
+      (r) =>
+        opts.includeLongDelisted ||
+        !longDelisted(r as { is_delisted?: unknown; delisted_date?: unknown }, cutoff),
+    )
+    .map((r) => r.symbol as string)
+    .filter(Boolean);
   if (!symbols.length)
     throw new HttpError(
       400,
       'No universe yet: sync the Universe dataset first, or use an explicit symbol list',
     );
   return symbols;
+}
+
+/** A universe row delisted before `cutoff` (an ISO date): no new prices, filings or estimates will come. */
+export function longDelisted(r: { is_delisted?: unknown; delisted_date?: unknown }, cutoff: string) {
+  const d = typeof r.delisted_date === 'string' ? r.delisted_date.slice(0, 10) : '';
+  return r.is_delisted === true && /^\d{4}-\d{2}-\d{2}$/.test(d) && d < cutoff;
 }
 
 export async function upsertRows(
