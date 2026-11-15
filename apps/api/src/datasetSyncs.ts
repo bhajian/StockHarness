@@ -51,7 +51,15 @@ async function listSyncs(ownerId: string) {
   const items = await syncsCol().find({ ownerId }).sort({ createdAt: -1 }).toArray();
   // Flag syncs with an in-flight run (ignoring rows orphaned by a restart) so the table can show it.
   const running = await datasetSyncRuns()
-    .find({ ownerId, status: 'running', startedAt: { $gt: new Date(Date.now() - 12 * 3600 * 1000) } })
+    .find({
+      ownerId,
+      status: 'running',
+      // A resumed run (#416) can be older than 12 hours: its heartbeat says it is alive.
+      $or: [
+        { startedAt: { $gt: new Date(Date.now() - 12 * 3600 * 1000) } },
+        { heartbeatAt: { $gt: new Date(Date.now() - 30 * 60 * 1000) } },
+      ],
+    })
     .project<{ syncId: string }>({ syncId: 1 })
     .toArray();
   const busy = new Set(running.map((r) => r.syncId));
