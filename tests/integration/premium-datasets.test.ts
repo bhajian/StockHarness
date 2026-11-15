@@ -71,6 +71,7 @@ before(async () => {
     sync('news', 'news_stocks'),
     sync('ins', 'insider_trades_history', { symbolsMode: 'list', symbols: ['AAPL', 'TINY'] }),
     sync('km', 'key_metrics_quarterly', { symbolsMode: 'list', symbols: ['AAPL'] }),
+    sync('prof', 'company_profiles'),
   ] as any[]);
   globalThis.fetch = (async (url: string) => {
     if (!String(url).startsWith('https://financialmodelingprep.com/')) return realFetch(url);
@@ -298,5 +299,33 @@ test(
       undefined,
       'sync depth untouched',
     );
+  },
+);
+
+test(
+  'routine runs skip names delisted long ago; backfills include them (#398)',
+  { skip: skipReason },
+  async () => {
+    // The universe from the tests above: D0-D2 were delisted in 2022; add one delisted last week.
+    const recent = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
+    await db()
+      .collection('universe')
+      .insertOne({ symbol: 'JUSTGONE', exchange: 'NYSE', is_delisted: true, delisted_date: recent });
+    const all = await db().collection('universe').countDocuments();
+    const r = await run('prof');
+    assert.equal(r.status, 'succeeded', r.error);
+    assert.equal(r.symbolsAttempted, all - 3, 'D0, D1, D2 skipped; JUSTGONE still pulled');
+    const job = await bf.createBackfill(owner, 'ins', { autostart: false });
+    assert.equal(job.symbols!.length, 2, 'list mode is untouched');
+    const kb = await bf.createBackfill(owner, 'sec', { from: '2026-01-01', autostart: false });
+    assert.equal(kb.mode, 'windows');
+    await bf.backfills().deleteMany({ _id: { $in: [job._id, kb._id] } });
+    const uni = await datasetSyncs().findOne({ _id: 'prof' });
+    const pb = await bf.createBackfill(owner, uni!._id, { autostart: false }).catch((e) => e);
+    // company_profiles has no history to backfill; use a limit-based dataset for the universe check.
+    assert.match(String(pb?.message ?? ''), /history/i);
+    await datasetSyncs().insertOne(sync('div', 'dividends_history') as any);
+    const db2 = await bf.createBackfill(owner, 'div', { autostart: false });
+    assert.equal(db2.symbols!.length, all, 'a backfill pulls every name once, the long-dead ones included');
   },
 );

@@ -74,6 +74,8 @@ export const backfills = () => collection<Backfill>('dataset_backfills');
 const ACTIVE: BackfillStatus[] = ['queued', 'running', 'paused'];
 /** One request may return at most ~5,000 daily bars (FMP cap): split longer ranges. */
 const MAX_YEARS_PER_REQUEST = 18;
+/** Symbols a backfill pulls at once (#398); the shared FMP limiter still caps the total rate. */
+const BACKFILL_CONCURRENCY = Math.max(1, Math.min(16, Number(process.env.BACKFILL_CONCURRENCY) || 4));
 
 /** Why a dataset cannot be backfilled, or undefined when it can. */
 export function backfillUnsupported(def: DatasetDef): string | undefined {
@@ -167,7 +169,7 @@ export async function createBackfill(
   if (def.perSymbol) {
     const apikey = await fmpApiKey(ownerId, sync.connectionId);
     symbols = await syncContext.run({ priority: 'BACKFILL' }, () =>
-      resolveSymbols(sync, mongo.db(workspaceDatabase(ownerId)), apikey),
+      resolveSymbols(sync, mongo.db(workspaceDatabase(ownerId)), apikey, { includeLongDelisted: true }),
     );
   }
   const plan = planBackfill(def, from, to, symbols, Math.max(1, Math.min(500, opts.batchSize ?? 25)));
@@ -321,11 +323,13 @@ export async function runBackfill(job: Backfill) {
       let lastErr: string | undefined;
       try {
         if (job.mode === 'symbols') {
-          for (let k = b.next ?? b.start!; k < b.end!; k++) {
-            if (k % 5 === 0 && (await live()) !== 'running') return; // pause within a batch, resumes at k
-            const symbol = job.symbols![k];
+          // A few symbols at a time (#398): the shared limiter still caps the request rate, but a backfill no
+          // longer waits on one response before asking for the next. Progress is saved per group of symbols.
+          const pullSymbol = async (symbol: string) => {
             let symRows = 0;
             let symCalls = 0;
+            let err: string | undefined;
+            let failed = false;
             try {
               // Time series: split ranges beyond the per-request cap; limit-based: one call at the sync's depth.
               const ranges =
@@ -337,7 +341,7 @@ export async function runBackfill(job: Backfill) {
                 const pages = def.pagesPerSymbol ?? 1;
                 for (let page = 0; page < pages; page++) {
                   if (pages > 1) params.page = page;
-                  const data = await call(params);
+                  const data = await call({ ...params });
                   symCalls++;
                   const list = Array.isArray(data) ? data : data ? [data] : [];
                   for (const r of list)
@@ -352,14 +356,28 @@ export async function runBackfill(job: Backfill) {
               }
             } catch (e) {
               // A symbol the plan does not serve (non-US listings) is not an error of the backfill (#291).
-              if (!(e instanceof FmpPlanLimit && e.param === 'symbol')) errors++;
-              lastErr = `${symbol}: ${safeError(e)}`;
+              failed = !(e instanceof FmpPlanLimit && e.param === 'symbol');
+              err = `${symbol}: ${safeError(e)}`;
             }
-            rows += symRows;
+            return { symRows, symCalls, err, failed };
+          };
+          for (let k = b.next ?? b.start!; k < b.end!; k += BACKFILL_CONCURRENCY) {
+            if ((await live()) !== 'running') return; // paused or cancelled: resumes at k
+            const group = job.symbols!.slice(k, Math.min(b.end!, k + BACKFILL_CONCURRENCY));
+            const results = await Promise.all(group.map(pullSymbol));
+            let groupRows = 0;
+            let groupCalls = 0;
+            for (const r of results) {
+              groupRows += r.symRows;
+              groupCalls += r.symCalls;
+              if (r.failed) errors++;
+              if (r.err) lastErr = r.err;
+            }
+            rows += groupRows;
             await save(
               b.i,
-              { next: k + 1, rows, errors, ...(lastErr ? { error: lastErr } : {}) },
-              { rows: symRows, calls: symCalls },
+              { next: k + group.length, rows, errors, ...(lastErr ? { error: lastErr } : {}) },
+              { rows: groupRows, calls: groupCalls },
             );
           }
         } else if (job.mode === 'fixed') {

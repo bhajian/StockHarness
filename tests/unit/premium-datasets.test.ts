@@ -13,6 +13,7 @@ const {
   perSymbolParams,
   chunkRanges,
   UNIVERSE_MIN_MARKET_CAP,
+  longDelisted,
 } = await import('../../packages/core/src/datasetSync.js');
 const { planBackfill, backfillUnsupported } = await import('../../packages/core/src/datasetBackfill.js');
 const { defaultPriority } = await import('../../packages/core/src/syncScheduler.js');
@@ -152,4 +153,17 @@ test('every dataset is well formed; index presets read the constituents', () => 
   assert.equal(defaultPriority('insider_trades_history'), 'P2');
   for (const id of ['sp500', 'ndx', 'dji']) assert.equal(presetById.get(id)?.index, id);
   assert.doesNotMatch(presetById.get('sp500_like')!.description, /plan upgrade/);
+});
+
+test('long-delisted names: delisted before the cutoff, with a real date (#398)', () => {
+  const cut = '2026-10-15';
+  assert.equal(longDelisted({ is_delisted: true, delisted_date: '2022-03-01' }, cut), true);
+  assert.equal(
+    longDelisted({ is_delisted: true, delisted_date: '2026-11-01' }, cut),
+    false,
+    'recent: still pulled',
+  );
+  assert.equal(longDelisted({ is_delisted: true, delisted_date: '2026-12-30' }, cut), false, 'scheduled');
+  assert.equal(longDelisted({ is_delisted: true }, cut), false, 'no date: keep');
+  assert.equal(longDelisted({ is_delisted: false, delisted_date: '2020-01-01' }, cut), false);
 });
