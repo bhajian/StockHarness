@@ -16,7 +16,7 @@ from .prices_logic import compute_symbol_rows, pick_bars
 from ._resolve import as_date, security_symbols
 
 UTC = timezone.utc
-TV = "5"  # 5: notes, preferreds, warrants, units and funds are skipped (#393); 4: one ticker per date, junk quotes and ×10 days without an action carry no return (#255); 3: #240
+TV = "6"  # 6: bars on non-trading days are dropped (#437); 5: notes, preferreds, warrants, units and funds are skipped (#393); 4: one ticker per date, junk quotes and ×10 days without an action carry no return (#255); 3: #240
 ERROR_FLAGS = ("zero_or_negative_price", "high_lt_low", "implausible_price")
 BAR_FIELDS = ["_id", "symbol", "date", "open", "high", "low", "close", "volume", "vwap"]
 
@@ -37,6 +37,12 @@ def compute(read, window=None, *, security_ids=None):
     }
     if security_ids:
         sec_syms = {k: v for k, v in sec_syms.items() if k in set(security_ids)}
+    # Trading sessions only (#437): FMP sometimes returns a bar on a weekend or holiday (BEP on Saturday 2025-11-08).
+    sessions = {
+        str(r["date"].isoformat() if hasattr(r["date"], "isoformat") else r["date"])[:10]
+        for r in read("trading_calendar", {"is_trading_day": True}, ["date"])
+        if r.get("date")
+    }
     actions = {}
     for a in read("corporate_actions", None, ["security_id", "action_type", "ex_date", "dividend_amount", "split_ratio"]):
         actions.setdefault(a["security_id"], []).append(a)
@@ -60,6 +66,8 @@ def compute(read, window=None, *, security_ids=None):
         else:
             q["date"] = {"$gte": lookback, "$lte": end}
         bars_raw = read("eod_prices", q, BAR_FIELDS, [("date", 1)])
+        if sessions:
+            bars_raw = [b for b in bars_raw if str(b.get("date"))[:10] in sessions]
         if not bars_raw:
             continue
         # One bar per date, from the right ticker when the security has several (#255).
