@@ -7484,6 +7484,10 @@ details.advanced summary {
   box-shadow: inset 3px 0 0 var(--accent, #4f46e5);
 }
 .dataset-row-actions { white-space: nowrap; }
+/* #420: the collection total, with the last run's rows under it. */
+.rows-total > span { display: block; font-variant-numeric: tabular-nums; }
+.rows-total > small { display: block; font-size: 11px; line-height: 1.2; }
+.dataset-table td.rows-total { white-space: nowrap; line-height: 1.25; }
 .dataset-row-actions .icon-button { display: inline-flex; }
 .dataset-grid-section { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 .dataset-grid-head h2 { margin: 0 0 4px; }

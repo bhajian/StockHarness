@@ -55,7 +55,7 @@ import { TransformsTab } from './TransformsTab';
 import { PipelinesTab } from './PipelinesTab';
 import { CatalogTab } from './CatalogTab';
 import { HealthTab } from './HealthTab';
-import { SyncDetail } from './SyncDetail';
+import { RowsTotal, SyncDetail } from './SyncDetail';
 import { SyncScheduleFields, type SyncTrigger } from './SyncScheduleFields';
 import {
   DATASET_TABS,
@@ -433,7 +433,8 @@ function SyncsTab({
     schedule: { value: (s) => (s.schedule?.enabled ? Number(s.schedule.everyMinutes) : null) },
     next: { value: (s) => (s.schedule?.enabled ? t(s.nextRunAt) : null) },
     last: { value: (s) => t(s.lastRunAt), firstDesc: true },
-    rows: { value: (s) => (typeof s.lastRows === 'number' ? s.lastRows : null), firstDesc: true },
+    // #420: the collection's total, not the last run's rows.
+    rows: { value: (s) => coverage.get(collectionOf(s))?.rows ?? null, firstDesc: true },
     status: { value: (s) => rankOf(['failed', 'running', 'queued', 'ready', 'disabled'])(statusOf(s)) },
   });
   const page = useInfiniteRows(sorted, {
@@ -772,7 +773,9 @@ function SyncsTab({
                         <td>{describeSchedule(s.schedule as Schedule | undefined)}</td>
                         <td>{s.nextRunAt && s.schedule?.enabled ? timestamp(s.nextRunAt) : '—'}</td>
                         <td>{s.lastRunAt ? timestamp(s.lastRunAt) : '—'}</td>
-                        <td>{typeof s.lastRows === 'number' ? s.lastRows.toLocaleString() : '—'}</td>
+                        <td className="rows-total">
+                          <RowsTotal total={coverage.get(collectionOf(s))?.rows} lastRun={s.lastRows} />
+                        </td>
                         <td>
                           <Status
                             status={

@@ -63,6 +63,17 @@ export function histogramBins(values: number[], bins = 20) {
 }
 export const escapeHtml = (s: string) =>
   s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
+/** A row count at a glance (#420): 5.0M, 179.8k, 2,128. */
+export const fmtCompact = (v: unknown) =>
+  typeof v !== 'number' || !Number.isFinite(v)
+    ? '—'
+    : Math.abs(v) >= 1e9
+      ? `${(v / 1e9).toFixed(1)}B`
+      : Math.abs(v) >= 1e6
+        ? `${(v / 1e6).toFixed(1)}M`
+        : Math.abs(v) >= 1e4
+          ? `${(v / 1e3).toFixed(1)}k`
+          : Math.round(v).toLocaleString('en-US');
 export const fmtNumber = (v: unknown) =>
   typeof v !== 'number' || !Number.isFinite(v)
     ? '—'
