@@ -24,7 +24,6 @@ export function useInfiniteRows<T>(
   const pageSize = opts.pageSize ?? PAGE_SIZE;
   const [pages, setPages] = useState(1);
   const resetKey = JSON.stringify(opts.resetKey ?? null);
-  useEffect(() => setPages(1), [resetKey]);
   const count = rowsToShow(rows.length, pages, pageSize, opts.keepIndex);
   const shown = useMemo(() => rows.slice(0, count), [rows, count]);
   const hasMore = count < rows.length;
@@ -34,6 +33,12 @@ export function useInfiniteRows<T>(
   );
 
   const rootRef = useRef<HTMLDivElement | null>(null);
+  // A new filter or sort starts again at the top: the first page, scrolled up (otherwise the sentinel is still in
+  // view at the bottom and loads every page again).
+  useEffect(() => {
+    setPages(1);
+    if (rootRef.current) rootRef.current.scrollTop = 0;
+  }, [resetKey]);
   const sentinel = useRef<Element | null>(null);
   const observer = useRef<IntersectionObserver | null>(null);
   const sentinelRef = useCallback(
