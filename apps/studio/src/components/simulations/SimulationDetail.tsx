@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { api } from '../../api';
 import { Drawer, KpiCard, Skeleton, StatusPill, Tabs } from '../kit';
+import { SortHead, useSort } from '../tableKit';
 import { BarChart, HeatmapChart, TimeSeriesChart } from '../../charts/Charts';
 import { go, num, pct } from '../ideas/nav';
 import { duration, money, openSchedule, when } from './SimulationsPage';
@@ -318,7 +319,22 @@ function Trades({ id, ideas }: { id: string; ideas: string[] }) {
     const t = setTimeout(() => void api(`/simulations/${id}/trades?${qs}`).then(setData), 250);
     return () => clearTimeout(t);
   }, [id, JSON.stringify(filter)]);
-  const items: any[] = data?.items ?? [];
+  // Click a header to sort the loaded trades (#385); picking an order in the Sort menu clears it.
+  const tradeSort = useSort((data?.items ?? []) as any[], {
+    n: { value: (t) => t.n },
+    security: { value: (t) => t.ticker ?? t.security_id },
+    idea: { value: (t) => t.idea_id },
+    side: { value: (t) => t.side },
+    entry: { value: (t) => t.entry_date },
+    exit: { value: (t) => t.exit_date, firstDesc: true },
+    sessions: { value: (t) => t.days_held, firstDesc: true },
+    ret: { value: (t) => t.return, firstDesc: true },
+    pnl: { value: (t) => t.pnl, firstDesc: true },
+    reason: { value: (t) => t.exit_reason },
+  });
+  const { setSort: setTradeSort } = tradeSort;
+  useEffect(() => setTradeSort(null), [filter.sort, setTradeSort]);
+  const items: any[] = tradeSort.sorted;
   const height = Math.min(600, items.length * ROW + 44);
   const first = Math.max(0, Math.floor(top / ROW) - 5);
   const last = Math.min(items.length, first + Math.ceil(height / ROW) + 10);
@@ -401,20 +417,22 @@ function Trades({ id, ideas }: { id: string; ideas: string[] }) {
           onScroll={(e) => setTop((e.target as HTMLDivElement).scrollTop)}
         >
           <table aria-label="Trades">
-            <thead>
-              <tr>
-                <th>#</th>
-                <th>Security</th>
-                <th>Idea</th>
-                <th>Side</th>
-                <th>Entry</th>
-                <th>Exit</th>
-                <th className="num">Sessions</th>
-                <th className="num">Return</th>
-                <th className="num">P&amp;L</th>
-                <th>Exit reason</th>
-              </tr>
-            </thead>
+            <SortHead
+              heads={[
+                ['n', '#'],
+                ['security', 'Security'],
+                ['idea', 'Idea'],
+                ['side', 'Side'],
+                ['entry', 'Entry'],
+                ['exit', 'Exit'],
+                ['sessions', 'Sessions', 'num'],
+                ['ret', 'Return', 'num'],
+                ['pnl', 'P&L', 'num'],
+                ['reason', 'Exit reason'],
+              ]}
+              sort={tradeSort.sort}
+              toggle={tradeSort.toggle}
+            />
             <tbody>
               {first > 0 && <tr style={{ height: first * ROW }} aria-hidden="true" />}
               {items.slice(first, last).map((t) => (
@@ -623,44 +641,7 @@ function Positions({ id, dates }: { id: string; dates: string[] }) {
               <p>Flat on {data.date ?? date}: all cash.</p>
             </div>
           ) : (
-            <div className="table-wrap">
-              <table aria-label="Positions">
-                <thead>
-                  <tr>
-                    <th>Security</th>
-                    <th>Idea</th>
-                    <th>Sector</th>
-                    <th className="num">Shares</th>
-                    <th className="num">Price</th>
-                    <th className="num">Value</th>
-                    <th className="num">Weight</th>
-                    <th className="num">Unrealized P&amp;L</th>
-                    <th>Since</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.positions.map((x: any) => (
-                    <tr key={`${x.idea_id}-${x.security_id}`}>
-                      <td>
-                        <strong>{x.ticker ?? x.security_id}</strong>
-                      </td>
-                      <td>{x.idea_id}</td>
-                      <td>{x.sector ?? '—'}</td>
-                      <td className="num">{num(x.shares, 2)}</td>
-                      <td className="num">{num(x.price)}</td>
-                      <td className="num">{money(x.value)}</td>
-                      <td className="num">{pct(x.weight)}</td>
-                      <td
-                        className={`num ${x.unrealized_pnl > 0 ? 'gain' : x.unrealized_pnl < 0 ? 'loss' : ''}`}
-                      >
-                        {money(x.unrealized_pnl)}
-                      </td>
-                      <td className="nowrap">{x.entry_date}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <PositionsTable positions={data.positions} />
           )}
         </>
       )}
@@ -816,6 +797,61 @@ function ConfigView({ s, isAdmin }: { s: any; isAdmin: boolean }) {
           <Copy size={14} /> Clone and edit
         </button>
       )}
+    </div>
+  );
+}
+
+/** Positions on a date (#385: every column sorts; unsorted, the server's order). */
+function PositionsTable({ positions }: { positions: any[] }) {
+  const { sorted, sort, toggle } = useSort(positions, {
+    security: { value: (x) => x.ticker ?? x.security_id },
+    idea: { value: (x) => x.idea_id },
+    sector: { value: (x) => x.sector },
+    shares: { value: (x) => x.shares, firstDesc: true },
+    price: { value: (x) => x.price, firstDesc: true },
+    value: { value: (x) => x.value, firstDesc: true },
+    weight: { value: (x) => x.weight, firstDesc: true },
+    pnl: { value: (x) => x.unrealized_pnl, firstDesc: true },
+    since: { value: (x) => x.entry_date },
+  });
+  return (
+    <div className="table-wrap">
+      <table aria-label="Positions">
+        <SortHead
+          heads={[
+            ['security', 'Security'],
+            ['idea', 'Idea'],
+            ['sector', 'Sector'],
+            ['shares', 'Shares', 'num'],
+            ['price', 'Price', 'num'],
+            ['value', 'Value', 'num'],
+            ['weight', 'Weight', 'num'],
+            ['pnl', 'Unrealized P&L', 'num'],
+            ['since', 'Since'],
+          ]}
+          sort={sort}
+          toggle={toggle}
+        />
+        <tbody>
+          {sorted.map((x) => (
+            <tr key={`${x.idea_id}-${x.security_id}`}>
+              <td>
+                <strong>{x.ticker ?? x.security_id}</strong>
+              </td>
+              <td>{x.idea_id}</td>
+              <td>{x.sector ?? '—'}</td>
+              <td className="num">{num(x.shares, 2)}</td>
+              <td className="num">{num(x.price)}</td>
+              <td className="num">{money(x.value)}</td>
+              <td className="num">{pct(x.weight)}</td>
+              <td className={`num ${x.unrealized_pnl > 0 ? 'gain' : x.unrealized_pnl < 0 ? 'loss' : ''}`}>
+                {money(x.unrealized_pnl)}
+              </td>
+              <td className="nowrap">{x.entry_date}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }

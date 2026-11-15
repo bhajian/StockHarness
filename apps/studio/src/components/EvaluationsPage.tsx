@@ -6,6 +6,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { ArrowLeft, Activity, AlertTriangle, BarChart3, Gauge, TrendingDown, TrendingUp } from 'lucide-react';
 import { api } from '../api';
 import { KpiCard, Skeleton, StatusPill } from './kit';
+import { SortHead, SortTh, rankOf, useSort } from './tableKit';
 import { BarChart, TimeSeriesChart } from '../charts/Charts';
 import { fmtNumber } from '../charts/chartData';
 import { ObjectTransfer } from './ObjectTransfer';
@@ -54,6 +55,17 @@ function EvaluationList() {
   useEffect(() => {
     void api('/evaluations').then(setData);
   }, []);
+  // Click a header to sort (#385); unsorted, newest first.
+  const { sorted, sort, toggle } = useSort(data?.items ?? [], {
+    started: { value: (e) => new Date(e.createdAt), firstDesc: true },
+    plugin: { value: (e) => `${e.pluginName} v${String(e.pluginVersion).padStart(6, '0')}` },
+    period: { value: (e) => e.params.start },
+    status: { value: (e) => rankOf(['failed', 'running', 'queued', 'succeeded'])(e.status) },
+    cagr: { value: (e) => e.record?.summary?.cagr, firstDesc: true },
+    sharpe: { value: (e) => e.record?.summary?.sharpe, firstDesc: true },
+    maxdd: { value: (e) => e.record?.summary?.max_drawdown, firstDesc: true },
+    trial: { value: (e) => e.trial, firstDesc: true },
+  });
   if (!data) return <Skeleton rows={6} />;
   return (
     <section className="page-section">
@@ -66,20 +78,22 @@ function EvaluationList() {
       <div className="table-wrap">
         {' '}
         <table aria-label="Evaluations">
-          <thead>
-            <tr>
-              <th>Started</th>
-              <th>Plugin</th>
-              <th>Period</th>
-              <th>Status</th>
-              <th>CAGR</th>
-              <th>Sharpe</th>
-              <th>Max DD</th>
-              <th>Trial</th>
-            </tr>
-          </thead>
+          <SortHead
+            heads={[
+              ['started', 'Started'],
+              ['plugin', 'Plugin'],
+              ['period', 'Period'],
+              ['status', 'Status'],
+              ['cagr', 'CAGR'],
+              ['sharpe', 'Sharpe'],
+              ['maxdd', 'Max DD'],
+              ['trial', 'Trial'],
+            ]}
+            sort={sort}
+            toggle={toggle}
+          />
           <tbody>
-            {data.items.map((e) => (
+            {sorted.map((e) => (
               <tr key={e.id} className="clickable" onClick={() => go(`/evaluations/${e.id}`)}>
                 <td>{new Date(e.createdAt).toLocaleString()}</td>
                 <td>
@@ -297,85 +311,17 @@ export function EvaluationReport({ record: r }: { record: Record<string, any> })
       <div className="eval-grid">
         <div className="table-wrap">
           {' '}
-          <table aria-label="Walk-forward folds">
-            <caption>Walk-forward folds (by calendar year)</caption>
-            <thead>
-              <tr>
-                <th>Fold</th>
-                <th>Return</th>
-                <th>Sharpe</th>
-                <th>Max DD</th>
-                <th>Days</th>
-              </tr>
-            </thead>
-            <tbody>
-              {folds.map((f) => (
-                <tr key={f.fold}>
-                  <td>
-                    {f.fold}
-                    {f.partial ? ' (partial)' : ''}
-                  </td>
-                  <td>{pct(f.total_return)}</td>
-                  <td>{num(f.sharpe)}</td>
-                  <td>{pct(f.max_drawdown)}</td>
-                  <td>{f.days}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <FoldsTable folds={folds} />
         </div>
         <div className="table-wrap">
           {' '}
-          <table aria-label="Factor exposures">
-            <caption>
-              Factor exposures · alpha {pct(r.factors?.alpha_annual)} a year (t {num(r.factors?.alpha_t)}) ·
-              R² {num(r.factors?.r2)}
-            </caption>
-            <thead>
-              <tr>
-                <th>Factor</th>
-                <th>Beta</th>
-                <th>t (Newey-West)</th>
-              </tr>
-            </thead>
-            <tbody>
-              {Object.keys(betas).map((k) => (
-                <tr key={k}>
-                  <td>{k}</td>
-                  <td>{num(betas[k])}</td>
-                  <td>{num(tstats[k])}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <FactorsTable factors={r.factors} betas={betas} tstats={tstats} />
         </div>
       </div>
       <div className="eval-grid">
         <div className="table-wrap">
           {' '}
-          <table aria-label="Regimes">
-            <caption>By regime</caption>
-            <thead>
-              <tr>
-                <th>Regime</th>
-                <th>Days</th>
-                <th>Return</th>
-                <th>Sharpe</th>
-              </tr>
-            </thead>
-            <tbody>
-              {Object.entries(r.by_regime ?? {}).flatMap(([g, rows]: [string, any]) =>
-                Object.entries(rows).map(([k, v]: [string, any]) => (
-                  <tr key={`${g}-${k}`}>
-                    <td>{g === 'trend' ? `S&P 500 trend ${k}` : `VIX ${k}`}</td>
-                    <td>{v.days}</td>
-                    <td>{pct(v.total_return)}</td>
-                    <td>{num(v.sharpe)}</td>
-                  </tr>
-                )),
-              )}
-            </tbody>
-          </table>
+          <RegimesTable byRegime={r.by_regime ?? {}} />
         </div>
         <BarChart
           title="Contribution by sector"
@@ -425,38 +371,44 @@ type NameRow = {
   avg_trade_return: number | null;
   by_year: Record<string, number>;
 };
-const NAME_SORTS: Record<string, { label: string; key: (x: NameRow) => number }> = {
-  contribution: { label: 'Contribution', key: (x) => x.contribution },
-  trades: { label: 'Trades', key: (x) => x.trades },
-  hit_rate: { label: 'Hit rate', key: (x) => x.hit_rate ?? -1 },
-  avg_trade_return: { label: 'Avg trade', key: (x) => x.avg_trade_return ?? -Infinity },
-  days: { label: 'Days held', key: (x) => x.days_long + x.days_short },
-};
 /** How each name held did (#324): which of the universe the strategy works for. */
 export function ByNameTable({ byName }: { byName: any }) {
   const rows: NameRow[] = byName.rows ?? [];
-  const [sort, setSort] = useState<{ by: string; desc: boolean }>({ by: 'contribution', desc: true });
   const [q, setQ] = useState('');
   const [all, setAll] = useState(false);
   const years = useMemo(() => [...new Set(rows.flatMap((x) => Object.keys(x.by_year ?? {})))].sort(), [rows]);
-  const shown = useMemo(() => {
+  const filtered = useMemo(() => {
     const f = q.trim().toLowerCase();
-    const k = NAME_SORTS[sort.by].key;
-    return rows
-      .filter((x) => !f || `${x.ticker ?? ''} ${x.sector ?? ''} ${x.security_id}`.toLowerCase().includes(f))
-      .sort((a, b) => (sort.desc ? k(b) - k(a) : k(a) - k(b)));
-  }, [rows, q, sort]);
-  const head = (id: string) => (
-    <th aria-sort={sort.by === id ? (sort.desc ? 'descending' : 'ascending') : 'none'}>
-      <button
-        type="button"
-        className="th-sort"
-        onClick={() => setSort((s) => ({ by: id, desc: s.by === id ? !s.desc : true }))}
-      >
-        {NAME_SORTS[id].label}
-        {sort.by === id ? (sort.desc ? ' ↓' : ' ↑') : ''}
-      </button>
-    </th>
+    return rows.filter(
+      (x) => !f || `${x.ticker ?? ''} ${x.sector ?? ''} ${x.security_id}`.toLowerCase().includes(f),
+    );
+  }, [rows, q]);
+  // Every column sorts (#385); numbers start with the largest. Best contribution first by default.
+  const {
+    sorted: shown,
+    sort,
+    toggle,
+  } = useSort(
+    filtered,
+    {
+      name: { value: (x) => x.ticker ?? x.security_id },
+      sector: { value: (x) => x.sector },
+      contribution: { value: (x) => x.contribution, firstDesc: true },
+      ...Object.fromEntries(
+        years.map((y) => [`y${y}`, { value: (x: NameRow) => x.by_year?.[y], firstDesc: true }]),
+      ),
+      trades: { value: (x) => x.trades, firstDesc: true },
+      hit_rate: { value: (x) => x.hit_rate, firstDesc: true },
+      avg_trade_return: { value: (x) => x.avg_trade_return, firstDesc: true },
+      avg_weight: { value: (x) => x.avg_weight, firstDesc: true },
+      days: { value: (x) => x.days_long + x.days_short, firstDesc: true },
+    },
+    { by: 'contribution', desc: true },
+  );
+  const head = (id: string, label: string) => (
+    <SortTh key={id} id={id} sort={sort} onSort={toggle}>
+      {label}
+    </SortTh>
   );
   const limit = all ? shown.length : 25;
   return (
@@ -484,17 +436,15 @@ export function ByNameTable({ byName }: { byName: any }) {
         <table aria-label="Results by name">
           <thead>
             <tr>
-              <th>Name</th>
-              <th>Sector</th>
-              {head('contribution')}
-              {years.map((y) => (
-                <th key={y}>{y}</th>
-              ))}
-              {head('trades')}
-              {head('hit_rate')}
-              {head('avg_trade_return')}
-              <th>Avg weight</th>
-              {head('days')}
+              {head('name', 'Name')}
+              {head('sector', 'Sector')}
+              {head('contribution', 'Contribution')}
+              {years.map((y) => head(`y${y}`, y))}
+              {head('trades', 'Trades')}
+              {head('hit_rate', 'Hit rate')}
+              {head('avg_trade_return', 'Avg trade')}
+              {head('avg_weight', 'Avg weight')}
+              {head('days', 'Days held')}
             </tr>
           </thead>
           <tbody>
@@ -527,5 +477,129 @@ export function ByNameTable({ byName }: { byName: any }) {
         </button>
       ) : null}
     </section>
+  );
+}
+
+// --- Sortable detail tables (#385) ---------------------------------------------------------------------
+function FoldsTable({ folds }: { folds: any[] }) {
+  const { sorted, sort, toggle } = useSort(folds, {
+    fold: { value: (f) => String(f.fold) },
+    ret: { value: (f) => f.total_return, firstDesc: true },
+    sharpe: { value: (f) => f.sharpe, firstDesc: true },
+    maxdd: { value: (f) => f.max_drawdown, firstDesc: true },
+    days: { value: (f) => f.days, firstDesc: true },
+  });
+  return (
+    <table aria-label="Walk-forward folds">
+      <caption>Walk-forward folds (by calendar year)</caption>
+      <SortHead
+        heads={[
+          ['fold', 'Fold'],
+          ['ret', 'Return'],
+          ['sharpe', 'Sharpe'],
+          ['maxdd', 'Max DD'],
+          ['days', 'Days'],
+        ]}
+        sort={sort}
+        toggle={toggle}
+      />
+      <tbody>
+        {sorted.map((f) => (
+          <tr key={f.fold}>
+            <td>
+              {f.fold}
+              {f.partial ? ' (partial)' : ''}
+            </td>
+            <td>{pct(f.total_return)}</td>
+            <td>{num(f.sharpe)}</td>
+            <td>{pct(f.max_drawdown)}</td>
+            <td>{f.days}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+function FactorsTable({
+  factors,
+  betas,
+  tstats,
+}: {
+  factors: any;
+  betas: Record<string, number>;
+  tstats: Record<string, number>;
+}) {
+  const { sorted, sort, toggle } = useSort(Object.keys(betas), {
+    factor: { value: (k) => k },
+    beta: { value: (k) => betas[k], firstDesc: true },
+    t: { value: (k) => tstats[k], firstDesc: true },
+  });
+  return (
+    <table aria-label="Factor exposures">
+      <caption>
+        Factor exposures · alpha {pct(factors?.alpha_annual)} a year (t {num(factors?.alpha_t)}) · R²{' '}
+        {num(factors?.r2)}
+      </caption>
+      <SortHead
+        heads={[
+          ['factor', 'Factor'],
+          ['beta', 'Beta'],
+          ['t', 't (Newey-West)'],
+        ]}
+        sort={sort}
+        toggle={toggle}
+      />
+      <tbody>
+        {sorted.map((k) => (
+          <tr key={k}>
+            <td>{k}</td>
+            <td>{num(betas[k])}</td>
+            <td>{num(tstats[k])}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+function RegimesTable({ byRegime }: { byRegime: Record<string, Record<string, any>> }) {
+  const rows = Object.entries(byRegime).flatMap(([g, rs]) =>
+    Object.entries(rs).map(([k, v]) => ({
+      key: `${g}-${k}`,
+      label: g === 'trend' ? `S&P 500 trend ${k}` : `VIX ${k}`,
+      ...v,
+    })),
+  );
+  const { sorted, sort, toggle } = useSort(rows, {
+    regime: { value: (x) => x.label },
+    days: { value: (x) => x.days, firstDesc: true },
+    ret: { value: (x) => x.total_return, firstDesc: true },
+    sharpe: { value: (x) => x.sharpe, firstDesc: true },
+  });
+  return (
+    <table aria-label="Regimes">
+      <caption>By regime</caption>
+      <SortHead
+        heads={[
+          ['regime', 'Regime'],
+          ['days', 'Days'],
+          ['ret', 'Return'],
+          ['sharpe', 'Sharpe'],
+        ]}
+        sort={sort}
+        toggle={toggle}
+      />
+      <tbody>
+        {sorted.map((x) => (
+          <tr key={x.key}>
+            <td>{x.label}</td>
+            <td>{x.days}</td>
+            <td>{pct(x.total_return)}</td>
+            <td>{num(x.sharpe)}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
   );
 }

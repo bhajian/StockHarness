@@ -15,6 +15,7 @@ import type { Schedule } from '../../../../packages/core/src/schema.js';
 import type { DatasetsRoute } from '../datasetsRoute';
 import { Button } from './ui';
 import { Drawer, Skeleton, StatusPill, Tabs } from './kit';
+import { SortHead, rankOf, useSort } from './tableKit';
 import { DataGrid } from './DataGrid';
 import { fmtNumber } from '../charts/chartData';
 
@@ -196,48 +197,7 @@ export function SyncDetail({
         ) : !runs.length ? (
           <p className="muted-line">No runs yet.</p>
         ) : (
-          <div className="table-wrap">
-            <table className="run-history">
-              <thead>
-                <tr>
-                  <th>Started</th>
-                  <th>Trigger</th>
-                  <th>Duration</th>
-                  <th>Status</th>
-                  <th>Rows</th>
-                  <th>FMP calls</th>
-                  <th>Symbols</th>
-                  <th>Errors</th>
-                </tr>
-              </thead>
-              <tbody>
-                {runs.map((r) => (
-                  <tr
-                    key={r.id}
-                    className="clickable"
-                    tabIndex={0}
-                    onClick={() => setOpen(r)}
-                    onKeyDown={(e) => e.key === 'Enter' && setOpen(r)}
-                  >
-                    <td>{timestamp(r.startedAt)}</td>
-                    <td>{r.trigger}</td>
-                    <td>{dur(r.startedAt, r.finishedAt)}</td>
-                    <td>
-                      <StatusPill status={r.status} />
-                    </td>
-                    <td>{r.rows !== undefined ? fmtNumber(r.rows) : '—'}</td>
-                    <td>{r.calls !== undefined ? fmtNumber(r.calls) : '—'}</td>
-                    <td>
-                      {r.symbolsAttempted !== undefined
-                        ? `${fmtNumber(r.symbolsCovered ?? 0)} / ${fmtNumber(r.symbolsAttempted)}`
-                        : '—'}
-                    </td>
-                    <td>{r.symbolErrors?.length ? r.symbolErrors.length : r.error ? 1 : '—'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <SyncRunsTable runs={runs} onOpen={setOpen} />
         )
       ) : tab === 'history' ? (
         backfill
@@ -302,6 +262,73 @@ export function SyncDetail({
           </div>
         </Drawer>
       )}
+    </div>
+  );
+}
+
+function SyncRunsTable({ runs, onOpen }: { runs: DatasetSyncRun[]; onOpen: (r: DatasetSyncRun) => void }) {
+  // Click a header to sort (#385); unsorted, newest first as the server sends them.
+  const { sorted, sort, toggle } = useSort(runs, {
+    started: { value: (r) => new Date(r.startedAt), firstDesc: true },
+    trigger: { value: (r) => r.trigger },
+    duration: {
+      value: (r) =>
+        r.finishedAt ? Date.parse(String(r.finishedAt)) - Date.parse(String(r.startedAt)) : null,
+      firstDesc: true,
+    },
+    status: { value: (r) => rankOf(['failed', 'running', 'succeeded'])(r.status) },
+    rows: { value: (r) => r.rows, firstDesc: true },
+    calls: { value: (r) => r.calls, firstDesc: true },
+    symbols: { value: (r) => r.symbolsCovered, firstDesc: true },
+    errors: {
+      value: (r) => (r.symbolErrors?.length ? r.symbolErrors.length : r.error ? 1 : null),
+      firstDesc: true,
+    },
+  });
+  return (
+    <div className="table-wrap">
+      <table className="run-history">
+        <SortHead
+          heads={[
+            ['started', 'Started'],
+            ['trigger', 'Trigger'],
+            ['duration', 'Duration'],
+            ['status', 'Status'],
+            ['rows', 'Rows'],
+            ['calls', 'FMP calls'],
+            ['symbols', 'Symbols'],
+            ['errors', 'Errors'],
+          ]}
+          sort={sort}
+          toggle={toggle}
+        />
+        <tbody>
+          {sorted.map((r) => (
+            <tr
+              key={r.id}
+              className="clickable"
+              tabIndex={0}
+              onClick={() => onOpen(r)}
+              onKeyDown={(e) => e.key === 'Enter' && onOpen(r)}
+            >
+              <td>{timestamp(r.startedAt)}</td>
+              <td>{r.trigger}</td>
+              <td>{dur(r.startedAt, r.finishedAt)}</td>
+              <td>
+                <StatusPill status={r.status} />
+              </td>
+              <td>{r.rows !== undefined ? fmtNumber(r.rows) : '—'}</td>
+              <td>{r.calls !== undefined ? fmtNumber(r.calls) : '—'}</td>
+              <td>
+                {r.symbolsAttempted !== undefined
+                  ? `${fmtNumber(r.symbolsCovered ?? 0)} / ${fmtNumber(r.symbolsAttempted)}`
+                  : '—'}
+              </td>
+              <td>{r.symbolErrors?.length ? r.symbolErrors.length : r.error ? 1 : '—'}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }

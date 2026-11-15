@@ -49,7 +49,7 @@ import { Button, IconButton, Field, Modal, SaveForm, Empty, PageTitle, Status } 
 import { ScheduleFields } from './agentFields';
 import { DataGrid } from './DataGrid';
 import { FilterBar, KpiCard, Tabs } from './kit';
-import { MoreRows, useInfiniteRows } from './tableKit';
+import { MoreRows, SortTh, rankOf, useInfiniteRows, useSort } from './tableKit';
 import { fmtNumber } from '../charts/chartData';
 import { TransformsTab } from './TransformsTab';
 import { PipelinesTab } from './PipelinesTab';
@@ -313,12 +313,6 @@ function SyncsTab({
       (!fStatus || statusOf(s) === fStatus) &&
       (!fCadence || cadenceOf(s) === fCadence),
   );
-  // 20 rows at a time, more as the table scrolls (#384); a filter change starts again at the top.
-  const page = useInfiniteRows(visible, {
-    resetKey: [q, fCategory, fPriority, fStatus, fCadence],
-    // Only a row that was picked stays loaded (`current` falls back to the first sync when none is).
-    keepIndex: selected ? visible.findIndex((s) => s.id === selected) : -1,
-  });
   const collections = [...new Set(syncs.map(collectionOf).filter(Boolean))];
   const healthy = syncs.filter((s) => s.enabled && !s.lastError).length;
   const historyOf = (s: Record<string, any>) =>
@@ -422,6 +416,36 @@ function SyncsTab({
     if (s.symbolsMode === 'preset') return presetById.get(s.preset)?.label ?? 'Preset';
     return 'Universe';
   };
+  // Click a header to sort the whole filtered list by that column's value (#385), then page it: 20 rows at a
+  // time, more as the table scrolls (#384); a filter or sort change starts again at the top.
+  const t = (v: unknown) => (v ? new Date(v as string) : null);
+  const {
+    sorted,
+    sort,
+    toggle: toggleSort,
+  } = useSort(visible, {
+    name: { value: (s) => s.name },
+    dataset: { value: (s) => catalogById.get(s.dataset as string)?.label ?? s.dataset },
+    symbols: { value: (s) => symbolsLabel(s) },
+    priority: { value: (s) => rankOf(['P0', 'P1', 'P2'])(s.effectivePriority) },
+    history: { value: (s) => historyOf(s) },
+    coverage: { value: (s) => coverage.get(collectionOf(s))?.pct, firstDesc: true },
+    schedule: { value: (s) => (s.schedule?.enabled ? Number(s.schedule.everyMinutes) : null) },
+    next: { value: (s) => (s.schedule?.enabled ? t(s.nextRunAt) : null) },
+    last: { value: (s) => t(s.lastRunAt), firstDesc: true },
+    rows: { value: (s) => (typeof s.lastRows === 'number' ? s.lastRows : null), firstDesc: true },
+    status: { value: (s) => rankOf(['failed', 'running', 'queued', 'ready', 'disabled'])(statusOf(s)) },
+  });
+  const page = useInfiniteRows(sorted, {
+    resetKey: [q, fCategory, fPriority, fStatus, fCadence, sort],
+    // Only a row that was picked stays loaded (`current` falls back to the first sync when none is).
+    keepIndex: selected ? sorted.findIndex((s) => s.id === selected) : -1,
+  });
+  const th = (id: string, label: string) => (
+    <SortTh id={id} sort={sort} onSort={toggleSort}>
+      {label}
+    </SortTh>
+  );
 
   async function exportYaml() {
     await act(async () => {
@@ -685,17 +709,17 @@ function SyncsTab({
                           />
                         </th>
                       )}
-                      <th>Name</th>
-                      <th>Dataset</th>
-                      <th>Symbols</th>
-                      <th>Priority</th>
-                      <th>History</th>
-                      <th>Coverage</th>
-                      <th>Schedule</th>
-                      <th>Next run</th>
-                      <th>Last run</th>
-                      <th>Rows</th>
-                      <th>Status</th>
+                      {th('name', 'Name')}
+                      {th('dataset', 'Dataset')}
+                      {th('symbols', 'Symbols')}
+                      {th('priority', 'Priority')}
+                      {th('history', 'History')}
+                      {th('coverage', 'Coverage')}
+                      {th('schedule', 'Schedule')}
+                      {th('next', 'Next run')}
+                      {th('last', 'Last run')}
+                      {th('rows', 'Rows')}
+                      {th('status', 'Status')}
                       {isAdmin && <th aria-label="Actions" />}
                     </tr>
                   </thead>

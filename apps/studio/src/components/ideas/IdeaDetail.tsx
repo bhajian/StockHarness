@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import { api, send } from '../../api';
 import { GateChecklist, KpiCard, Skeleton, StatusPill, Tabs } from '../kit';
+import { SortTh, rankOf, useSort } from '../tableKit';
 import { CodeEditor } from '../../editor/CodeEditor';
 import { EvaluationReport } from '../EvaluationsPage';
 import { SubsetPanel } from '../SubsetPanel';
@@ -744,6 +745,23 @@ function Runs({
       stop = true;
     };
   }, [id, busy]);
+  // Click a header to sort (#385); unsorted, newest first.
+  const { sorted, sort, toggle } = useSort(rows ?? [], {
+    when: { value: (e) => new Date(e.createdAt), firstDesc: true },
+    mode: { value: (e) => e.mode },
+    status: { value: (e) => rankOf(['failed', 'running', 'queued', 'succeeded'])(e.status) },
+    version: { value: (e) => e.pluginVersion, firstDesc: true },
+    trial: { value: (e) => e.trial, firstDesc: true },
+    period: { value: (e) => e.params?.start },
+    sharpe: { value: (e) => e.summary?.sharpe, firstDesc: true },
+    excess: { value: (e) => e.excess?.spx?.excess_cagr, firstDesc: true },
+    record: { value: (e) => e.recordHash },
+  });
+  const th = (id: string, label: string, className?: string) => (
+    <SortTh id={id} sort={sort} onSort={toggle} className={className}>
+      {label}
+    </SortTh>
+  );
   if (!rows) return <Skeleton rows={5} />;
   if (!rows.length)
     return (
@@ -756,20 +774,20 @@ function Runs({
       <table aria-label="Evaluations">
         <thead>
           <tr>
-            <th>When</th>
-            <th>Mode</th>
-            <th>Status</th>
-            <th>Version</th>
-            <th>Trial</th>
-            <th>Period</th>
-            <th className="num">Sharpe</th>
-            <th className="num">Excess / yr</th>
-            <th>Record</th>
+            {th('when', 'When')}
+            {th('mode', 'Mode')}
+            {th('status', 'Status')}
+            {th('version', 'Version')}
+            {th('trial', 'Trial')}
+            {th('period', 'Period')}
+            {th('sharpe', 'Sharpe', 'num')}
+            {th('excess', 'Excess / yr', 'num')}
+            {th('record', 'Record')}
             <th />
           </tr>
         </thead>
         <tbody>
-          {rows.map((e) => (
+          {sorted.map((e) => (
             <tr key={e.id} className="clickable" onClick={() => go(`/evaluations/${e.id}`)}>
               <td>{when(e.createdAt)}</td>
               <td>

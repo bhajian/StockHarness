@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { api } from '../../api';
 import { KpiCard, Skeleton, Sparkline, StatusPill } from '../kit';
+import { SortTh, useSort } from '../tableKit';
 import { TimeSeriesChart } from '../../charts/Charts';
 import { IdeaDetail } from './IdeaDetail';
 import { IdeaStatus } from './IdeaStatus';
@@ -267,7 +268,8 @@ function IdeasList({ search }: { search: string }) {
           ))}
         </div>
       ) : (
-        <IdeaTable items={data.items} selected={selected} toggle={toggle} />
+        // Keyed by the Sort menu: picking a server order clears a header sort (#385).
+        <IdeaTable key={sort} items={data.items} selected={selected} toggle={toggle} />
       )}
     </section>
   );
@@ -285,10 +287,33 @@ function IdeaTable({
 }) {
   const box = useRef<HTMLDivElement>(null);
   const [top, setTop] = useState(0);
+  // Click a header to sort every loaded idea (#385), then window the sorted list.
+  const {
+    sorted,
+    sort,
+    toggle: toggleSort,
+  } = useSort(items, {
+    id: { value: (i) => i.ref },
+    idea: { value: (i) => i.title },
+    status: { value: (i) => i.status },
+    side: { value: (i) => i.side },
+    horizon: { value: (i) => i.horizonDays },
+    sharpe: { value: (i) => i.sharpe, firstDesc: true },
+    deflated: { value: (i) => i.deflatedSharpe, firstDesc: true },
+    excess: { value: (i) => i.excessPerYear, firstDesc: true },
+    maxdd: { value: (i) => i.maxDrawdown, firstDesc: true },
+    // A finished holdout by its excess return; unfinished or none go last.
+    holdout: { value: (i) => (i.holdout?.status === 'succeeded' ? i.holdout.excess : null), firstDesc: true },
+  });
   const height = Math.min(640, items.length * ROW_HEIGHT + 44);
   const first = Math.max(0, Math.floor(top / ROW_HEIGHT) - 5);
   const last = Math.min(items.length, first + Math.ceil(height / ROW_HEIGHT) + 10);
-  const shown = items.slice(first, last);
+  const shown = sorted.slice(first, last);
+  const th = (id: string, label: string, className?: string) => (
+    <SortTh id={id} sort={sort} onSort={toggleSort} className={className}>
+      {label}
+    </SortTh>
+  );
   return (
     <div
       className="idea-table"
@@ -300,16 +325,16 @@ function IdeaTable({
         <thead>
           <tr>
             <th aria-label="Select" />
-            <th>ID</th>
-            <th>Idea</th>
-            <th>Status</th>
-            <th>Side</th>
-            <th>Horizon</th>
-            <th className="num">Sharpe</th>
-            <th className="num">Deflated</th>
-            <th className="num">Excess / yr</th>
-            <th className="num">Max DD</th>
-            <th>Holdout</th>
+            {th('id', 'ID')}
+            {th('idea', 'Idea')}
+            {th('status', 'Status')}
+            {th('side', 'Side')}
+            {th('horizon', 'Horizon')}
+            {th('sharpe', 'Sharpe', 'num')}
+            {th('deflated', 'Deflated', 'num')}
+            {th('excess', 'Excess / yr', 'num')}
+            {th('maxdd', 'Max DD', 'num')}
+            {th('holdout', 'Holdout')}
             <th>Equity</th>
           </tr>
         </thead>

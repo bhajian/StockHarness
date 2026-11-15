@@ -4,6 +4,7 @@ import React, { useEffect, useState } from 'react';
 import { ArrowLeft, BookOpen, Wrench } from 'lucide-react';
 import { api } from '../../api';
 import { Skeleton, StatusPill } from '../kit';
+import { SortHead, rankOf, useSort } from '../tableKit';
 import { IdeaStatus } from '../ideas/IdeaStatus';
 import { go } from '../ideas/nav';
 
@@ -24,6 +25,20 @@ function CycleList() {
       .then(setRows)
       .catch((e) => setError(e?.message ?? String(e)));
   }, []);
+  // Click a header to sort (#385); unsorted, newest first.
+  const { sorted, sort, toggle } = useSort(rows ?? [], {
+    started: { value: (r) => new Date(r.startedAt), firstDesc: true },
+    status: { value: (r) => rankOf(['failed', 'running', 'succeeded'])(r.status) },
+    took: { value: (r) => r.durationMs, firstDesc: true },
+    cost: { value: (r) => r.usd, firstDesc: true },
+    calls: { value: (r) => r.calls, firstDesc: true },
+    ...Object.fromEntries(
+      (['proposed', 'reviewed', 'coded', 'evaluated', 'judged'] as const).map((k) => [
+        k,
+        { value: (r: any) => r.theories?.[k], firstDesc: true },
+      ]),
+    ),
+  });
   if (error)
     return (
       <div className="empty-state">
@@ -40,22 +55,24 @@ function CycleList() {
   return (
     <div className="table-wrap">
       <table aria-label="Cycles">
-        <thead>
-          <tr>
-            <th>Started</th>
-            <th>Status</th>
-            <th className="num">Took</th>
-            <th className="num">Cost</th>
-            <th className="num">Model calls</th>
-            <th className="num">Proposed</th>
-            <th className="num">Reviewed</th>
-            <th className="num">Coded</th>
-            <th className="num">Evaluated</th>
-            <th className="num">Judged</th>
-          </tr>
-        </thead>
+        <SortHead
+          heads={[
+            ['started', 'Started'],
+            ['status', 'Status'],
+            ['took', 'Took', 'num'],
+            ['cost', 'Cost', 'num'],
+            ['calls', 'Model calls', 'num'],
+            ['proposed', 'Proposed', 'num'],
+            ['reviewed', 'Reviewed', 'num'],
+            ['coded', 'Coded', 'num'],
+            ['evaluated', 'Evaluated', 'num'],
+            ['judged', 'Judged', 'num'],
+          ]}
+          sort={sort}
+          toggle={toggle}
+        />
         <tbody>
-          {rows.map((r) => (
+          {sorted.map((r) => (
             <tr key={r.id} className="clickable" onClick={() => go(`/research/cycles/${r.id}`)}>
               <td className="nowrap">{when(r.startedAt)}</td>
               <td>

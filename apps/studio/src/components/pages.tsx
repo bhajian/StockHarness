@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { api, errorMessage, send, timestamp, type Data, type Entity } from '../api';
 import { Button, Empty, ErrorNotice, Field, IconButton, Modal, PageTitle, Status } from './ui';
+import { SortTh, nextSort, type SortState } from './tableKit';
 import { ObjectTransfer } from './ObjectTransfer';
 import { Markdown, Trace } from './Playground';
 import { describeSchedule } from '../../../../packages/core/src/schedule.js';
@@ -417,9 +418,16 @@ export function ConnectionsPage({ data, edit, act, refresh }: PageProps) {
     </>
   );
 }
+/** Run columns the server sorts (#385): across every run, not just the page shown. */
+const RUN_SORT_FIELD: Record<string, string> = { status: 'status', trigger: 'trigger', started: 'createdAt' };
 export function RunsPage() {
   const [runs, setRuns] = useState<any[]>([]);
   const [page, setPage] = useState(0);
+  const [runSort, setRunSort] = useState<SortState>(null);
+  const sortRuns = (by: string) => {
+    setPage(0);
+    setRunSort((s) => nextSort(s, by, by === 'started'));
+  };
   const [filter, setFilter] = useState('all');
   const [selected, setSelected] = useState<any>(null);
   const [error, setError] = useState('');
@@ -428,7 +436,7 @@ export function RunsPage() {
     const load = async () => {
       try {
         const r = await api(
-          `/runs?page=${page}${new URLSearchParams(location.search).get('cycle') ? '&cycle=' + encodeURIComponent(new URLSearchParams(location.search).get('cycle')!) : ''}`,
+          `/runs?page=${page}${runSort ? `&sort=${RUN_SORT_FIELD[runSort.by]}&dir=${runSort.desc ? 'desc' : 'asc'}` : ''}${new URLSearchParams(location.search).get('cycle') ? '&cycle=' + encodeURIComponent(new URLSearchParams(location.search).get('cycle')!) : ''}`,
         );
         if (!stopped) setRuns(r);
       } catch (e) {
@@ -441,7 +449,7 @@ export function RunsPage() {
       stopped = true;
       clearInterval(timer);
     };
-  }, [page]);
+  }, [page, runSort]);
   useEffect(() => {
     if (!selected?.id) return;
     let stopped = false;
@@ -506,10 +514,16 @@ export function RunsPage() {
             <thead>
               <tr>
                 <th>Harness</th>
-                <th>Status</th>
+                <SortTh id="status" sort={runSort} onSort={sortRuns}>
+                  Status
+                </SortTh>
                 <th>Input</th>
-                <th>Trigger</th>
-                <th>Started</th>
+                <SortTh id="trigger" sort={runSort} onSort={sortRuns}>
+                  Trigger
+                </SortTh>
+                <SortTh id="started" sort={runSort} onSort={sortRuns}>
+                  Started
+                </SortTh>
                 <th />
               </tr>
             </thead>

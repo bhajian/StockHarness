@@ -60,6 +60,7 @@ import type { DatasetsRoute } from '../datasetsRoute';
 import { LANES, LANE_HEAD, NODE_H, NODE_W, criticalPath, ganttBars, layoutPipeline } from '../pipelineLayout';
 import { Button, Empty, Field, IconButton, Modal } from './ui';
 import { Drawer, GateChecklist, KpiCard, Skeleton, StatusPill, Tabs } from './kit';
+import { SortTh, rankOf, useSort } from './tableKit';
 import { ScheduleFields } from './agentFields';
 import { ObjectTransfer } from './ObjectTransfer';
 
@@ -175,6 +176,22 @@ function PipelinesList({
     const t = setInterval(() => void reload(), 4000);
     return () => clearInterval(t);
   }, [active, reload]);
+  // Click a header to sort (#385).
+  const t = (v?: string | Date) => (v ? new Date(v) : null);
+  const { sorted, sort, toggle } = useSort(list ?? [], {
+    name: { value: (p) => p.name },
+    schedule: { value: (p) => scheduleText(p) },
+    period: { value: (p) => p.period },
+    last: {
+      value: (p) =>
+        p.lastRun ? rankOf(['failed', 'blocked', 'running', 'queued', 'succeeded'])(p.lastRun.status) : null,
+    },
+    duration: { value: (p) => dur(p.lastRun?.startedAt, p.lastRun?.finishedAt), firstDesc: true },
+    passed: {
+      value: (p) => (p.lastRun ? passed(p.lastRun) / Math.max(1, Object.keys(p.lastRun.nodes).length) : null),
+    },
+    next: { value: (p) => t(p.nextRunAt) },
+  });
   if (!list) return error ? <div className="notice error">{error}</div> : <Skeleton rows={6} />;
   const today = new Date().toDateString();
   const runsToday = list.filter(
@@ -225,17 +242,25 @@ function PipelinesList({
             <table>
               <thead>
                 <tr>
-                  <th>Name</th>
-                  <th>Schedule</th>
-                  <th>Period</th>
-                  <th>Last run</th>
-                  <th>Duration</th>
-                  <th>Nodes passed</th>
-                  <th>Next run</th>
+                  {(
+                    [
+                      ['name', 'Name'],
+                      ['schedule', 'Schedule'],
+                      ['period', 'Period'],
+                      ['last', 'Last run'],
+                      ['duration', 'Duration'],
+                      ['passed', 'Nodes passed'],
+                      ['next', 'Next run'],
+                    ] as const
+                  ).map(([id, label]) => (
+                    <SortTh key={id} id={id} sort={sort} onSort={toggle}>
+                      {label}
+                    </SortTh>
+                  ))}
                 </tr>
               </thead>
               <tbody>
-                {list.map((p) => (
+                {sorted.map((p) => (
                   <tr key={p.id}>
                     <td>
                       <a
