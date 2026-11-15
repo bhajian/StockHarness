@@ -87,7 +87,8 @@ patches:
         GATEWAY_PUBLIC_URL: wss://openharness.faberiq.ai
         # FMP Premium allows 750 calls/min (#387); dataset syncs take 600 and leave room for agents' FMP calls.
         DATASET_SYNC_RPM: "600"
-  # MongoDB memory: 16 GB of data and 1.3 GB of indexes did not fit the 0.54 GB cache a 2 GiB limit gives.
+  # MongoDB on its own memory-optimized node (#415; scripts/eks-mongo-node.sh creates it): r7i.xlarge, 4 vCPU and
+  # 32 GiB, in the volume's zone. The data stays on the same 200 GiB volume (data-mongo-0); only the pod moves.
   - target:
       kind: StatefulSet
       name: mongo
@@ -96,13 +97,24 @@ patches:
         path: /spec/template/spec/containers/0/resources
         value:
           requests:
-            cpu: 250m
-            memory: 3Gi
+            cpu: "3"
+            memory: 24Gi
           limits:
-            memory: 4Gi
+            memory: 28Gi
       - op: add
         path: /spec/template/spec/containers/0/args
-        value: ["--wiredTigerCacheSizeGB", "2"]
+        value: ["--wiredTigerCacheSizeGB", "18"]
+      - op: add
+        path: /spec/template/spec/nodeSelector
+        value:
+          openharness.io/role: mongo
+      - op: add
+        path: /spec/template/spec/tolerations
+        value:
+          - key: openharness.io/dedicated
+            operator: Equal
+            value: mongo
+            effect: NoSchedule
   # Persistent EBS for the shared files claim and every StatefulSet volume.
   - target:
       kind: PersistentVolumeClaim
