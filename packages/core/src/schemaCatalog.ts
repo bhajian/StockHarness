@@ -7,7 +7,7 @@ import { safeError } from './security.js';
 import { describeSchedule } from './schedule.js';
 import { catalogById, DATASET_CATALOG, UNIVERSE_COLLECTION, type DatasetDef } from './datasetCatalog.js';
 import { KNOWN_AT, describeKnownAt, type KnownAtRule } from './knownAt.js';
-import { FIELD_DOCS } from './fieldDocs.js';
+import { builtinFieldDoc } from './fieldDocs.js';
 import { caveatsFor, type Caveat, type CaveatSeverity } from './catalogCaveats.js';
 import type { DatasetSync } from './datasetSync.js';
 
@@ -185,11 +185,36 @@ const short = (v: unknown) => {
 /** Field stats from a sample of documents (pure; unit-tested). */
 /** Internal bookkeeping fields that are not part of a collection's schema. */
 const INTERNAL_FIELDS = new Set(['_id', '_hash']);
+/**
+ * The doc a field gets in the catalog (#394). Precedence: curated (edited, or oh.describe) > declared by the
+ * producer (a transform output's `fields`) > the built-in dictionary (the collection's own meaning, then shared).
+ */
+export function resolveFieldDoc(
+  name: string,
+  opts: {
+    collection?: string;
+    curated?: CatalogCurated;
+    declared?: Record<string, { description?: string; unit?: string }>;
+  } = {},
+): { description: string; unit?: string; doc: 'curated' | 'dictionary' } | undefined {
+  const c = opts.curated?.fields?.[name]?.description ? opts.curated.fields[name] : opts.declared?.[name];
+  const dict = builtinFieldDoc(opts.collection, name);
+  if (c?.description) {
+    const unit = c.unit ?? dict?.unit;
+    return { description: c.description, ...(unit ? { unit } : {}), doc: 'curated' };
+  }
+  if (dict)
+    return { description: dict.description, ...(dict.unit ? { unit: dict.unit } : {}), doc: 'dictionary' };
+  return undefined;
+}
+
 export function inferFields(
   docs: Record<string, unknown>[],
   curated?: CatalogCurated,
   /** Field docs declared by the producer (a transform output's `fields`). */
   declared?: Record<string, { description?: string; unit?: string }>,
+  /** The collection, for names whose meaning depends on it (`date`, `name`, `value`, #394). */
+  collection?: string,
 ): CatalogField[] {
   const names = new Set<string>();
   for (const d of docs) for (const k of Object.keys(d)) if (!INTERNAL_FIELDS.has(k)) names.add(k);
@@ -215,17 +240,8 @@ export function inferFields(
       Object.assign(field, { min: strs[0], max: strs[strs.length - 1] });
     }
     if (present.length) field.example = short(present[0]);
-    // Precedence: curated (edited, or oh.describe) > declared by the producer > the built-in dictionary.
-    const c = curated?.fields?.[name]?.description ? curated.fields[name] : declared?.[name];
-    const dict = FIELD_DOCS[name];
-    if (c?.description)
-      Object.assign(field, { description: c.description, unit: c.unit ?? dict?.unit, doc: 'curated' });
-    else if (dict)
-      Object.assign(field, {
-        description: dict.description,
-        ...(dict.unit ? { unit: dict.unit } : {}),
-        doc: 'dictionary',
-      });
+    const doc = resolveFieldDoc(name, { collection, curated, declared });
+    if (doc) Object.assign(field, doc);
     fields.push(field);
   }
   return fields.sort((a, b) => a.name.localeCompare(b.name));
@@ -322,7 +338,7 @@ export async function refreshCatalogEntry(ownerId: string, name: string, syncs?:
         [],
       )
     : [];
-  const fields = inferFields(sample, curated, tOut?.fields);
+  const fields = inferFields(sample, curated, tOut?.fields, name);
   const names = new Set(fields.map((f) => f.name));
   const symbolField = names.has('security_id') ? 'security_id' : names.has('symbol') ? 'symbol' : undefined;
   const rule: KnownAtRule | undefined =
