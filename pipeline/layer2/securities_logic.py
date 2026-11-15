@@ -7,6 +7,8 @@ from __future__ import annotations
 
 from difflib import SequenceMatcher
 
+from ..core.instruments import EQUITY_TYPES, instrument_type
+
 IDENTIFIER_TYPES = ("ticker", "cusip", "cik", "isin", "figi")
 
 
@@ -216,7 +218,16 @@ def build_securities_docs(profiles, stock_list, delisted, existing, first_seen, 
             exch = (p.get("exchange") or p.get("exchangeShortName") or "").upper()
             if exch and allowed and not any(a in exch for a in allowed):
                 continue
+        elif allowed:
+            # A delisted name without a profile: its exchange is on the delisted row (US only, #393).
+            exch = str(d.get("exchange") or "").upper()
+            if not any(a in exch for a in allowed):
+                continue
         name = p.get("companyName") or sl.get("companyName") or d.get("companyName") or sym
+        # Notes, preferreds, warrants, units and funds are not securities of their own and must not attach to the
+        # issuer's security through a shared CIK (#393).
+        if instrument_type(sym, name, p.get("isEtf", False), p.get("isFund", False), p.get("isAdr", False)) not in EQUITY_TYPES:
+            continue
         sid = match_security({"ticker": sym, "cik": p.get("cik"), "cusip": p.get("cusip"), "name": name}, idx, live=live)
         if sid and sid in touched:
             doc = touched[sid]
@@ -229,7 +240,7 @@ def build_securities_docs(profiles, stock_list, delisted, existing, first_seen, 
             doc = {
                 "security_id": sid,
                 "name": name,
-                "security_type": "ADR" if p.get("isAdr") else "common",
+                "security_type": instrument_type(sym, name, is_adr=bool(p.get("isAdr"))),
                 "country": p.get("country"),
                 "currency": p.get("currency") or "USD",
                 "identifiers": [],
@@ -279,4 +290,16 @@ def build_securities_docs(profiles, stock_list, delisted, existing, first_seen, 
         )
         doc["source_collections"] = ["company_profiles", "stock_list", "delisted_companies", "eod_prices"]
         touched[sid] = doc
+    # Every security is (re)classified (#393): docs created before the classifier said "common" for notes,
+    # preferreds and warrants. The type comes from the current ticker and the name.
+    for sid, doc in existing_docs.items():
+        doc = touched.get(sid, doc)
+        tickers = [i for i in doc.get("identifiers") or [] if i.get("type") == "ticker"]
+        current = next((i["value"] for i in tickers if not i.get("valid_to")), tickers[-1]["value"] if tickers else "")
+        p = profiles.get(current, {})
+        t = instrument_type(current, doc.get("name"), p.get("isEtf", False), p.get("isFund", False),
+                            bool(p.get("isAdr")) or doc.get("security_type") == "ADR")
+        if doc.get("security_type") != t:
+            doc["security_type"] = t
+            touched[sid] = doc
     return list(touched.values())

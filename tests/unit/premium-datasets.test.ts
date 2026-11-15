@@ -6,8 +6,14 @@ process.env.ENCRYPTION_KEY ??= 'ab'.repeat(32);
 process.env.SETUP_TOKEN ??= 'unit-test-setup-token'.repeat(3);
 const { catalogById, variantsOf, DATASET_CATALOG, ECONOMIC_INDICATORS, FMP_SECTORS, presetById } =
   await import('../../packages/core/src/datasetCatalog.js');
-const { tagRows, rollingWindow, isCommonStockSymbol, perSymbolParams, chunkRanges, UNIVERSE_MIN_MARKET_CAP } =
-  await import('../../packages/core/src/datasetSync.js');
+const {
+  tagRows,
+  rollingWindow,
+  isUniverseInstrument,
+  perSymbolParams,
+  chunkRanges,
+  UNIVERSE_MIN_MARKET_CAP,
+} = await import('../../packages/core/src/datasetSync.js');
 const { planBackfill, backfillUnsupported } = await import('../../packages/core/src/datasetBackfill.js');
 const { defaultPriority } = await import('../../packages/core/src/syncScheduler.js');
 const def = (id: string) => catalogById.get(id)!;
@@ -66,9 +72,9 @@ test('rolling windows: calendars look ahead; treasury and macro look back far en
   });
 });
 
-test('common stock only: warrants, units, rights and preferreds are left out of the universe', () => {
-  for (const s of ['AAPL', 'BRK-B', 'BF.B', 'GOOGL', 'FOXA', 'SNOW', 'A', 'MSTR'])
-    assert.ok(isCommonStockSymbol(s), s);
+test('universe instruments: US common stock and ADRs only (#387, #393)', () => {
+  for (const s of ['AAPL', 'BRK-B', 'BF-B', 'GOOGL', 'FOXA', 'SNOW', 'A', 'MSTR', 'MKC-V'])
+    assert.ok(isUniverseInstrument(s, 'Some Company Inc.'), s);
   for (const s of [
     'BFRIW',
     'CCXIU',
@@ -79,10 +85,14 @@ test('common stock only: warrants, units, rights and preferreds are left out of 
     'AHT-PI',
     'ACHR-WS',
     'XYZ.U',
-    'ABCD-RT',
+    'ABCDR',
   ])
-    assert.equal(isCommonStockSymbol(s), false, s);
-  for (const s of ['005110.KS', '0HMG.L', '472230.KQ']) assert.equal(isCommonStockSymbol(s), false, s);
+    assert.equal(isUniverseInstrument(s, 'Some Company Inc.'), false, s);
+  for (const s of ['005110.KS', '0HMG.L', '472230.KQ', 'GHH.L', 'RY.TO', 'VOD.L'])
+    assert.equal(isUniverseInstrument(s, 'x'), false, s);
+  assert.equal(isUniverseInstrument('DTB', 'DTE Energy Company 2020 Series'), false, 'exchange-traded debt');
+  assert.equal(isUniverseInstrument('BXSL', 'Blackstone Secured Lending Fund', { isFund: true }), false);
+  assert.ok(isUniverseInstrument('TSM', 'Taiwan Semiconductor', { isAdr: true }));
   assert.equal(UNIVERSE_MIN_MARKET_CAP, 300_000_000, "matches universe_daily's min_market_cap");
 });
 

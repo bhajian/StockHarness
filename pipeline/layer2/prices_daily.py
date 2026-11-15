@@ -11,11 +11,12 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from ..core import pit
+from ..core.instruments import EQUITY_TYPES
 from .prices_logic import compute_symbol_rows, pick_bars
 from ._resolve import as_date, security_symbols
 
 UTC = timezone.utc
-TV = "4"  # 4: one ticker per date, junk quotes and ×10 days without an action carry no return (#255); 3: #240
+TV = "5"  # 5: notes, preferreds, warrants, units and funds are skipped (#393); 4: one ticker per date, junk quotes and ×10 days without an action carry no return (#255); 3: #240
 ERROR_FLAGS = ("zero_or_negative_price", "high_lt_low", "implausible_price")
 BAR_FIELDS = ["_id", "symbol", "date", "open", "high", "low", "close", "volume", "vwap"]
 
@@ -23,7 +24,13 @@ BAR_FIELDS = ["_id", "symbol", "date", "open", "high", "low", "close", "volume",
 def compute(read, window=None, *, security_ids=None):
     """Yield (rows, issues) per security. `read(collection, filter=None, columns=None, sort=None)`;
     `window` has start, end and lookback_start (ISO dates) or is None for a full rebuild."""
-    securities = read("securities", None, ["security_id", "identifiers"])
+    # Equity only (#393): exchange-traded notes, preferreds, warrants, units and funds get no adjusted prices (and
+    # so no DQ issues); their open issues resolve on the next full run.
+    securities = [
+        s
+        for s in read("securities", None, ["security_id", "identifiers", "security_type"])
+        if (s.get("security_type") or "common") in EQUITY_TYPES
+    ]
     sec_syms = security_symbols(securities)
     ticker_iv = {
         s["security_id"]: [i for i in s.get("identifiers", []) if i.get("type") == "ticker"] for s in securities

@@ -58,6 +58,13 @@ class PricesDaily(unittest.TestCase):
         # Already-adjusted bars (FMP, #240): the same split leaves the factors at 1.
         self.assertEqual({r["adj_factor"] for r in self.rows(w, [split])}, {1.0})
 
+    def test_non_equity_instruments_get_no_prices(self):
+        """#393: a note's bars produce no rows and no DQ issues (its open issues resolve on the next full run)."""
+        bars = [{"_id": f"b{i}", "symbol": "AAA", "date": f"2020-01-{i + 2:02d}", "open": 0.0, "high": 0.0, "low": 0.0,
+                 "close": 0.0, "volume": 0} for i in range(5)]
+        read = reader({"securities": [dict(SECURITIES[0], security_type="note")], "eod_prices": bars, "corporate_actions": []})
+        self.assertEqual(list(prices_daily.compute(read)), [])
+
     def test_dq_flags_become_issues(self):
         bars = [dict(b) for b in BARS[:8]]
         bars[5]["close"] = 0

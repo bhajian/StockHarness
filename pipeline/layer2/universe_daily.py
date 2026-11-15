@@ -16,6 +16,7 @@ from __future__ import annotations
 from statistics import median
 
 from ..core import pit
+from ..core.instruments import EQUITY_TYPES
 from ._resolve import as_date, security_symbols
 from .index_membership_logic import member_on
 
@@ -55,7 +56,9 @@ def evaluate(day, close, adv, market_cap, exchange, p):
 
 def compute(read, window=None, params=None):
     p = {**DEFAULTS, **(params or {})}
-    securities = read("securities", None, ["security_id", "identifiers", "exchange_history"])
+    securities = read("securities", None, ["security_id", "identifiers", "exchange_history", "security_type"])
+    # Only common stock and ADRs can be members (#393): notes, preferreds, warrants, units and funds never are.
+    equity = {s["security_id"]: (s.get("security_type") or "common") in EQUITY_TYPES for s in securities}
     syms = security_symbols(securities)
     exch = {s["security_id"]: s.get("exchange_history") or [] for s in securities}
     start = window.start if window else None
@@ -108,6 +111,8 @@ def compute(read, window=None, params=None):
                 cap, src = None, None
             exchange = _interval_value(exch.get(sid), day)
             fails = evaluate(day, close, adv, cap, exchange, p)
+            if not equity.get(sid, True):
+                fails.append("security_type")
             mine = membership.get(sid, {})
             flags = {f: (member_on(mine.get(i, []), day) if i in indexed else None) for i, f in INDEX_FLAGS.items()}
             rows.append(

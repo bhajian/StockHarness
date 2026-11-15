@@ -1695,16 +1695,19 @@ builds the `universe` collection:
    A higher floor here would drop names that were above $300M in the past and fell since, which is survivorship
    bias. Fields: `symbol`, `companyName`, `marketCap`, `exchange`, `sector`, `industry`, `is_delisted: false`.
 2. **Delisted names**: the FMP delisted-companies list, every page (about 170 pages on Premium, delistings since
-   late 2020). These are also written to `delisted_companies`. Only delisted names from the same exchanges join
-   the universe (`is_delisted: true`, `delisted_date`).
-3. **Common stock only**: warrants, units, rights and preferreds (`ABCDW`, `ABCDU`, `-WS`, `-PA`…) are left out;
-   share classes such as `BRK-B` stay.
+   late 2020). The list mixes every country; only listings on NASDAQ, NYSE and AMEX are stored in
+   `delisted_companies` (the universe is US only). They join the universe as `is_delisted: true`, `delisted_date`.
+3. **Equity only** (#393): common stock and ADRs. Exchange-traded notes and debentures ("DTE Energy Company 2020
+   Series", "… Senior Notes due 2028"), preferreds (`-PA`, "Perpetual Preferred"), warrants (`ABCDW`, `-WS`),
+   units, rights, funds and ETFs are left out; share classes such as `BRK-B` stay. The same classifier sets
+   `securities.security_type`, and `universe_daily` only admits `common` and `ADR` (fail reason `security_type`).
 4. **Merge**: an active row overrides a delisted row for the same symbol.
 
-A complete pull replaces the universe: names that no longer qualify (foreign or OTC leftovers, warrants) are
-removed and stop being synced. The removal only happens when the delisted list was read to its end and the
-screener returned at least 500 names, so a short or failed answer never empties it. In this deployment the
-universe holds about 3,300 active names plus the delisted ones. Every per-symbol sync in **Reuse the Universe
+The universe is **sticky**: a name stays once it is in, so a stock that falls below $300M, or a second share class
+the screener stops returning, keeps its prices flowing (a held position can still be marked and sold). A name we
+hold an active profile for comes back if it went missing. Only listings that are not US equity (notes,
+preferreds, warrants, units, funds, foreign or OTC leftovers) are removed. In this deployment the universe holds
+about 3,300 active names plus about 4,900 delisted ones. Every per-symbol sync in **Reuse the Universe
 collection** mode iterates all of them.
 
 The universe is deliberately broad. The point-in-time filter (price, liquidity, market cap and exchange on each

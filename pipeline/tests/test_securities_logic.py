@@ -182,3 +182,32 @@ class TestConcurrentInstruments(unittest.TestCase):
         meta = [{"symbol": "META", "companyName": "Meta Platforms, Inc.", "cik": "1326801", "exchange": "NASDAQ", "isActivelyTrading": True}]
         [doc] = s.build_securities_docs(meta, [], [], [old], {"META": "2022-06-09"}, "2026-11-06")
         self.assertEqual(doc["security_id"], "SEC_000010")
+
+
+class TestInstrumentTypes(unittest.TestCase):
+    """#393: notes, preferreds and funds are not securities of their own; foreign delisted names are skipped."""
+
+    def test_note_does_not_attach_to_its_issuer_and_foreign_delisted_is_skipped(self):
+        profiles = [
+            {"symbol": "DTE", "companyName": "DTE Energy Company", "cik": "936340", "exchange": "NYSE", "isActivelyTrading": True},
+            # Same CIK as the issuer: matching would put the debenture's ticker on DTE's security.
+            {"symbol": "DTB", "companyName": "DTE Energy Company 2020 Series", "cik": "936340", "exchange": "NYSE", "isActivelyTrading": True},
+            {"symbol": "BXSL", "companyName": "Blackstone Secured Lending Fund", "cik": "2", "exchange": "NYSE", "isFund": True},
+        ]
+        delisted = [
+            {"symbol": "OLDCO", "companyName": "Old Co", "exchange": "NASDAQ", "delistedDate": "2022-03-01"},
+            {"symbol": "GHH.L", "companyName": "Gooch & Housego", "exchange": "LSE", "delistedDate": "2022-03-01"},
+        ]
+        docs = s.build_securities_docs(profiles, [], delisted, [], {"DTE": "2016-01-04"}, "2026-11-15")
+        tickers = {i["value"] for d in docs for i in d["identifiers"] if i["type"] == "ticker"}
+        self.assertEqual(tickers, {"DTE", "OLDCO"})
+        self.assertTrue(all(d["security_type"] == "common" for d in docs))
+
+    def test_existing_junk_is_reclassified(self):
+        note = {"security_id": "SEC_000009", "name": "Abacus Global Management, Inc. - 9.875% Fixed Rate Senior Notes due 2028",
+                "security_type": "common",
+                "identifiers": [{"type": "ticker", "value": "ABXL", "valid_from": "2016-01-04", "valid_to": None}]}
+        docs = s.build_securities_docs([], [], [], [note], {}, "2026-11-15")
+        self.assertEqual([(d["security_id"], d["security_type"]) for d in docs], [("SEC_000009", "note")])
+        # A re-run with the type already set touches nothing.
+        self.assertEqual(s.build_securities_docs([], [], [], docs, {}, "2026-11-16"), [])

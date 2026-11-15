@@ -1,0 +1,71 @@
+{
+  "note": "Instrument classifier vectors (#393), shared by tests/unit/instruments.test.ts and pipeline/tests/test_instruments.py. Each case: symbol, name, profile flags, expected type. Taken from live FMP data.",
+  "cases": [
+    ["AAPL", "Apple Inc.", {}, "common"],
+    ["BRK-B", "Berkshire Hathaway Inc.", {}, "common"],
+    ["BF.B", "Brown-Forman Corporation", {}, "common"],
+    ["FOXA", "Fox Corporation", {}, "common"],
+    ["NWSA", "News Corporation", {}, "common"],
+    ["FWONK", "Liberty Media Corporation - Liberty Formula One", {}, "common"],
+    ["BATRK", "Atlanta Braves Holdings, Inc.", {}, "common"],
+    ["MKC-V", "McCormick & Company, Incorporated", {}, "common"],
+    ["GOOGL", "Alphabet Inc.", {}, "common"],
+    ["SNOW", "Snowflake Inc.", {}, "common"],
+    ["EPD", "Enterprise Products Partners L.P.", {}, "common"],
+    ["SNR", "New Senior Investment Group Inc.", {}, "common"],
+    ["UNIT", "Uniti Group Inc.", {}, "common"],
+    ["NTRS", "Northern Trust Corporation", {}, "common"],
+    [
+      "TSM",
+      "Taiwan Semiconductor Manufacturing Company Limited",
+      {
+        "isAdr": true
+      },
+      "ADR"
+    ],
+    ["DTB", "DTE Energy Company 2020 Series", {}, "note"],
+    ["SOJC", "The Southern Company JR 2017B NT 77", {}, "note"],
+    ["ABXL", "Abacus Global Management, Inc. - 9.875% Fixed Rate Senior Notes due 2028", {}, "note"],
+    ["PFH", "Prudential Financial, Inc. 4.125% Junior Subordinated Notes due 2060", {}, "note"],
+    ["DUKB", "Duke Energy Corporation 5.625% Junior Subordinated Debentures due 2078", {}, "note"],
+    ["ATH-PA", "Athene Holding Ltd.", {}, "preferred"],
+    ["CFR-PB", "Cullen/Frost Bankers, Inc.", {}, "preferred"],
+    [
+      "BPYPO",
+      "Brookfield Property Partners L.P. 6.375% Class A Cumulative Redeemable Perpetual Preferred Units",
+      {},
+      "preferred"
+    ],
+    ["ASTLW", "Algoma Steel Group Inc.", {}, "warrant"],
+    ["ACHR-WS", "Archer Aviation Inc. Warrants", {}, "warrant"],
+    ["ATIIW", "Archimedes Tech SPAC Partners II Co. Warrant", {}, "warrant"],
+    ["ATIIU", "Archimedes Tech SPAC Partners II Co.", {}, "unit"],
+    ["XYZ.U", "XYZ Acquisition Corp.", {}, "unit"],
+    ["ABCDR", "ABCD Acquisition Corp. Rights", {}, "right"],
+    [
+      "BXSL",
+      "Blackstone Secured Lending Fund",
+      {
+        "isFund": true
+      },
+      "fund"
+    ],
+    [
+      "SPY",
+      "SPDR S&P 500 ETF Trust",
+      {
+        "isEtf": true
+      },
+      "etf"
+    ],
+    ["SATA", "Strive Inc. Perp. Pfd. Series A", {}, "preferred"],
+    ["ARM", "Arm Holdings plc American Depositary Shares", {}, "ADR"],
+    ["PONY", "Pony AI Inc. American Depositary Shares", {}, "ADR"],
+    ["TBB", "AT&T Inc. 5.35% GLB NTS 66", {}, "note"],
+    ["CMSA", "CMS Energy Corporation 5.6% JRSUB NT 78", {}, "note"],
+    ["DTW", "DTE Energy Company 5.25 % Debentures 2017-01.12.77 Global", {}, "note"],
+    ["SPKLU", "Spark I Acquisition Corp. Unit", {}, "unit"],
+    ["DTE", "DTE Energy Company", {}, "common"],
+    ["T", "AT&T Inc.", {}, "common"]
+  ]
+}

@@ -17,6 +17,7 @@ import {
   type DatasetDef,
 } from './datasetCatalog.js';
 import { catalogEntries, refreshCatalogEntry } from './schemaCatalog.js';
+import { isEquity, type InstrumentFlags } from './instruments.js';
 import { ingestChecker, recordDrift } from './ingestValidation.js';
 import { emitHarnessEvent } from './harnessEvents.js';
 import {
@@ -33,8 +34,6 @@ const FMP_BASE = process.env.FMP_BASE_URL || 'https://financialmodelingprep.com/
 const MAX_RPM = Number(process.env.DATASET_SYNC_RPM) || 250;
 /** The universe screener floor: the research universe's point-in-time min_market_cap (universe_daily). */
 export const UNIVERSE_MIN_MARKET_CAP = 300_000_000;
-/** A screener answer shorter than this is treated as broken: the universe is then not pruned. */
-const UNIVERSE_MIN_ACTIVE = 500;
 /** One FMP rate limit for every sync in the process; the highest-priority waiter gets the next slot (#78). */
 export const fmpLimiter = new PriorityRateLimiter(MAX_RPM);
 /** Background sync runs: priority first, never twice at once, never blocking the dispatcher tick. */
@@ -174,15 +173,20 @@ export function rollingWindow(def: DatasetDef, sync: Pick<DatasetSync, 'from' | 
 }
 
 /**
- * Common stock only (#387): drops warrants, units and rights (a NASDAQ 5-letter symbol ending in W, U or R, or a
- * -W/-WS/-U/-R/-RT/.U/.WS suffix) and preferreds (-P, -PA…). Share classes such as BRK-B stay.
+ * Whether a listing belongs in the sync universe (#387, #393): a US ticker (share classes such as BRK-B stay;
+ * foreign suffixes such as .L or .KS do not) for common stock or an ADR, not a note, preferred, warrant,
+ * unit, right, fund or ETF (packages/core/src/instruments.ts).
  */
-export function isCommonStockSymbol(symbol: string) {
+export function isUniverseInstrument(symbol: string, name?: string | null, flags: InstrumentFlags = {}) {
   const s = symbol.toUpperCase();
-  if (/[-.](P[A-Z]?|W[A-Z]?|WS|U|UN|R|RT)$/.test(s)) return false;
-  if (/^[A-Z]{4}[WUR]$/.test(s)) return false;
-  return /^[A-Z][A-Z0-9]{0,5}([-.][A-Z])?$/.test(s);
+  // FMP writes US share classes with a dash (BRK-B, BF-B); a dot suffix is a foreign listing (.L, .TO) or a unit.
+  return /^[A-Z][A-Z0-9]{0,5}(-[A-Z])?$/.test(s) && isEquity(s, name, flags);
 }
+const flagsOf = (r: Record<string, unknown>): InstrumentFlags => ({
+  isEtf: r.isEtf === true,
+  isFund: r.isFund === true,
+  isAdr: r.isAdr === true,
+});
 
 export async function fmpApiKey(ownerId: string, connectionId: string) {
   const connection = await ownedConnection(ownerId, connectionId);
@@ -556,7 +560,7 @@ async function pullChecked(
     );
     const active = (Array.isArray(screener) ? screener : [])
       .filter((r): r is Record<string, unknown> => !!r && typeof r === 'object' && !!r.symbol)
-      .filter((r) => isCommonStockSymbol(String(r.symbol)))
+      .filter((r) => isUniverseInstrument(String(r.symbol), r.companyName as string, flagsOf(r)))
       .map((r) => ({
         symbol: r.symbol,
         companyName: r.companyName,
@@ -569,7 +573,6 @@ async function pullChecked(
     // Delisted companies, every page (#387: the Premium plan serves about 170 pages, delistings since late 2020). Non-fatal: a page the
     // plan refuses ends the list, and the universe keeps what came back. Refreshes delisted_companies.
     const delisted: Record<string, unknown>[] = [];
-    let delistedComplete = false;
     for (let page = 0; page < Number(p.delistedPages ?? 1000); page++) {
       let d: unknown;
       try {
@@ -580,28 +583,26 @@ async function pullChecked(
       const dl = (Array.isArray(d) ? d : []).filter(
         (r): r is Record<string, unknown> => !!r && typeof r === 'object' && !!r.symbol,
       );
-      if (!dl.length) {
-        delistedComplete = true;
-        break;
-      }
+      if (!dl.length) break;
       delisted.push(...dl);
     }
-    if (delisted.length) {
-      const dcoll = mongo.db(workspaceDatabase(sync.ownerId)).collection('delisted_companies');
-      await dcoll.createIndex({ symbol: 1, delistedDate: 1 }).catch(() => undefined);
-      await upsertRows(dcoll, delisted, ['symbol', 'delistedDate']);
-    }
-    // Merge: an active screener row overrides a delisted row for the same symbol. Delisted listings on other
-    // exchanges (LSE, TSX, OTC …) are outside the plan's price data and the research universe (#291).
     const exchanges = new Set(
       String(p.exchange ?? 'NASDAQ,NYSE,AMEX')
         .split(',')
         .map((x) => x.trim().toUpperCase()),
     );
+    // US only (owner, 2026-11-15): FMP's delisted list mixes every country; only listings on the sync's exchanges
+    // are stored, so nothing downstream (securities) sees foreign names.
+    const usDelisted = delisted.filter((x) => exchanges.has(String(x.exchange ?? '').toUpperCase()));
+    if (usDelisted.length) {
+      const dcoll = mongo.db(workspaceDatabase(sync.ownerId)).collection('delisted_companies');
+      await dcoll.createIndex({ symbol: 1, delistedDate: 1 }).catch(() => undefined);
+      await upsertRows(dcoll, usDelisted, ['symbol', 'delistedDate']);
+    }
+    // Merge: an active screener row overrides a delisted row for the same symbol. Delisted listings on other
+    // exchanges (LSE, TSX, OTC …) are outside the plan's price data and the research universe (#291).
     const bySymbol = new Map<string, Record<string, unknown>>();
-    for (const r of delisted.filter(
-      (x) => exchanges.has(String(x.exchange ?? '').toUpperCase()) && isCommonStockSymbol(String(x.symbol)),
-    ))
+    for (const r of usDelisted.filter((x) => isUniverseInstrument(String(x.symbol), x.companyName as string)))
       bySymbol.set(String(r.symbol), {
         symbol: r.symbol,
         companyName: r.companyName,
@@ -610,11 +611,53 @@ async function pullChecked(
         is_delisted: true,
       });
     for (const r of active) bySymbol.set(String(r.symbol), r);
+    // Sticky (#393): a name stays in the sync universe once it is in, so a stock that falls below the floor (or
+    // that the screener stops returning, e.g. a second share class) keeps its prices flowing; and a name we hold a
+    // trading profile for comes back. Only listings that are not US common stock or ADRs, or not on the exchanges
+    // (notes, preferreds, warrants, units, funds, foreign or OTC leftovers), are removed.
+    const profiles = await wsDb
+      .collection('company_profiles')
+      .find(
+        { isActivelyTrading: { $ne: false } },
+        {
+          projection: {
+            _id: 0,
+            symbol: 1,
+            companyName: 1,
+            exchange: 1,
+            exchangeShortName: 1,
+            isEtf: 1,
+            isFund: 1,
+            isAdr: 1,
+          },
+        },
+      )
+      .toArray();
+    const profileOf = new Map(profiles.map((x) => [String(x.symbol), x as Record<string, unknown>]));
+    const exchangeOf = (r: Record<string, unknown>) =>
+      String(r.exchange ?? r.exchangeShortName ?? '').toUpperCase();
+    const qualifies = (r: Record<string, unknown>) => {
+      const prof = profileOf.get(String(r.symbol)) ?? {};
+      return (
+        exchanges.has(exchangeOf(r) || exchangeOf(prof)) &&
+        isUniverseInstrument(String(r.symbol), (r.companyName ?? prof.companyName) as string, flagsOf(prof))
+      );
+    };
+    const held = await coll
+      .find({}, { projection: { _id: 0, symbol: 1, companyName: 1, exchange: 1 } })
+      .toArray();
+    const heldSymbols = new Set(held.map((r) => String(r.symbol)));
+    for (const prof of profiles)
+      if (!bySymbol.has(String(prof.symbol)) && !heldSymbols.has(String(prof.symbol)) && qualifies(prof))
+        bySymbol.set(String(prof.symbol), {
+          symbol: prof.symbol,
+          companyName: prof.companyName,
+          exchange: exchangeOf(prof),
+          is_delisted: false,
+        });
     rows += await upsertRows(coll, [...bySymbol.values()], def.keyFields);
-    // A complete pull replaces the universe: names that no longer qualify (foreign or OTC leftovers, warrants,
-    // units) stop being synced. Guarded so a short or failed answer never empties it.
-    if (delistedComplete && active.length >= UNIVERSE_MIN_ACTIVE)
-      stats.removed = (await coll.deleteMany({ symbol: { $nin: [...bySymbol.keys()] } })).deletedCount;
+    const junk = held.filter((r) => !bySymbol.has(String(r.symbol)) && !qualifies(r)).map((r) => r.symbol);
+    if (junk.length) stats.removed = (await coll.deleteMany({ symbol: { $in: junk } })).deletedCount;
   } else if (def.scope === 'feed') {
     // Feeds are newest first: page until a page brings nothing new (or the plan's page limit, #291).
     const maxPages = Number((sync.params as Record<string, unknown> | undefined)?.pages ?? 50);

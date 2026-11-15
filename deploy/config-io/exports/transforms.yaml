@@ -521,7 +521,7 @@ spec:
         name:
           description: Company name
         security_type:
-          description: common or ADR
+          description: common or ADR (equity); preferred, note, warrant, unit, right, fund or etf are kept for identity but never enter the universe
         country:
           description: Country of domicile
         currency:
@@ -658,7 +658,7 @@ spec:
         in_universe:
           description: Passed every filter on this date
         fails:
-          description: "Filters that failed: price, liquidity, market_cap, exchange"
+          description: "Filters that failed: price, liquidity, market_cap, exchange, security_type (not common stock or an ADR)"
         close:
           description: Close that day
           unit: USD
