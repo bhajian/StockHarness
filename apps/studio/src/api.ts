@@ -641,7 +641,8 @@ export type HealthRow = {
   dateMax?: string;
   rows: number;
   coveragePct?: number;
-  dq: { error: number; warn: number };
+  /** `research`: the part on rows in the research universe (#428). */
+  dq: { error: number; warn: number; research?: { error: number; warn: number } };
   caveats: { blocking: number; warn: number };
   producer?: { type: string; name: string };
   error?: string;
@@ -667,7 +668,14 @@ export const resolveDrift = (id: string) =>
   send<{ resolved: boolean }>(`/datasets/drift/${encodeURIComponent(id)}/resolve`, {});
 export type DataHealth = {
   drift: DriftAlert[];
-  kpis: { fresh: number; stale: number; failed: number; drift: number; gaps?: number };
+  kpis: {
+    fresh: number;
+    stale: number;
+    failed: number;
+    drift: number;
+    gaps?: number;
+    dqResearchErrors?: number;
+  };
   indicator: { level: 'green' | 'amber' | 'red'; text: string };
   expected: string[];
   collections: HealthRow[];

@@ -89,8 +89,7 @@ export function HealthTab({ go, isAdmin = false }: { go: Go; isAdmin?: boolean }
           (r) =>
             filter === 'all' ||
             r.freshness !== 'fresh' ||
-            r.dq.error ||
-            r.caveats.blocking ||
+            (r.dq.research ? r.dq.research.error : r.dq.error) ||
             (r.gaps ?? []).some((c) => !c.rows || c.partial),
         )
         .sort(
@@ -163,6 +162,12 @@ export function HealthTab({ go, isAdmin = false }: { go: Go; isAdmin?: boolean }
           label="Gaps"
           value={h.kpis.gaps ?? 0}
           footnote="daily series with missing or partial sessions"
+        />
+        <KpiCard
+          icon={<XCircle size={18} />}
+          label="DQ errors"
+          value={h.kpis.dqResearchErrors ?? 0}
+          footnote="on rows in the research universe"
         />
       </div>
       {(h.drift ?? []).length > 0 && (
@@ -373,17 +378,33 @@ export function HealthTab({ go, isAdmin = false }: { go: Go; isAdmin?: boolean }
                   </td>
                   <td className="health-issues">
                     <div>
-                      {r.dq.error > 0 && (
-                        <StatusPill status="failed" label={`${fmtNumber(r.dq.error)} DQ errors`} />
-                      )}
-                      {r.dq.warn > 0 && (
-                        <StatusPill status="warn" label={`${fmtNumber(r.dq.warn)} DQ warnings`} />
-                      )}
-                      {r.caveats.blocking > 0 && (
+                      {/* #428: the research-relevant part leads; flags on rows no strategy can read are muted. */}
+                      {(r.dq.research?.error ?? r.dq.error) > 0 && (
                         <StatusPill
-                          status="blocked"
-                          label={`${r.caveats.blocking} blocking caveat${r.caveats.blocking === 1 ? '' : 's'}`}
+                          status="failed"
+                          label={`${fmtNumber(r.dq.research?.error ?? r.dq.error)} DQ errors${r.dq.research ? ' in the research universe' : ''}`}
                         />
+                      )}
+                      {(r.dq.research?.warn ?? r.dq.warn) > 0 && (
+                        <StatusPill
+                          status="warn"
+                          label={`${fmtNumber(r.dq.research?.warn ?? r.dq.warn)} DQ warnings${r.dq.research ? ' in the research universe' : ''}`}
+                        />
+                      )}
+                      {r.dq.research &&
+                        r.dq.error + r.dq.warn - r.dq.research.error - r.dq.research.warn > 0 && (
+                          <div
+                            className="muted-line"
+                            title="Flags on rows of securities that were not in the research universe on that date (penny stocks, shells): kept and flagged, never read by strategies"
+                          >
+                            {fmtNumber(r.dq.error + r.dq.warn - r.dq.research.error - r.dq.research.warn)}{' '}
+                            flags outside the research universe
+                          </div>
+                        )}
+                      {r.caveats.blocking > 0 && (
+                        <span title="FMP keeps no history of this data: it exists from the first sync on, so backtests cannot use it before then (strategies on it are paper-tracked forward). A fact of the source, not a defect; agents see the full caveat.">
+                          <StatusPill status="outline" label="forward-only" />
+                        </span>
                       )}
                       {r.error && (
                         <span className="muted-line" title={r.error}>
