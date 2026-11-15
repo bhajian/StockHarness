@@ -11,6 +11,7 @@ import { activeGates } from './gates.js';
 import { theories, type Theory } from './theories.js';
 import { PROFILE_IDS, profileOf, type ProfileId } from './profiles.js';
 import type { ResearchRole } from './lifecycleTools.js';
+import { harnessScheduleOf } from './researchState.js';
 
 /** The small-scale default (owner, 2026-11-05): 50 large caps; wider scopes come later. */
 export const DEFAULT_SYMBOLS =
@@ -107,6 +108,33 @@ export async function updateResearchSettings(ownerId: string, patch: unknown) {
   const next = researchSettingsSchema.partial().parse(patch);
   await settings().updateOne({ _id: ownerId }, { $set: next }, { upsert: true });
   return researchSettings(ownerId);
+}
+/**
+ * Write the research harness's schedule from the settings (#458): the settings are the one source of truth. On only
+ * when enabled, not paused and not past its end; removed when the settings have no schedule. A changed interval
+ * re-times the next cycle.
+ */
+export async function syncResearchSchedule(ownerId: string, name = 'Research loop') {
+  const s = await researchSettings(ownerId);
+  const wf = collection<any>('workflows');
+  const h = await wf.findOne({ ownerId, name }, { projection: { schedule: 1 } });
+  if (!h) return undefined;
+  const next = harnessScheduleOf(s);
+  if (!next) {
+    if (h.schedule)
+      await wf.updateOne(
+        { _id: h._id },
+        { $unset: { schedule: '', nextRunAt: '' }, $set: { updatedAt: new Date() } },
+      );
+    return undefined;
+  }
+  const retime = h.schedule?.everyMinutes !== next.everyMinutes;
+  if (JSON.stringify(h.schedule ?? null) !== JSON.stringify(next))
+    await wf.updateOne(
+      { _id: h._id },
+      { $set: { schedule: next, updatedAt: new Date() }, ...(retime ? { $unset: { nextRunAt: '' } } : {}) },
+    );
+  return next;
 }
 /** A human steering note: the Theorists see it in their next brief (the latest five are kept). */
 export async function addSteeringNote(ownerId: string, note: string, by?: string) {
@@ -237,7 +265,7 @@ async function coderQueue(queue: Theory[], role: ResearchRole | undefined) {
 export async function researchBrief(
   ownerId: string,
   role: ResearchRole | undefined,
-  meta: { agentId?: string; nodeId?: string } = {},
+  meta: { agentId?: string; nodeId?: string; runId?: string } = {},
 ) {
   const s = await researchSettings(ownerId);
   const counts = Object.fromEntries(
@@ -264,14 +292,17 @@ export async function researchBrief(
     .limit(20)
     .toArray();
   const gates = await activeGates(ownerId);
-  if (s.paused)
+  if (s.paused) {
+    await noteOnCycle(meta.runId, 'paused');
     return {
       role: role ?? 'none',
       paused: true,
       instruction: 'The research loop is paused: do nothing and reply DONE.',
     };
+  }
   const coderQueueSize = await coderBacklog(ownerId);
   const backlogFull = coderQueueSize >= s.maxCoderBacklog;
+  if (role === 'theorist' && backlogFull) await noteOnCycle(meta.runId, 'backlog_full');
   return {
     role: role ?? 'none',
     ...(role === 'theorist' && backlogFull
@@ -300,6 +331,17 @@ export async function researchBrief(
     evaluation_params: await evaluationParams(ownerId, s),
     gates: { version: gates.version, ...gates.gates },
   };
+}
+/**
+ * What held a cycle back (#458), on its run (and the cycle's top run): "paused" when an agent was told to stop,
+ * "backlog_full" when a Theorist was told not to propose. The Cycles list shows these instead of a bare "succeeded".
+ */
+async function noteOnCycle(runId: string | undefined, note: 'paused' | 'backlog_full') {
+  if (!runId) return;
+  const runs = collection<any>('runs');
+  const r = await runs.findOne({ _id: runId }, { projection: { parentRunId: 1 } });
+  const ids = [runId, ...(r?.parentRunId ? [r.parentRunId] : [])];
+  await runs.updateMany({ _id: { $in: ids } }, { $addToSet: { researchNotes: note } });
 }
 /** Ideas waiting for the Coder (#336). */
 export const coderBacklog = (ownerId: string) =>
@@ -397,6 +439,8 @@ export type ResearchLoopInput = {
   maxTurns?: number;
   scheduleMinutes?: number;
   scheduleUntil?: string;
+  /** The harness schedule as derived from the settings (#458); overrides scheduleMinutes. */
+  schedule?: { enabled: boolean; everyMinutes: number; input: string; until?: string };
 };
 /** The model of Theorist i (0-based): its own (#413), else the Theorist role's. */
 export const theoristProvider = (o: Pick<ResearchLoopInput, 'providers' | 'theoristProviders'>, i: number) =>
@@ -535,15 +579,17 @@ export function makeResearchLoop(o: ResearchLoopInput): Workflow {
     resources: [],
     bindings: [],
     nodes,
-    ...(o.scheduleMinutes
-      ? {
-          schedule: {
-            enabled: true,
-            everyMinutes: o.scheduleMinutes,
-            input: 'Scheduled research cycle',
-            ...(o.scheduleUntil ? { until: o.scheduleUntil } : {}),
-          },
-        }
-      : {}),
+    ...(o.schedule
+      ? { schedule: o.schedule }
+      : o.scheduleMinutes
+        ? {
+            schedule: {
+              enabled: true,
+              everyMinutes: o.scheduleMinutes,
+              input: 'Scheduled research cycle',
+              ...(o.scheduleUntil ? { until: o.scheduleUntil } : {}),
+            },
+          }
+        : {}),
   });
 }

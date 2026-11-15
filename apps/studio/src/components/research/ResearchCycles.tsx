@@ -28,7 +28,10 @@ function CycleList() {
   // Click a header to sort (#385); unsorted, newest first.
   const { sorted, sort, toggle } = useSort(rows ?? [], {
     started: { value: (r) => new Date(r.startedAt), firstDesc: true },
-    status: { value: (r) => rankOf(['failed', 'running', 'succeeded'])(r.status) },
+    status: {
+      value: (r) =>
+        rankOf(['failed', 'running', 'paused', 'held: backlog', 'succeeded'])(r.outcome ?? r.status),
+    },
     took: { value: (r) => r.durationMs, firstDesc: true },
     cost: { value: (r) => r.usd, firstDesc: true },
     calls: { value: (r) => r.calls, firstDesc: true },
@@ -77,7 +80,7 @@ function CycleList() {
               <tr key={r.id} className="clickable" onClick={() => go(`/research/cycles/${r.id}`)}>
                 <td className="nowrap">{when(r.startedAt)}</td>
                 <td>
-                  <StatusPill status={r.status} />
+                  <StatusPill status={r.outcome ?? r.status} />
                   {r.error && <small className="error-line">{r.error.slice(0, 80)}</small>}
                 </td>
                 <td className="num">{mins(r.durationMs)}</td>
@@ -116,7 +119,7 @@ function Cycle({ id }: { id: string }) {
         <span aria-hidden="true">›</span> {when(c.startedAt)}
       </nav>
       <p>
-        <StatusPill status={c.status} />{' '}
+        <StatusPill status={c.outcome ?? c.status} />{' '}
         {c.finishedAt
           ? `took ${mins(new Date(c.finishedAt).getTime() - new Date(c.startedAt).getTime())}`
           : 'running'}{' '}

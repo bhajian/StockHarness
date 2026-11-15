@@ -1,6 +1,7 @@
 // How the research loop works, and what each cycle did (#302). The harness is an ordinary workflow of agent cards;
 // this joins its nodes with the models, skills, MCP connections and tools they use, and a cycle (a run of it) with
 // what each agent did: its tool calls, the skills it loaded, its tokens and cost, and the theories it touched.
+import { cycleOutcome } from './researchState.js';
 import { collection } from './db.js';
 import { HttpError } from './security.js';
 import { ROLE_CONNECTION_NAMES } from './researchLoop.js';
@@ -154,7 +155,7 @@ export async function researchCycles(ownerId: string, limit = 50) {
   const runs = await collection<any>('runs')
     .find(
       { ownerId, workflowId: wf._id },
-      { projection: { status: 1, createdAt: 1, finishedAt: 1, error: 1, trigger: 1 } },
+      { projection: { status: 1, createdAt: 1, finishedAt: 1, error: 1, trigger: 1, researchNotes: 1 } },
     )
     .sort({ createdAt: -1 })
     .limit(limit)
@@ -193,6 +194,9 @@ export async function researchCycles(ownerId: string, limit = 50) {
     return {
       id: r._id,
       status: r.status,
+      // #458: what the cycle actually did. A run that "succeeded" while paused did nothing.
+      outcome: cycleOutcome(r.status, r.researchNotes),
+      notes: (r.researchNotes ?? []) as string[],
       trigger: r.trigger ?? null,
       startedAt: r.createdAt,
       finishedAt: r.finishedAt ?? null,
@@ -326,6 +330,8 @@ export async function researchCycle(ownerId: string, runId: string) {
   return {
     id: run._id,
     status: run.status,
+    outcome: cycleOutcome(run.status, run.researchNotes),
+    notes: (run.researchNotes ?? []) as string[],
     startedAt: run.createdAt,
     finishedAt: run.finishedAt ?? null,
     ...(run.error ? { error: String(run.error) } : {}),

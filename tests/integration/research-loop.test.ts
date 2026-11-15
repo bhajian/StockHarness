@@ -230,8 +230,11 @@ test('Research Lab: pause / resume, settings rebuild the harness, gates edits ma
     0,
     'research agents have no token budget (#263)',
   );
+  assert.equal((await ok('/research/status')).state.state, 'idle', 'one status: idle on a schedule (#458)');
   const paused = await ok('/research/pause', {});
   assert.equal(paused.paused, true);
+  assert.equal(paused.state.state, 'paused');
+  assert.deepEqual(paused.state.actions, ['resume']);
   wf = (await ok('/workflows')).find((w: any) => w.name === 'Research loop');
   assert.equal(wf.schedule.enabled, false, 'paused: no scheduled cycles');
   assert.equal((await ok('/research/resume', {})).paused, false);
@@ -265,6 +268,14 @@ test('Research Lab: pause / resume, settings rebuild the harness, gates edits ma
   const after = await ok(`/research/gates/${before.active}`);
   assert.deepEqual(after.gates, used.gates, 'the locked version is unchanged');
   await ok('/research/settings', { schedule: { enabled: false, everyMinutes: 120 } }, 'PUT');
+  // #458: turning the schedule off in Setup turns the harness's schedule off (it used to stay on).
+  wf = (await ok('/workflows')).find((w: any) => w.name === 'Research loop');
+  assert.equal(wf.schedule.enabled, false, 'the schedule off in the settings is off in the harness');
+  assert.equal((await ok('/research/status')).state.state, 'not_scheduled');
+  // Stop: paused, and nothing left queued or running.
+  const stopped = await ok('/research/stop', {});
+  assert.equal(stopped.state.state, 'paused');
+  assert.equal((await ok('/research/resume', {})).paused, false);
 });
 
 test('a spend cap below the spend stops the next cycle at its first model call and pauses the loop (#297)', async () => {
@@ -295,9 +306,21 @@ test('a spend cap below the spend stops the next cycle at its first model call a
   assert.ok(s.spend.sinceCap >= s.spend.today);
   const wf = (await ok('/workflows')).find((w: any) => w.name === 'Research loop');
   assert.equal(wf.schedule.enabled, false, 'its schedule is off');
+  assert.equal(s.state.state, 'paused_spend_cap', 'one status: paused by the spend cap (#458)');
+  // Resume is refused while the cap is still reached (#458), and clears the stop once it is raised.
+  const refused = await fetch(base + '/api/research/resume', {
+    method: 'POST',
+    headers: { Origin: base, Cookie: cookie, 'Content-Type': 'application/json' },
+    body: '{}',
+  });
+  assert.equal(refused.status, 409);
+  assert.match((await refused.json()).error, /spend cap is still reached/);
   // One cycle at a time (#317): Run a cycle now refuses while one is running.
+  await ok('/research/settings', { budget: { capUsd: 1000, capSince: '2020-01-01T00:00:00Z' } }, 'PUT');
+  s = await ok('/research/resume', {});
+  assert.equal(s.spend.stoppedAt, undefined, 'Resume clears the spend-cap stop');
+  assert.notEqual(s.state.state, 'paused_spend_cap');
   await ok('/research/settings', { budget: {} }, 'PUT');
-  await ok('/research/resume', {});
   await ok('/research/settings', { schedule: { enabled: false, everyMinutes: 120 } }, 'PUT');
   for (let i = 0; i < 120; i++) {
     const cycles = await ok('/research/cycles');

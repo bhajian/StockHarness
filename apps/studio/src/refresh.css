@@ -3869,9 +3869,46 @@ td.loss {
   align-items: center;
   gap: 12px;
 }
-.setup-status > div:first-child {
+.setup-status {
   display: grid;
-  gap: 3px;
+  justify-content: stretch;
+}
+/* The one research status and control (#458), in the Lab and Setup. */
+.research-status {
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: var(--surface-2);
+}
+.setup-status .research-status {
+  border: 0;
+  padding: 0;
+  background: none;
+}
+.research-status-main {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+}
+.research-status-detail {
+  min-width: 0;
+  flex: 1 1 320px;
+}
+.research-status-hold {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted, #5b6b7f);
+  font-size: 13px;
+}
+.research-status-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
 }
 .setup-section {
   display: grid;

@@ -3,7 +3,8 @@
 import { collection } from './db.js';
 import { theories, type Theory } from './theories.js';
 import { trialCount } from './evaluations.js';
-import { researchSettings } from './researchLoop.js';
+import { coderBacklog, researchSettings } from './researchLoop.js';
+import { researchState } from './researchState.js';
 import { budgetState } from './spendGuard.js';
 
 export const BOARD_COLUMNS: { key: string; label: string; statuses: Theory['status'][] }[] = [
@@ -43,8 +44,9 @@ export async function researchHarness(ownerId: string, name = 'Research loop') {
     _id: string;
     name: string;
     ownerId: string;
-    schedule?: { enabled: boolean; everyMinutes: number };
-  }>('workflows').findOne({ ownerId, name }, { projection: { name: 1, schedule: 1 } });
+    schedule?: { enabled: boolean; everyMinutes: number; until?: string };
+    nextRunAt?: Date;
+  }>('workflows').findOne({ ownerId, name }, { projection: { name: 1, schedule: 1, nextRunAt: 1 } });
 }
 
 async function researchRunIds(ownerId: string, since: Date) {
@@ -99,8 +101,40 @@ export async function researchStatus(ownerId: string) {
         .limit(1)
         .next()
     : null;
+  const activeRun = h
+    ? await collection<{ _id: string; status: string; createdAt: Date; cancelRequested?: boolean }>('runs')
+        .find(
+          { ownerId, workflowId: h._id, status: { $in: ['queued', 'running'] } } as Record<string, unknown>,
+          {
+            projection: { status: 1, createdAt: 1, cancelRequested: 1 },
+          },
+        )
+        .sort({ createdAt: -1 })
+        .limit(1)
+        .next()
+    : null;
+  const state = researchState({
+    installed: !!h,
+    paused: !!s.paused,
+    schedule: s.schedule,
+    nextRunAt: h?.nextRunAt,
+    activeRun: activeRun
+      ? {
+          id: activeRun._id,
+          status: activeRun.status,
+          startedAt: activeRun.createdAt,
+          cancelRequested: activeRun.cancelRequested,
+        }
+      : null,
+    stoppedAt: spend.stoppedAt,
+    stopReason: spend.stopReason,
+    capExceeded: spend.exceeded,
+    backlog: { size: await coderBacklog(ownerId), limit: s.maxCoderBacklog },
+  });
   return {
     paused: !!s.paused,
+    // #458: the one status the Lab and Setup show, with its reason and the controls that apply.
+    state,
     harness: h ? { id: h._id, name: h.name, schedule: h.schedule ?? null } : null,
     lastRun: lastRun
       ? {

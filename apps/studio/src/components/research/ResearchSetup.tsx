@@ -2,11 +2,12 @@
 // the Theorists (how many; a model and an idea profile each), the Judge and Coder (model and skills), effort, the
 // evaluation scope, the budget (overall and per model), the schedule and the gates; then Start, Pause or run a cycle.
 import React, { useEffect, useMemo, useState } from 'react';
-import { CirclePause, CirclePlay, Play, Save } from 'lucide-react';
+import { Save } from 'lucide-react';
 import { api, send, type Data } from '../../api';
 import { Field } from '../ui';
 import { Skeleton, StatusPill } from '../kit';
 import { SortHead, useSort } from '../tableKit';
+import { ResearchStatusBar, startResearch } from './ResearchStatusBar';
 import { ALL_PROFILES } from '../../../../../packages/core/src/profiles.js';
 
 const ROLES = [
@@ -125,99 +126,34 @@ export function ResearchSetup({
       setBusy('');
     }
   };
-  const start = () =>
-    act('start', async () => {
-      set({ schedule: { ...(s.schedule ?? { everyMinutes: 60 }), enabled: true } });
-      const { steering: _s, paused: _p, ...rest } = s;
-      await send(
-        '/research/settings',
-        { ...rest, schedule: { ...(s.schedule ?? { everyMinutes: 60 }), enabled: true } },
-        'PUT',
-      );
-      if (!status.harness) await send('/research/loop', {});
-      if (status.paused) await send('/research/resume', {});
-      return 'Started: cycles run on the schedule.';
-    });
+  // Start (#458) saves the edited settings with the schedule on; an ended schedule loses its end date.
+  const start = async () => {
+    const { steering: _s, paused: _p, ...rest } = s;
+    if (!status.harness) await send('/research/loop', {});
+    await send('/research/settings', rest, 'PUT');
+    return startResearch(status, s);
+  };
   const active = gates.versions.find((v: any) => v.version === gates.active);
   return (
     <div className="research-setup">
       <div className="card-panel setup-status">
-        <div>
-          <strong>
-            {status.paused
-              ? 'Paused'
-              : status.harness?.schedule?.enabled
-                ? 'Running on a schedule'
-                : 'Not scheduled'}
-          </strong>
-          <span className="muted-line">
-            {status.harness
-              ? [
-                  status.harness.name,
-                  status.harness.schedule?.enabled
-                    ? `every ${status.harness.schedule.everyMinutes} min`
-                    : 'no schedule',
-                  s.schedule?.until ? `until ${new Date(s.schedule.until).toLocaleString()}` : '',
-                ]
-                  .filter(Boolean)
-                  .join(' · ')
-              : 'The research loop is not installed yet: Start installs it.'}
-            {status.lastRun
-              ? ` · last cycle ${status.lastRun.status}, ${new Date(status.lastRun.startedAt).toLocaleString()}`
-              : ''}
-          </span>
-          <span className="muted-line">
-            Spend today {usd(spend.today)}
-            {spend.dailyCapUsd !== undefined ? ` of ${usd(spend.dailyCapUsd, 0)} a day` : ''}
-            {spend.capUsd !== undefined
-              ? ` · ${usd(spend.sinceCap)} of ${usd(spend.capUsd, 0)} since the cap started`
-              : ''}
-          </span>
-          {spend.stopReason && (
-            <span className="error-line">
-              <StatusPill status="blocked" label="spend cap" /> {spend.stopReason}
-            </span>
-          )}
-        </div>
-        {isAdmin && (
-          <div className="idea-actions">
-            <button type="button" className="button primary" disabled={!!busy} onClick={start}>
-              <CirclePlay size={14} /> Start
-            </button>
-            <button
-              type="button"
-              className="button"
-              disabled={!!busy || !status.harness}
-              onClick={() =>
-                act(
-                  'pause',
-                  async () => (
-                    await send(status.paused ? '/research/resume' : '/research/pause', {}),
-                    status.paused ? 'Resumed.' : 'Paused.'
-                  ),
-                )
-              }
-            >
-              <CirclePause size={14} /> {status.paused ? 'Resume' : 'Pause'}
-            </button>
-            <button
-              type="button"
-              className="button"
-              disabled={!!busy || !status.harness || status.paused}
-              onClick={() =>
-                act(
-                  'run',
-                  async () => (
-                    await send('/research/run-now', {}),
-                    'A cycle started; follow it in Lab or Cycles.'
-                  ),
-                )
-              }
-            >
-              <Play size={14} /> Run a cycle now
-            </button>
-          </div>
-        )}
+        <ResearchStatusBar
+          status={status}
+          isAdmin={isAdmin}
+          onChanged={() => (void load(), onChanged())}
+          onStart={start}
+        />
+        <span className="muted-line">
+          {status.harness ? `${status.harness.name} · ` : ''}
+          Spend today {usd(spend.today)}
+          {spend.dailyCapUsd !== undefined ? ` of ${usd(spend.dailyCapUsd, 0)} a day` : ''}
+          {spend.capUsd !== undefined
+            ? ` · ${usd(spend.sinceCap)} of ${usd(spend.capUsd, 0)} since the cap started`
+            : ''}
+          {status.lastRun
+            ? ` · last cycle ${status.lastRun.status}, ${new Date(status.lastRun.startedAt).toLocaleString()}`
+            : ''}
+        </span>
       </div>
 
       <section className="setup-section" aria-label="Theorists">

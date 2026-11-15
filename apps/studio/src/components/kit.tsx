@@ -42,6 +42,8 @@ const PILL: Record<string, { tone: PillTone; icon: typeof Circle; spin?: boolean
   draft: { tone: 'gray', icon: CircleDashed },
   parked: { tone: 'gray', icon: PauseCircle },
   paused: { tone: 'gray', icon: PauseCircle },
+  pausing: { tone: 'gray', icon: PauseCircle },
+  'held: backlog': { tone: 'amber', icon: Clock },
   cancelled: { tone: 'gray', icon: Ban },
   disabled: { tone: 'outline', icon: Circle },
   'forward-only': { tone: 'magenta', icon: Clock },
