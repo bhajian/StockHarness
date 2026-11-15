@@ -283,10 +283,13 @@ test('ResearchSettings YAML: models and skills by name, round trip', { skip: ski
       })
     ).insertedId;
   const pa = await provider(A);
-  await provider(B);
+  const pb = await provider(B);
   await R.updateResearchSettings(A, {
     focus: 'Quality and low volatility',
     theoristsPerCycle: 3,
+    // #413: Theorist 1 and 3 on the Judge model, Theorist 2 on the role default.
+    theoristProviders: [pa, '', pa],
+    profiles: ['equity_long', 'equity_short', 'equity_long'],
     agents: { judge: { providerId: pa } },
     budget: { dailyTokenAlert: 500000 },
   });
@@ -294,9 +297,11 @@ test('ResearchSettings YAML: models and skills by name, round trip', { skip: ski
   const { yaml } = await exportObjects(A, ['ResearchSettings']);
   assert.match(yaml, /kind: ResearchSettings/);
   assert.match(yaml, /judge:\n\s+providerId:\n\s+\$ref:\n\s+type: providers\n\s+name: Judge model/);
+  assert.match(yaml, /theoristProviders:\n\s+- \$ref:\n\s+type: providers\n\s+name: Judge model\n\s+- ""/);
   assert.ok(!yaml.includes('steering') && !yaml.includes(pa));
   const r = await applyObjectImport(who(B), yaml, 'merge');
   assert.equal(r.applied, true, JSON.stringify(r));
+  assert.deepEqual((await R.researchSettings(B)).theoristProviders, [pb, '', pb], "B's own provider ids");
   assert.equal((await exportObjects(B, ['ResearchSettings'])).yaml, yaml, 'identical round trip');
   await collection<any>('providers').deleteMany({ ownerId: { $in: [A, B] } });
   await collection<any>('research_settings').deleteMany({ _id: { $in: [A, B] } });

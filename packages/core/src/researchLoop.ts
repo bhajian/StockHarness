@@ -22,6 +22,11 @@ export const researchSettingsSchema = z.object({
   focus: z.string().max(4000).default(''),
   /** Theorists that propose in parallel each cycle (the harness's Parallel step). */
   theoristsPerCycle: z.number().int().min(1).max(8).default(2),
+  /**
+   * #413: the model of each Theorist (provider id, by position: Theorist i uses the i-th). Missing or empty entries
+   * use the Theorist role's model (`agents.theorist`), so settings from before #413 keep working unchanged.
+   */
+  theoristProviders: z.array(z.string().max(200)).max(8).default([]),
   /** #323: the idea profiles the Theorists explore, in order (Theorist i takes the i-th); empty = the equity ones. */
   profiles: z.array(z.enum(PROFILE_IDS)).max(30).default([]),
   /** #336: at this many ideas waiting for code, the Theorists stop proposing new ones (revisions still go). */
@@ -381,6 +386,8 @@ const PROMPTS = {
 export type ResearchLoopInput = {
   name?: string;
   providers: { theorist: string; judge: string; coder: string };
+  /** #413: a model per Theorist (by position); missing or empty entries use `providers.theorist`. */
+  theoristProviders?: string[];
   connections: Record<ResearchRole, string>;
   skills: { library?: string; plugin?: string; catalog?: string; judge?: string };
   /** Skills per role chosen in the research settings (replace the seed skills for that role). */
@@ -391,6 +398,9 @@ export type ResearchLoopInput = {
   scheduleMinutes?: number;
   scheduleUntil?: string;
 };
+/** The model of Theorist i (0-based): its own (#413), else the Theorist role's. */
+export const theoristProvider = (o: Pick<ResearchLoopInput, 'providers' | 'theoristProviders'>, i: number) =>
+  o.theoristProviders?.[i] || o.providers.theorist;
 /** The research loop harness (ids resolved). */
 export function makeResearchLoop(o: ResearchLoopInput): Workflow {
   const sk = (...ids: (string | undefined)[]) => ids.filter(Boolean) as string[];
@@ -430,7 +440,7 @@ export function makeResearchLoop(o: ResearchLoopInput): Workflow {
       type: 'agent',
       config: agent(
         `Theorist ${i + 1}`,
-        o.providers.theorist,
+        theoristProvider(o, i),
         PROMPTS.theorist(i + 1, o.theorists),
         o.connections.theorist,
         ROLE_TOOLS.theorist,

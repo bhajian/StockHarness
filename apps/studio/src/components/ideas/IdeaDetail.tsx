@@ -141,6 +141,12 @@ export function IdeaDetail({ id, tab, isAdmin }: { id: string; tab: string; isAd
               {t.revisions} revision{t.revisions === 1 ? '' : 's'} · {t.trials} trial
               {t.trials === 1 ? '' : 's'}
             </span>
+            {idea.proposedBy && (
+              <span title="Who proposed this idea">
+                Proposed by {idea.proposedBy.agent}
+                {idea.proposedBy.model ? ` · ${idea.proposedBy.model}` : ''}
+              </span>
+            )}
             {Object.entries(idea.models as Record<string, string[]>).map(([role, ms]) => (
               <span key={role} title={`${ROLE_LABEL[role] ?? role} model`}>
                 {ROLE_LABEL[role] ?? role}: {ms.join(', ')}
@@ -529,7 +535,7 @@ function Review({
             </span>
             <div>
               <div className="debate-head">
-                <strong>{ROLE_LABEL[e.role] ?? e.role}</strong>
+                <strong>{e.agent ?? ROLE_LABEL[e.role] ?? e.role}</strong>
                 <span>{describe(e)}</span>
                 {e.to && <IdeaStatus status={e.to} />}
                 {e.model && <span className="muted-line">{e.model}</span>}

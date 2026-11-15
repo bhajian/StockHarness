@@ -218,10 +218,18 @@ export async function getIdea(ownerId: string, id: string) {
   for (const h of t.history)
     if (h.actor.model) models[h.actor.role] = [...new Set([...(models[h.actor.role] ?? []), h.actor.model])];
   const { history, ...rest } = t;
+  // #413: which Theorist proposed the idea, and with which model.
+  const created = t.history.find((h) => h.type === 'create');
   return {
     ...row(t, evals),
     theory: { ...rest, id: t._id },
     models,
+    proposedBy: created
+      ? {
+          agent: agentLabel(created.actor.nodeId) ?? ROLE_NAMES[created.actor.role] ?? created.actor.role,
+          ...(created.actor.model ? { model: created.actor.model } : {}),
+        }
+      : null,
     gates,
     judgeSummary: judge
       ? { at: judge.at, to: judge.to, reasoning: judge.reasoning, model: judge.actor.model }
@@ -355,6 +363,17 @@ export function sourceNumbers(text: string, values: { value: number; evaluationI
   }
   return chips;
 }
+const ROLE_NAMES: Record<string, string> = {
+  theorist: 'Theorist',
+  judge: 'Judge',
+  coder: 'Coder',
+  human: 'Person',
+};
+/** The harness step as a name: theorist_2 → "Theorist 2" (#413); other steps are named by their role. */
+export function agentLabel(nodeId?: string) {
+  const m = /^theorist_(\d+)$/.exec(nodeId ?? '');
+  return m ? `Theorist ${m[1]}` : undefined;
+}
 export async function ideaDebate(ownerId: string, id: string) {
   const t = await getTheory(ownerId, id);
   const values = metricValues(await ideaEvaluationDocs(t));
@@ -365,6 +384,7 @@ export async function ideaDebate(ownerId: string, id: string) {
     ...(h.from ? { from: h.from } : {}),
     ...(h.to ? { to: h.to } : {}),
     role: h.actor.role,
+    ...(agentLabel(h.actor.nodeId) ? { agent: agentLabel(h.actor.nodeId) } : {}),
     ...(h.actor.model ? { model: h.actor.model } : {}),
     ...(h.actor.userId ? { userId: h.actor.userId } : {}),
     reasoning: h.reasoning,

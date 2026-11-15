@@ -147,23 +147,42 @@ test('the Research Lab shows a cycle: KPIs, board, activity, debate, steering, p
   await expect(page.getByText(/changing a threshold creates gates v2/i)).toBeVisible();
   await expect(page.getByLabel('Gate minSharpe')).toHaveValue('0.5');
   await page.getByRole('radio', { name: 'S&P 500 proxy (top 500)' }).click();
-  // #323: idea profiles, in the Theorists' order; options wait for the options evaluator.
-  const profiles = page.getByRole('region', { name: 'Idea profiles' });
-  await profiles.getByLabel('Short', { exact: true }).check();
-  await profiles.getByLabel('Long', { exact: true }).check();
-  await expect(profiles.locator('label', { has: page.locator('.order-badge') })).toHaveText([
-    'LongTheorist 2',
-    'ShortTheorist 1',
-  ]);
-  await expect(profiles.getByLabel('Covered call', { exact: true })).toBeDisabled();
-  await expect(profiles.getByText(/open when the options evaluator is ready/)).toBeVisible();
+  // #413: settings are grouped by what they affect; the Theorists section sets how many, and a model and an idea
+  // profile for each (#323: options profiles wait for the options evaluator).
+  for (const region of ['Theorists', 'Judge and Coder', 'Effort', 'Scope', 'Budget', 'Schedule', 'Gates'])
+    await expect(page.getByRole('region', { name: region })).toBeVisible();
+  const theorists = page.getByRole('region', { name: 'Theorists' });
+  await theorists.getByLabel('Number of Theorists').fill('3');
+  const rows = page.getByRole('table', { name: 'Theorist models' }).locator('tbody tr');
+  await expect(rows).toHaveCount(3);
+  await expect(page.getByLabel('Theorist 1 idea profile')).toHaveValue('equity_long');
+  await page.getByLabel('Theorist 1 idea profile').selectOption('equity_short');
+  await expect(
+    page.getByLabel('Theorist 2 idea profile').locator('option[value="options_covered_call"]'),
+  ).toBeDisabled();
+  await expect(page.getByLabel('Theorist 2 model')).toHaveValue('');
+  await page.getByLabel('Theorist 2 model').selectOption({ index: 1 });
   await page.getByRole('button', { name: 'Save' }).click();
   await expect(page.getByRole('status')).toHaveText(/Saved/);
   await expect
     .poll(async () => (await api('/research/settings')).scope)
     .toEqual({ kind: 'top_market_cap', top: 500 });
-  expect((await api('/research/settings')).profiles).toEqual(['equity_short', 'equity_long']);
-  await api('/research/settings', { scope: { kind: 'symbols', top: 500 }, profiles: [] }, 'PUT');
+  const saved = await api('/research/settings');
+  expect(saved.theoristsPerCycle).toBe(3);
+  expect(saved.profiles).toEqual(['equity_short', 'equity_short', 'equity_long_short']);
+  expect(saved.theoristProviders[0]).toBe('');
+  expect(saved.theoristProviders[1]).toMatch(/^[0-9a-f-]{36}$/);
+  // The harness was rebuilt with three Theorists, Theorist 2 on its own model.
+  await expect
+    .poll(
+      async () => (await api('/research/how')).steps.find((s: any) => s.kind === 'parallel')?.agents.length,
+    )
+    .toBe(3);
+  await api(
+    '/research/settings',
+    { scope: { kind: 'symbols', top: 500 }, profiles: [], theoristsPerCycle: 2, theoristProviders: [] },
+    'PUT',
+  );
   if (process.env.SCREENSHOT)
     await page.screenshot({ path: 'test-results/research-setup.png', fullPage: true });
   // #302: How it works — the pipeline, and each agent's model, skills and tools.

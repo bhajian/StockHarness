@@ -3886,6 +3886,17 @@ td.loss {
 .setup-section p.muted-line {
   margin: 0;
 }
+/* #413: labels and inputs line up across a row; a hint sits under its own input. */
+.setup-section .form-row {
+  align-items: start;
+}
+.setup-theorists td {
+  vertical-align: middle;
+}
+.setup-theorists td:first-child {
+  white-space: nowrap;
+  width: 1%;
+}
 .setup-section textarea,
 .setup-section select {
   width: 100%;
