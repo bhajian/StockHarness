@@ -316,7 +316,8 @@ function SyncsTab({
   // 20 rows at a time, more as the table scrolls (#384); a filter change starts again at the top.
   const page = useInfiniteRows(visible, {
     resetKey: [q, fCategory, fPriority, fStatus, fCadence],
-    keepIndex: current ? visible.indexOf(current) : -1,
+    // Only a row that was picked stays loaded (`current` falls back to the first sync when none is).
+    keepIndex: selected ? visible.findIndex((s) => s.id === selected) : -1,
   });
   const collections = [...new Set(syncs.map(collectionOf).filter(Boolean))];
   const healthy = syncs.filter((s) => s.enabled && !s.lastError).length;
