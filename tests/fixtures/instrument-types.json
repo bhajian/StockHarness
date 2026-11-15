@@ -66,6 +66,14 @@
     ["DTW", "DTE Energy Company 5.25 % Debentures 2017-01.12.77 Global", {}, "note"],
     ["SPKLU", "Spark I Acquisition Corp. Unit", {}, "unit"],
     ["DTE", "DTE Energy Company", {}, "common"],
-    ["T", "AT&T Inc.", {}, "common"]
+    ["T", "AT&T Inc.", {}, "common"],
+    ["ABMVX", "American Beacon Mid-Cap Value Fund", {}, "fund"],
+    ["STEW", "SRH Total Return Fund, Inc.", {}, "fund"],
+    ["BICK", "First Trust BICK Index Fund", {}, "fund"],
+    ["ADRE", "Invesco BLDRS Emerging Markets 50 ADR Index Fund", {}, "fund"],
+    ["SPY", "SPDR S&P 500 ETF Trust", {}, "etf"],
+    ["FGF", "Fundamental Global Inc.", {}, "common"],
+    ["O", "Realty Income Corporation", {}, "common"],
+    ["BEP", "Brookfield Renewable Partners L.P.", {}, "common"]
   ]
 }

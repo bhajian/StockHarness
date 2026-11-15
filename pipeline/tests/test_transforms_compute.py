@@ -58,6 +58,16 @@ class PricesDaily(unittest.TestCase):
         # Already-adjusted bars (FMP, #240): the same split leaves the factors at 1.
         self.assertEqual({r["adj_factor"] for r in self.rows(w, [split])}, {1.0})
 
+    def test_bars_on_non_trading_days_are_dropped(self):
+        """#437: FMP sometimes returns a weekend bar; prices_daily keeps trading sessions only."""
+        from datetime import datetime
+        bars = [{"_id": f"b{i}", "symbol": "AAA", "date": d, "open": 10.0, "high": 11.0, "low": 9.0, "close": 10.5,
+                 "volume": 1000} for i, d in enumerate(["2025-11-06", "2025-11-07", "2025-11-08", "2025-11-10"])]
+        cal = [{"date": datetime(2025, 11, d), "is_trading_day": True} for d in (6, 7, 10)]
+        read = reader({"securities": SECURITIES, "eod_prices": bars, "corporate_actions": [], "trading_calendar": cal})
+        dates = [r["date"] for rows, _ in prices_daily.compute(read) for r in rows]
+        self.assertEqual(dates, ["2025-11-06", "2025-11-07", "2025-11-10"])
+
     def test_non_equity_instruments_get_no_prices(self):
         """#393: a note's bars produce no rows and no DQ issues (its open issues resolve on the next full run)."""
         bars = [{"_id": f"b{i}", "symbol": "AAA", "date": f"2020-01-{i + 2:02d}", "open": 0.0, "high": 0.0, "low": 0.0,

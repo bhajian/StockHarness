@@ -10,6 +10,10 @@ export const EQUITY_TYPES: readonly InstrumentType[] = ['common', 'ADR'];
 const PREFERRED_SYMBOL = /[-.](P[A-Z]?|PR[A-Z]?)$/;
 const PREFERRED_NAME = /\b(preferred|pfd|perpetual)\b/;
 const ADR_NAME = /\bamerican depositary (shares?|receipts?)\b/;
+// FMP profiles often leave isFund/isEtf unset for mutual, closed-end and index funds (#437).
+const ETF_NAME = /\b(etf|etn|etfs)\b/;
+const FUND_NAME = /\bfund\b/;
+const MUTUAL_FUND_SYMBOL = /^[A-Z]{4}X$/; // NASDAQ: a fifth letter X is a mutual fund
 const WARRANT_SYMBOL = /[-.](WS|W[A-Z]?)$|^[A-Z]{4}W$/;
 const UNIT_SYMBOL = /[-.](U|UN)$|^[A-Z]{4}U$/;
 const RIGHT_SYMBOL = /[-.](R|RT)$|^[A-Z]{4}R$/;
@@ -32,6 +36,8 @@ export function instrumentType(
   const n = String(name ?? '').toLowerCase();
   if (flags.isEtf) return 'etf';
   if (flags.isFund) return 'fund';
+  if (ETF_NAME.test(n)) return 'etf';
+  if (FUND_NAME.test(n) || MUTUAL_FUND_SYMBOL.test(s)) return 'fund';
   if (ADR_NAME.test(n)) return 'ADR';
   if (PREFERRED_SYMBOL.test(s) || PREFERRED_NAME.test(n)) return 'preferred';
   if (WARRANT_SYMBOL.test(s) || /\bwarrants?\b/.test(n)) return 'warrant';
