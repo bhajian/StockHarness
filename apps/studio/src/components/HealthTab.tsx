@@ -6,7 +6,7 @@ import { type DataHealth, type HealthRow, fetchDataHealth, fetchGaps, resolveDri
 import type { DatasetsRoute } from '../datasetsRoute';
 import { Button } from './ui';
 import { KpiCard, Skeleton, StatusPill } from './kit';
-import { SortTh, useSort } from './tableKit';
+import { PagedRows, SortTh, useSort } from './tableKit';
 import { fmtNumber } from '../charts/chartData';
 
 type Go = (r: DatasetsRoute) => void;
@@ -190,38 +190,45 @@ export function HealthTab({ go, isAdmin = false }: { go: Go; isAdmin?: boolean }
                 </tr>
               </thead>
               <tbody>
-                {drift.sorted.map((d) => (
-                  <tr key={d.id}>
-                    <td>
-                      <button
-                        className="link-button"
-                        onClick={() => go({ tab: 'catalog', item: d.collection })}
-                        title="Open the collection (Sample shows the rows)"
-                      >
-                        <code>{d.collection}</code>
-                      </button>
-                      {d.syncName && <div className="muted-line">{d.syncName}</div>}
-                    </td>
-                    <td>
-                      <code>{d.field}</code>
-                    </td>
-                    <td>
-                      <StatusPill status={d.breaking ? 'blocked' : 'warn'} label={d.kind.replace('_', ' ')} />{' '}
-                      <span className="muted-line">{d.detail}</span>
-                      {d.breaking && <div className="muted-line">Breaking: those items were not written</div>}
-                    </td>
-                    <td>
-                      {d.count}× · {timestamp(d.lastSeenAt)}
-                    </td>
-                    <td>
-                      {isAdmin && (
-                        <Button variant="ghost" onClick={() => void resolveDrift(d.id).then(load)}>
-                          Resolve
-                        </Button>
-                      )}
-                    </td>
-                  </tr>
-                ))}
+                <PagedRows rows={drift.sorted} resetKey={drift.sort}>
+                  {(d) => (
+                    <tr key={d.id}>
+                      <td>
+                        <button
+                          className="link-button"
+                          onClick={() => go({ tab: 'catalog', item: d.collection })}
+                          title="Open the collection (Sample shows the rows)"
+                        >
+                          <code>{d.collection}</code>
+                        </button>
+                        {d.syncName && <div className="muted-line">{d.syncName}</div>}
+                      </td>
+                      <td>
+                        <code>{d.field}</code>
+                      </td>
+                      <td>
+                        <StatusPill
+                          status={d.breaking ? 'blocked' : 'warn'}
+                          label={d.kind.replace('_', ' ')}
+                        />{' '}
+                        <span className="muted-line">{d.detail}</span>
+                        {d.breaking && (
+                          <div className="muted-line">Breaking: those items were not written</div>
+                        )}
+                      </td>
+                      <td>
+                        {d.count}× · {timestamp(d.lastSeenAt)}
+                      </td>
+                      <td>
+                        {isAdmin && (
+                          <Button variant="ghost" onClick={() => void resolveDrift(d.id).then(load)}>
+                            Resolve
+                          </Button>
+                        )}
+                      </td>
+                    </tr>
+                  )}
+                </PagedRows>
               </tbody>
             </table>
           </div>
@@ -323,66 +330,71 @@ export function HealthTab({ go, isAdmin = false }: { go: Go; isAdmin?: boolean }
             </tr>
           </thead>
           <tbody>
-            {table.sorted.map((r) => (
-              <tr key={r.collection}>
-                <td>
-                  <button className="link-button" onClick={() => go({ tab: 'catalog', item: r.collection })}>
-                    <code>{r.collection}</code>
-                  </button>
-                  {r.producer && (
-                    <div className="muted-line">
-                      {r.producer.type} {r.producer.name}
-                    </div>
-                  )}
-                </td>
-                <td>{r.layer ? `L${r.layer}` : '—'}</td>
-                <td>
-                  <StatusPill status={PILL[r.freshness]} label={r.freshness} />
-                  {r.lagSessions ? <div className="muted-line">{r.lagSessions} sessions behind</div> : null}
-                </td>
-                <td>
-                  {r.dateMax ? r.dateMax.slice(0, 10) : '—'}
-                  {r.lastUpdated && <div className="muted-line">updated {timestamp(r.lastUpdated)}</div>}
-                </td>
-                <td>
-                  {r.coveragePct !== undefined ? (
-                    <span
-                      title={`${r.coveragePct}% of the ${r.coverageBasis === 'active' ? 'active (listed) universe: this data exists for listed companies only' : 'whole universe, delisted names included'}${r.coverageSparse ? `; ${r.coverageSparse}` : ''}`}
+            <PagedRows rows={table.sorted} resetKey={table.sort}>
+              {(r) => (
+                <tr key={r.collection}>
+                  <td>
+                    <button
+                      className="link-button"
+                      onClick={() => go({ tab: 'catalog', item: r.collection })}
                     >
-                      {r.coveragePct}%{r.coverageBasis === 'active' ? <small> active</small> : null}
-                    </span>
-                  ) : (
-                    '—'
-                  )}
-                  {r.coverageSparse && <div className="muted-line">{r.coverageSparse}</div>}
-                  <div className="muted-line">{fmtNumber(r.rows)} rows</div>
-                </td>
-                <td>
-                  <GapCell row={r} />
-                </td>
-                <td className="health-issues">
-                  <div>
-                    {r.dq.error > 0 && (
-                      <StatusPill status="failed" label={`${fmtNumber(r.dq.error)} DQ errors`} />
+                      <code>{r.collection}</code>
+                    </button>
+                    {r.producer && (
+                      <div className="muted-line">
+                        {r.producer.type} {r.producer.name}
+                      </div>
                     )}
-                    {r.dq.warn > 0 && (
-                      <StatusPill status="warn" label={`${fmtNumber(r.dq.warn)} DQ warnings`} />
-                    )}
-                    {r.caveats.blocking > 0 && (
-                      <StatusPill
-                        status="blocked"
-                        label={`${r.caveats.blocking} blocking caveat${r.caveats.blocking === 1 ? '' : 's'}`}
-                      />
-                    )}
-                    {r.error && (
-                      <span className="muted-line" title={r.error}>
-                        {r.error.slice(0, 60)}
+                  </td>
+                  <td>{r.layer ? `L${r.layer}` : '—'}</td>
+                  <td>
+                    <StatusPill status={PILL[r.freshness]} label={r.freshness} />
+                    {r.lagSessions ? <div className="muted-line">{r.lagSessions} sessions behind</div> : null}
+                  </td>
+                  <td>
+                    {r.dateMax ? r.dateMax.slice(0, 10) : '—'}
+                    {r.lastUpdated && <div className="muted-line">updated {timestamp(r.lastUpdated)}</div>}
+                  </td>
+                  <td>
+                    {r.coveragePct !== undefined ? (
+                      <span
+                        title={`${r.coveragePct}% of the ${r.coverageBasis === 'active' ? 'active (listed) universe: this data exists for listed companies only' : 'whole universe, delisted names included'}${r.coverageSparse ? `; ${r.coverageSparse}` : ''}`}
+                      >
+                        {r.coveragePct}%{r.coverageBasis === 'active' ? <small> active</small> : null}
                       </span>
+                    ) : (
+                      '—'
                     )}
-                  </div>
-                </td>
-              </tr>
-            ))}
+                    {r.coverageSparse && <div className="muted-line">{r.coverageSparse}</div>}
+                    <div className="muted-line">{fmtNumber(r.rows)} rows</div>
+                  </td>
+                  <td>
+                    <GapCell row={r} />
+                  </td>
+                  <td className="health-issues">
+                    <div>
+                      {r.dq.error > 0 && (
+                        <StatusPill status="failed" label={`${fmtNumber(r.dq.error)} DQ errors`} />
+                      )}
+                      {r.dq.warn > 0 && (
+                        <StatusPill status="warn" label={`${fmtNumber(r.dq.warn)} DQ warnings`} />
+                      )}
+                      {r.caveats.blocking > 0 && (
+                        <StatusPill
+                          status="blocked"
+                          label={`${r.caveats.blocking} blocking caveat${r.caveats.blocking === 1 ? '' : 's'}`}
+                        />
+                      )}
+                      {r.error && (
+                        <span className="muted-line" title={r.error}>
+                          {r.error.slice(0, 60)}
+                        </span>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              )}
+            </PagedRows>
             {!rows.length && (
               <tr>
                 <td colSpan={7} className="muted-line">

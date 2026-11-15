@@ -22,7 +22,7 @@ import {
 } from 'lucide-react';
 import { api, send } from '../../api';
 import { GateChecklist, KpiCard, Skeleton, StatusPill, Tabs } from '../kit';
-import { SortTh, rankOf, useSort } from '../tableKit';
+import { PagedRows, rankOf, SortTh, useSort } from '../tableKit';
 import { CodeEditor } from '../../editor/CodeEditor';
 import { EvaluationReport } from '../EvaluationsPage';
 import { SubsetPanel } from '../SubsetPanel';
@@ -787,53 +787,59 @@ function Runs({
           </tr>
         </thead>
         <tbody>
-          {sorted.map((e) => (
-            <tr key={e.id} className="clickable" onClick={() => go(`/evaluations/${e.id}`)}>
-              <td>{when(e.createdAt)}</td>
-              <td>
-                {e.mode === 'holdout' ? <StatusPill status="warn" label="holdout" /> : e.mode}
-                {e.reproduces && (
-                  <StatusPill
-                    status={
-                      e.reproduces.match === true ? 'ok' : e.reproduces.match === false ? 'failed' : 'pending'
-                    }
-                    label={
-                      e.reproduces.match === true
-                        ? 'reproduced ✓'
-                        : e.reproduces.match === false
-                          ? 'mismatch'
-                          : 'reproducing'
-                    }
-                  />
-                )}
-              </td>
-              <td>
-                <StatusPill status={e.status} />
-              </td>
-              <td>v{e.pluginVersion}</td>
-              <td>{e.trial}</td>
-              <td>
-                {e.params?.start} → {e.params?.end}
-              </td>
-              <td className="num">{num(e.summary?.sharpe)}</td>
-              <td className="num">{pct(e.excess?.spx?.excess_cagr)}</td>
-              <td>
-                <code title={e.recordHash}>{e.recordHash?.slice(0, 12) ?? '—'}</code>
-              </td>
-              <td onClick={(ev) => ev.stopPropagation()}>
-                {isAdmin && e.status === 'succeeded' && e.mode !== 'holdout' && !e.reproduces && (
-                  <button
-                    type="button"
-                    className="link-button"
-                    disabled={busy}
-                    onClick={() => reproduce(e.id)}
-                  >
-                    <RotateCcw size={13} /> Reproduce
-                  </button>
-                )}
-              </td>
-            </tr>
-          ))}
+          <PagedRows rows={sorted} resetKey={sort}>
+            {(e) => (
+              <tr key={e.id} className="clickable" onClick={() => go(`/evaluations/${e.id}`)}>
+                <td>{when(e.createdAt)}</td>
+                <td>
+                  {e.mode === 'holdout' ? <StatusPill status="warn" label="holdout" /> : e.mode}
+                  {e.reproduces && (
+                    <StatusPill
+                      status={
+                        e.reproduces.match === true
+                          ? 'ok'
+                          : e.reproduces.match === false
+                            ? 'failed'
+                            : 'pending'
+                      }
+                      label={
+                        e.reproduces.match === true
+                          ? 'reproduced ✓'
+                          : e.reproduces.match === false
+                            ? 'mismatch'
+                            : 'reproducing'
+                      }
+                    />
+                  )}
+                </td>
+                <td>
+                  <StatusPill status={e.status} />
+                </td>
+                <td>v{e.pluginVersion}</td>
+                <td>{e.trial}</td>
+                <td>
+                  {e.params?.start} → {e.params?.end}
+                </td>
+                <td className="num">{num(e.summary?.sharpe)}</td>
+                <td className="num">{pct(e.excess?.spx?.excess_cagr)}</td>
+                <td>
+                  <code title={e.recordHash}>{e.recordHash?.slice(0, 12) ?? '—'}</code>
+                </td>
+                <td onClick={(ev) => ev.stopPropagation()}>
+                  {isAdmin && e.status === 'succeeded' && e.mode !== 'holdout' && !e.reproduces && (
+                    <button
+                      type="button"
+                      className="link-button"
+                      disabled={busy}
+                      onClick={() => reproduce(e.id)}
+                    >
+                      <RotateCcw size={13} /> Reproduce
+                    </button>
+                  )}
+                </td>
+              </tr>
+            )}
+          </PagedRows>
         </tbody>
       </table>
     </div>

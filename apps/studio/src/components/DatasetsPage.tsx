@@ -694,7 +694,8 @@ function SyncsTab({
                   </IconButton>
                 </div>
               )}
-              <div className="table-wrap dataset-table" ref={page.rootRef}>
+              {/* Grows with the page (#414): no inner scroll box; more rows load as the page scrolls. */}
+              <div className="table-wrap dataset-table">
                 <table>
                   <thead>
                     <tr>

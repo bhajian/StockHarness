@@ -87,3 +87,35 @@ test('logical orders for statuses and priorities; clicking flips the direction',
   assert.deepEqual(nextSort({ by: 'rows', desc: true }, 'rows'), { by: 'rows', desc: false });
   assert.deepEqual(nextSort({ by: 'rows', desc: false }, 'name'), { by: 'name', desc: false });
 });
+
+test('PagedRows renders the first 20 rows and a "Show more" row (#414)', async () => {
+  const React = await import('react');
+  const { createElement } = React;
+  // tsx compiles the component's JSX to React.createElement (classic runtime).
+  (globalThis as { React?: unknown }).React = React;
+  const { renderToStaticMarkup } = await import('react-dom/server');
+  const { PagedRows } = await import('../../apps/studio/src/components/tableKit.js');
+  const render = (rows: string[]) =>
+    renderToStaticMarkup(
+      createElement(
+        'table',
+        null,
+        createElement(
+          'tbody',
+          null,
+          createElement(PagedRows<string>, {
+            rows,
+            children: (r: string) => createElement('tr', { key: r }, createElement('td', null, r)),
+          }),
+        ),
+      ),
+    );
+  const rows = Array.from({ length: 45 }, (_, i) => `r${i}`);
+  const html = render(rows);
+  assert.equal((html.match(/<tr>/g) ?? []).length, 20, 'first page');
+  assert.match(html, /class="table-more"/);
+  assert.match(html, /Showing 20 of 45/);
+  const few = render(rows.slice(0, 7));
+  assert.equal((few.match(/<tr>/g) ?? []).length, 7);
+  assert.doesNotMatch(few, /table-more/, 'no "Show more" when everything fits');
+});

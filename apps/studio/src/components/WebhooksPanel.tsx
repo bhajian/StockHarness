@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Plus, Trash2 } from 'lucide-react';
 import { api, errorMessage, send, timestamp, type Data, type Entity } from '../api';
 import { Button, CopyButton, ErrorNotice, Field, Modal, SaveForm } from './ui';
-import { SortHead, useSort } from './tableKit';
+import { PagedRows, SortHead, useSort } from './tableKit';
 export function WebhooksPanel({ data }: { data: Data }) {
   const [hooks, setHooks] = useState<Entity[]>([]),
     [error, setError] = useState(''),
@@ -60,35 +60,37 @@ export function WebhooksPanel({ data }: { data: Data }) {
             extra={<th />}
           />
           <tbody>
-            {sorted.map((h) => (
-              <tr key={h.id}>
-                <td>
-                  <strong>{h.name}</strong>
-                </td>
-                <td>
-                  <code>{h.url}</code>
-                  <CopyButton value={h.url} />
-                </td>
-                <td>{timestamp(h.expiresAt)}</td>
-                <td>
-                  <Button
-                    variant="ghost"
-                    onClick={async () => {
-                      if (!confirm(`Revoke webhook “${h.name}”?`)) return;
-                      try {
-                        await api(`/integrations/webhooks/${h.id}`, { method: 'DELETE' });
-                        await load();
-                      } catch (e) {
-                        setError(errorMessage(e));
-                      }
-                    }}
-                  >
-                    <Trash2 size={14} />
-                    Revoke
-                  </Button>
-                </td>
-              </tr>
-            ))}
+            <PagedRows rows={sorted} resetKey={sort}>
+              {(h) => (
+                <tr key={h.id}>
+                  <td>
+                    <strong>{h.name}</strong>
+                  </td>
+                  <td>
+                    <code>{h.url}</code>
+                    <CopyButton value={h.url} />
+                  </td>
+                  <td>{timestamp(h.expiresAt)}</td>
+                  <td>
+                    <Button
+                      variant="ghost"
+                      onClick={async () => {
+                        if (!confirm(`Revoke webhook “${h.name}”?`)) return;
+                        try {
+                          await api(`/integrations/webhooks/${h.id}`, { method: 'DELETE' });
+                          await load();
+                        } catch (e) {
+                          setError(errorMessage(e));
+                        }
+                      }}
+                    >
+                      <Trash2 size={14} />
+                      Revoke
+                    </Button>
+                  </td>
+                </tr>
+              )}
+            </PagedRows>
             {!hooks.length && (
               <tr>
                 <td colSpan={4} className="empty-table">

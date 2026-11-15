@@ -15,7 +15,7 @@ import type { Schedule } from '../../../../packages/core/src/schema.js';
 import type { DatasetsRoute } from '../datasetsRoute';
 import { Button } from './ui';
 import { Drawer, Skeleton, StatusPill, Tabs } from './kit';
-import { SortHead, rankOf, useSort } from './tableKit';
+import { PagedRows, rankOf, SortHead, useSort } from './tableKit';
 import { DataGrid } from './DataGrid';
 import { fmtNumber } from '../charts/chartData';
 
@@ -303,30 +303,32 @@ function SyncRunsTable({ runs, onOpen }: { runs: DatasetSyncRun[]; onOpen: (r: D
           toggle={toggle}
         />
         <tbody>
-          {sorted.map((r) => (
-            <tr
-              key={r.id}
-              className="clickable"
-              tabIndex={0}
-              onClick={() => onOpen(r)}
-              onKeyDown={(e) => e.key === 'Enter' && onOpen(r)}
-            >
-              <td>{timestamp(r.startedAt)}</td>
-              <td>{r.trigger}</td>
-              <td>{dur(r.startedAt, r.finishedAt)}</td>
-              <td>
-                <StatusPill status={r.status} />
-              </td>
-              <td>{r.rows !== undefined ? fmtNumber(r.rows) : '—'}</td>
-              <td>{r.calls !== undefined ? fmtNumber(r.calls) : '—'}</td>
-              <td>
-                {r.symbolsAttempted !== undefined
-                  ? `${fmtNumber(r.symbolsCovered ?? 0)} / ${fmtNumber(r.symbolsAttempted)}`
-                  : '—'}
-              </td>
-              <td>{r.symbolErrors?.length ? r.symbolErrors.length : r.error ? 1 : '—'}</td>
-            </tr>
-          ))}
+          <PagedRows rows={sorted} resetKey={sort}>
+            {(r) => (
+              <tr
+                key={r.id}
+                className="clickable"
+                tabIndex={0}
+                onClick={() => onOpen(r)}
+                onKeyDown={(e) => e.key === 'Enter' && onOpen(r)}
+              >
+                <td>{timestamp(r.startedAt)}</td>
+                <td>{r.trigger}</td>
+                <td>{dur(r.startedAt, r.finishedAt)}</td>
+                <td>
+                  <StatusPill status={r.status} />
+                </td>
+                <td>{r.rows !== undefined ? fmtNumber(r.rows) : '—'}</td>
+                <td>{r.calls !== undefined ? fmtNumber(r.calls) : '—'}</td>
+                <td>
+                  {r.symbolsAttempted !== undefined
+                    ? `${fmtNumber(r.symbolsCovered ?? 0)} / ${fmtNumber(r.symbolsAttempted)}`
+                    : '—'}
+                </td>
+                <td>{r.symbolErrors?.length ? r.symbolErrors.length : r.error ? 1 : '—'}</td>
+              </tr>
+            )}
+          </PagedRows>
         </tbody>
       </table>
     </div>

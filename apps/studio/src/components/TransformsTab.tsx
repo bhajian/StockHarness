@@ -47,7 +47,7 @@ import { TEMPLATES, readSnippet, type TemplateOutput } from '../transformTemplat
 import type { DatasetsRoute } from '../datasetsRoute';
 import { Button, Empty, Field, IconButton, Modal } from './ui';
 import { KpiCard, Skeleton, StatusPill, Tabs } from './kit';
-import { SortHead, SortTh, rankOf, useSort, type SortColumns } from './tableKit';
+import { PagedRows, rankOf, SortHead, SortTh, type SortColumns, useSort } from './tableKit';
 import { BackfillProgress, RunHistory, VersionsPanel } from './TransformHistory';
 import { ScheduleFields } from './agentFields';
 import { ObjectTransfer } from './ObjectTransfer';
@@ -315,68 +315,70 @@ function TransformsList({
                 </tr>
               </thead>
               <tbody>
-                {sorted.map((t) => (
-                  <tr key={t.id}>
-                    <td>
-                      <a
-                        href={`/datasets/transforms/${t.name}`}
-                        onClick={(e) => {
-                          e.preventDefault();
-                          go({ tab: 'transforms', item: t.name });
-                        }}
-                      >
-                        <strong>{t.name}</strong>
-                      </a>
-                      <div className="muted-line">
-                        v{t.version}
-                        {!t.enabled && (
+                <PagedRows rows={sorted} resetKey={sort}>
+                  {(t) => (
+                    <tr key={t.id}>
+                      <td>
+                        <a
+                          href={`/datasets/transforms/${t.name}`}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            go({ tab: 'transforms', item: t.name });
+                          }}
+                        >
+                          <strong>{t.name}</strong>
+                        </a>
+                        <div className="muted-line">
+                          v{t.version}
+                          {!t.enabled && (
+                            <>
+                              {' '}
+                              · <StatusPill status="disabled" />
+                            </>
+                          )}
+                        </div>
+                      </td>
+                      <td>
+                        <Chips items={t.inputs} />
+                      </td>
+                      <td>
+                        <span className="chips">
+                          {t.outputs.map((o) => (
+                            <button
+                              key={o.collection}
+                              type="button"
+                              className="chip strong link-chip"
+                              title={`See the rows of ${o.collection} in the Catalog`}
+                              onClick={() => go({ tab: 'catalog', item: o.collection })}
+                            >
+                              {o.collection}
+                            </button>
+                          ))}
+                        </span>
+                      </td>
+                      <td className="when-runs">{whenItRuns(t)}</td>
+                      <td>
+                        {t.lastRun ? (
                           <>
-                            {' '}
-                            · <StatusPill status="disabled" />
+                            <StatusPill status={t.lastRun.status} />
+                            <div className="muted-line">{timestamp(t.lastRun.createdAt)}</div>
                           </>
+                        ) : (
+                          <span className="muted-line">Never</span>
                         )}
-                      </div>
-                    </td>
-                    <td>
-                      <Chips items={t.inputs} />
-                    </td>
-                    <td>
-                      <span className="chips">
-                        {t.outputs.map((o) => (
-                          <button
-                            key={o.collection}
-                            type="button"
-                            className="chip strong link-chip"
-                            title={`See the rows of ${o.collection} in the Catalog`}
-                            onClick={() => go({ tab: 'catalog', item: o.collection })}
-                          >
-                            {o.collection}
-                          </button>
-                        ))}
-                      </span>
-                    </td>
-                    <td className="when-runs">{whenItRuns(t)}</td>
-                    <td>
-                      {t.lastRun ? (
-                        <>
-                          <StatusPill status={t.lastRun.status} />
-                          <div className="muted-line">{timestamp(t.lastRun.createdAt)}</div>
-                        </>
-                      ) : (
-                        <span className="muted-line">Never</span>
-                      )}
-                    </td>
-                    <td>{t.lastRun ? rowsWritten(t.lastRun).toLocaleString() : '—'}</td>
-                    <td>{fmtMs(t.lastRun?.durationMs)}</td>
-                    <td className="row-actions">
-                      {isAdmin && (
-                        <IconButton title="Run now (last day)" onClick={() => void runNow(t)}>
-                          <Play size={15} />
-                        </IconButton>
-                      )}
-                    </td>
-                  </tr>
-                ))}
+                      </td>
+                      <td>{t.lastRun ? rowsWritten(t.lastRun).toLocaleString() : '—'}</td>
+                      <td>{fmtMs(t.lastRun?.durationMs)}</td>
+                      <td className="row-actions">
+                        {isAdmin && (
+                          <IconButton title="Run now (last day)" onClick={() => void runNow(t)}>
+                            <Play size={15} />
+                          </IconButton>
+                        )}
+                      </td>
+                    </tr>
+                  )}
+                </PagedRows>
               </tbody>
             </table>
           </div>
@@ -1416,21 +1418,23 @@ function PreviewRows({ columns, rows }: { columns: string[]; rows: Cell[] }) {
       <table>
         <SortHead heads={columns.map((c) => [c, c])} sort={sort} toggle={toggle} />
         <tbody>
-          {sorted.map((r, i) => (
-            <tr key={i}>
-              {columns.map((c) => (
-                <td key={c}>
-                  {r[c] === null || r[c] === undefined ? (
-                    <span className="data-grid-null">—</span>
-                  ) : typeof r[c] === 'object' ? (
-                    JSON.stringify(r[c])
-                  ) : (
-                    String(r[c])
-                  )}
-                </td>
-              ))}
-            </tr>
-          ))}
+          <PagedRows rows={sorted} resetKey={sort}>
+            {(r, i) => (
+              <tr key={i}>
+                {columns.map((c) => (
+                  <td key={c}>
+                    {r[c] === null || r[c] === undefined ? (
+                      <span className="data-grid-null">—</span>
+                    ) : typeof r[c] === 'object' ? (
+                      JSON.stringify(r[c])
+                    ) : (
+                      String(r[c])
+                    )}
+                  </td>
+                ))}
+              </tr>
+            )}
+          </PagedRows>
         </tbody>
       </table>
     </div>
@@ -1457,15 +1461,17 @@ function PreviewSchema({ fields }: { fields: Record<string, { type?: string | nu
           toggle={toggle}
         />
         <tbody>
-          {sorted.map((r) => (
-            <tr key={r.name}>
-              <td>
-                <code>{r.name}</code>
-              </td>
-              <td>{r.type ?? '—'}</td>
-              <td>{r.null_pct}%</td>
-            </tr>
-          ))}
+          <PagedRows rows={sorted} resetKey={sort}>
+            {(r) => (
+              <tr key={r.name}>
+                <td>
+                  <code>{r.name}</code>
+                </td>
+                <td>{r.type ?? '—'}</td>
+                <td>{r.null_pct}%</td>
+              </tr>
+            )}
+          </PagedRows>
         </tbody>
       </table>
     </div>
@@ -1494,19 +1500,21 @@ function PreviewDq({ dq }: { dq: DqRow[] }) {
           toggle={toggle}
         />
         <tbody>
-          {sorted.map((d, i) => (
-            <tr key={i}>
-              <td>{d.issue_type}</td>
-              <td>
-                <StatusPill
-                  status={d.severity === 'error' ? 'failed' : d.severity === 'warn' ? 'warn' : 'ok'}
-                  label={d.severity}
-                />
-              </td>
-              <td>{d.security_id ?? '—'}</td>
-              <td>{d.date ?? '—'}</td>
-            </tr>
-          ))}
+          <PagedRows rows={sorted} resetKey={sort}>
+            {(d, i) => (
+              <tr key={i}>
+                <td>{d.issue_type}</td>
+                <td>
+                  <StatusPill
+                    status={d.severity === 'error' ? 'failed' : d.severity === 'warn' ? 'warn' : 'ok'}
+                    label={d.severity}
+                  />
+                </td>
+                <td>{d.security_id ?? '—'}</td>
+                <td>{d.date ?? '—'}</td>
+              </tr>
+            )}
+          </PagedRows>
         </tbody>
       </table>
     </div>
@@ -1545,17 +1553,19 @@ function RunOutputs({ run }: { run: TransformRun }) {
           toggle={toggle}
         />
         <tbody>
-          {sorted.map((r) => (
-            <tr key={r.c}>
-              <td>
-                <code>{r.c}</code>
-              </td>
-              <td>{r.read?.toLocaleString() ?? '—'}</td>
-              <td>{r.written?.toLocaleString() ?? '—'}</td>
-              <td>{r.unchanged?.toLocaleString() ?? '—'}</td>
-              <td>{r.dq || '—'}</td>
-            </tr>
-          ))}
+          <PagedRows rows={sorted} resetKey={sort}>
+            {(r) => (
+              <tr key={r.c}>
+                <td>
+                  <code>{r.c}</code>
+                </td>
+                <td>{r.read?.toLocaleString() ?? '—'}</td>
+                <td>{r.written?.toLocaleString() ?? '—'}</td>
+                <td>{r.unchanged?.toLocaleString() ?? '—'}</td>
+                <td>{r.dq || '—'}</td>
+              </tr>
+            )}
+          </PagedRows>
         </tbody>
       </table>
     </div>
