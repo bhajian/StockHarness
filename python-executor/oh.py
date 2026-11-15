@@ -473,17 +473,81 @@ def _flush_dq() -> None:
                 issues["dq"].append({k: d[k] for k in ("issue_type", "severity", "security_id", "date")})
         _dq_buffer.clear()
         return
+    _ensure_dq_index()
+    # One write per issue key (the last report wins). An issue seen again is open again, even if an earlier run
+    # resolved it (#386).
+    latest = {tuple(d[k] for k in DQ_KEY): d for d in _dq_buffer}
     ops = [
         UpdateOne(
-            {k: d[k] for k in ("collection", "issue_type", "security_id", "date")},
-            {"$set": {"severity": d["severity"], "context": d["context"], "last_seen_at": now},
-             "$setOnInsert": {"detected_at": now, "resolved": False}},
+            {k: d[k] for k in DQ_KEY},
+            {"$set": {"severity": d["severity"], "context": d["context"], "last_seen_at": now, "resolved": False},
+             "$unset": {"resolved_at": "", "resolution": ""},
+             "$setOnInsert": {"detected_at": now}},
             upsert=True,
         )
-        for d in _dq_buffer
+        for d in latest.values()
     ]
     _db()["dq_issues"].bulk_write(ops, ordered=False)
     _dq_buffer.clear()
+
+
+DQ_KEY = ("collection", "issue_type", "security_id", "date")
+_dq_indexed = False
+
+
+def _ensure_dq_index() -> None:
+    """One issue per key (#386). Creating it fails while older duplicates remain (scripts/dq-reconcile.ts removes
+    them); a run never fails over it, it just tries again next time."""
+    global _dq_indexed
+    if _dq_indexed:
+        return
+    _dq_indexed = True
+    try:
+        _db()["dq_issues"].create_index([(k, 1) for k in DQ_KEY], name="oh_dq_key", unique=True)
+    except Exception:  # duplicates from older runs, or the index exists under another name
+        pass
+
+
+# Reconciliation (#386): when a run succeeds, the open issues of every output it recomputed that it did not
+# see again are resolved. A windowed run only recomputed [window.start, window.end], so only issues dated in
+# that window are touched; a full run (no window) recomputed the whole collection. Preview runs, failed runs
+# and outputs the run wrote nothing to are left alone.
+_RUN_STARTED = None
+_run_failed = False
+
+
+def _mark_failed(*exc_info) -> None:
+    global _run_failed
+    _run_failed = True
+    _previous_excepthook(*exc_info)
+
+
+def _recomputed_outputs() -> list[str]:
+    return [c for c in _OUTPUTS if (_stats.get(c, {}).get("written", 0) + _stats.get(c, {}).get("unchanged", 0)) > 0]
+
+
+def _reconcile_dq() -> dict[str, int]:
+    """Resolve the open issues this run recomputed but did not re-see. Returns how many, per output."""
+    from datetime import datetime, timezone
+
+    if _PREVIEW or _run_failed or _RUN_STARTED is None:
+        return {}
+    resolved: dict[str, int] = {}
+    now = datetime.now(timezone.utc)
+    for collection in _recomputed_outputs():
+        flt: dict[str, Any] = {
+            "collection": collection,
+            "resolved": {"$ne": True},
+            "$or": [{"last_seen_at": {"$lt": _RUN_STARTED}}, {"last_seen_at": {"$exists": False}}],
+        }
+        if window is not None:
+            flt["date"] = {"$gte": window.start, "$lte": window.end}
+        res = _db()["dq_issues"].update_many(
+            flt, {"$set": {"resolved": True, "resolved_at": now, "resolution": "not re-seen"}}
+        )
+        if res.modified_count:
+            resolved[collection] = res.modified_count
+    return resolved
 
 
 _described: dict[str, dict] = {}
@@ -592,7 +656,24 @@ def _write_stats() -> None:
             json.dump(_stats, handle)
 
 
-# At exit: buffered data-quality issues are written (also every 1,000 issues), then the stats file.
+import sys as _sys  # noqa: E402
+from datetime import datetime as _datetime, timezone as _timezone  # noqa: E402
+
+_RUN_STARTED = _datetime.now(_timezone.utc)
+_previous_excepthook = _sys.excepthook
+_sys.excepthook = _mark_failed
+
+
+def _finish_dq() -> None:
+    if _dq_buffer:
+        _flush_dq()
+    if _OUTPUTS and not _PREVIEW and not _run_failed:
+        for collection, n in _reconcile_dq().items():
+            _count(collection, "dq_resolved", n)
+
+
+# At exit (run in reverse order): buffered data-quality issues are written (also every 1,000 issues) and the
+# issues the run no longer sees are resolved, then the stats file and the preview.
 _atexit.register(_write_preview)
 _atexit.register(_write_stats)
-_atexit.register(lambda: _dq_buffer and _flush_dq())
+_atexit.register(_finish_dq)

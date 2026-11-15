@@ -1831,13 +1831,13 @@ docs) are kept separately and never overwritten.
 
 ### The collection list (left)
 
-| Control                   | What it does                                                                           |
-| ------------------------- | -------------------------------------------------------------------------------------- |
-| **Search collections**    | Filters by name and description                                                        |
-| **Lineage graph**         | Opens the [full lineage graph](#lineage-graph)                                         |
-| **Export for agents (N)** | Downloads `catalog-for-agents.md`: exactly what agents see, for the ticked collections |
-| Groups                    | **Layer 1 · raw**, **Layer 2 · prepared**, **Other**, each with "N · X% documented"    |
-| Each row                  | A checkbox (for the export), the name, and "rows · % of fields documented"             |
+| Control                   | What it does                                                                                                                                         |
+| ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Search collections**    | Filters by name and description                                                                                                                      |
+| **Lineage graph**         | Opens the [full lineage graph](#lineage-graph)                                                                                                       |
+| **Export for agents (N)** | Downloads `catalog-for-agents.md`: exactly what agents see, for the ticked collections                                                               |
+| Groups                    | **Layer 1 · raw**, **Layer 2 · prepared**, **Layer 4 · simulations** (`sim_*` results), **Other** (no known producer), each with "N · X% documented" |
+| Each row                  | A checkbox (for the export), the name, and "rows · % of fields documented"                                                                           |
 
 ### The collection page (right)
 
@@ -2165,7 +2165,10 @@ oh.describe("prices_daily", fields={"adj_close": {"description": "Split-adjusted
 - `upsert` skips rows whose content did not change (content hash) and reports **Written** and **Unchanged**.
 - A row without its `known_at` field is refused (unless the output is static).
 - `oh.dq(...)` writes data-quality issues to `dq_issues`, one row per (collection, issue type, security,
-  date), so re-runs never duplicate them. DQ issues never fail a run; pipeline gates decide.
+  date) (a unique index), so re-runs never duplicate them. DQ issues never fail a run; pipeline gates decide.
+- A successful run **resolves** the open issues of each output it wrote that it did not report again, within what
+  it recomputed: only dates inside its window for a windowed run, everything for a full run. An issue reported
+  again is open again. Failed runs and previews resolve nothing. The run records how many it resolved.
 - `oh.describe(...)` becomes curated Catalog docs after a successful run.
 - After every successful run, each output's Catalog entry is refreshed and `transform.completed` is emitted, which
   triggers the next transforms.
@@ -2460,8 +2463,12 @@ errors, blocking caveats or gaps; **All collections** shows every one.
    | Monthly                                   | 40 days                                             |
    | No schedule                               | 8 days                                              |
 
-3. A daily, dated collection that is "fresh" by time becomes **stale** when its data lags more than 3 expected
-   sessions (its latest date is more than three NYSE sessions behind; today does not count).
+3. A daily observation series that is "fresh" by time becomes **stale** when its data lags more than 3 expected
+   sessions (its latest date is more than three NYSE sessions behind; today does not count). Daily series are
+   Layer 1 time series synced at least daily (prices, index levels, treasury rates, sector performance) and Layer 2
+   tables with one row per trading day. Statements, ratios and segments (fiscal period ends), monthly or quarterly
+   macro, feeds (transaction or disclosure dates) and weekly snapshots are never judged by session lag: their
+   latest date says nothing about whether the sync is late.
 
 A sync is **late** when it is enabled and its next run is more than an hour in the past, which means the
 dispatcher should have started it.

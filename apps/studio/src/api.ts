@@ -375,7 +375,7 @@ export type CatalogField = {
 };
 export type CatalogListItem = {
   collection: string;
-  layer: 1 | 2 | null;
+  layer: 1 | 2 | 4 | null;
   description: string;
   grain: string;
   primaryKey: string[];
@@ -634,7 +634,7 @@ export async function exportCatalogMarkdown(collections: string[]) {
 // Data health (#86).
 export type HealthRow = {
   collection: string;
-  layer: 1 | 2 | null;
+  layer: 1 | 2 | 4 | null;
   freshness: 'fresh' | 'stale' | 'failed' | 'unknown';
   lagSessions?: number;
   lastUpdated?: string;

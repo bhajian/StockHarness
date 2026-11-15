@@ -38,9 +38,10 @@ export type CatalogEntry = {
   _id: string; // `${ownerId}:${collection}`
   ownerId: string;
   collection: string;
-  layer: 1 | 2 | null;
+  /** 1 raw sync data, 2 prepared (transforms), 4 simulation results; null: no known producer. */
+  layer: CatalogLayer;
   producedBy: {
-    type: 'sync' | 'pipeline' | 'transform';
+    type: 'sync' | 'pipeline' | 'transform' | 'simulation';
     name: string;
     id?: string;
     dataset?: string;
@@ -72,6 +73,7 @@ export type CatalogEntry = {
   refreshedAt: Date;
   refreshError?: string;
 };
+export type CatalogLayer = 1 | 2 | 4 | null;
 export const catalogEntries = () => collection<CatalogEntry>('dataset_catalog');
 
 /** The existing Layer 2 pipeline outputs (pipeline/layer2), until they become Transforms (M2). */
@@ -131,6 +133,28 @@ const SIDE_OUTPUTS: Record<string, { description: string; key: string[] }> = {
     description:
       'Delisted companies merged into the universe by the universe sync (about 100 names on the current plan).',
     key: ['symbol', 'delistedDate'],
+  },
+};
+/** Layer 4 · Ideas & simulations (#386): what a simulation run writes (pipeline/strategy/simulate.py). */
+const SIMULATION_OUTPUTS: Record<string, { description: string; key: string[] }> = {
+  sim_orders: {
+    description:
+      'Simulation fills: idea, security, side, shares, price, cost and the signal behind each order.',
+    key: ['simulation_id', 'n'],
+  },
+  sim_trades: {
+    description:
+      'Simulation round trips: entry and exit, P&L, return, dividends, costs, borrow and exit reason.',
+    key: ['simulation_id', 'n'],
+  },
+  sim_portfolio_daily: {
+    description:
+      'One row per simulation and session: NAV, cash, exposure, return and its reconciliation terms.',
+    key: ['simulation_id', 'date'],
+  },
+  sim_positions: {
+    description: 'Simulation holdings per session, idea and security: shares, value, weight, unrealized P&L.',
+    key: ['simulation_id', 'date', 'idea_id', 'security_id'],
   },
 };
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -355,22 +379,28 @@ export async function refreshCatalogEntry(ownerId: string, name: string, syncs?:
     (best, s) => (s.lastRunAt && (!best?.lastRunAt || s.lastRunAt > best.lastRunAt) ? s : best),
     undefined,
   );
-  const timeSemantics: CatalogEntry['timeSemantics'] = l2
-    ? l2.static
-      ? { status: 'static', text: 'Static reference data (no point-in-time filter needed).' }
-      : {
-          status: 'pit',
-          text: '`known_at` / `as_of_date` on every row; filter `as_of_date <= D`.',
-          eventDate: l2.dateField,
-        }
-    : rule
-      ? {
-          status: rule.type === 'current_only' ? 'current_only' : 'pit',
-          rule,
-          text: describeKnownAt(rule),
-          eventDate: def?.dateField,
-        }
-      : { status: 'unknown', text: 'No producer declares when rows became known; do not use for backtests.' };
+  const sim = SIMULATION_OUTPUTS[name];
+  const timeSemantics: CatalogEntry['timeSemantics'] = sim
+    ? { status: 'static', text: 'Results of simulation runs (filter by simulation_id), not market data.' }
+    : l2
+      ? l2.static
+        ? { status: 'static', text: 'Static reference data (no point-in-time filter needed).' }
+        : {
+            status: 'pit',
+            text: '`known_at` / `as_of_date` on every row; filter `as_of_date <= D`.',
+            eventDate: l2.dateField,
+          }
+      : rule
+        ? {
+            status: rule.type === 'current_only' ? 'current_only' : 'pit',
+            rule,
+            text: describeKnownAt(rule),
+            eventDate: def?.dateField,
+          }
+        : {
+            status: 'unknown',
+            text: 'No producer declares when rows became known; do not use for backtests.',
+          };
   const joins: CatalogEntry['joins'] = [];
   if (symbolField === 'symbol')
     joins.push({ to: 'securities', on: 'symbol → identifiers(type ticker, valid_from/valid_to)' });
@@ -395,26 +425,35 @@ export async function refreshCatalogEntry(ownerId: string, name: string, syncs?:
   const entry: Omit<CatalogEntry, '_id'> = {
     ownerId,
     collection: name,
-    layer: l2 ? 2 : def || SIDE_OUTPUTS[name] ? 1 : null,
-    producedBy: l2
-      ? [
-          tr && tOut
-            ? { type: 'transform' as const, name: tr.name, id: tr._id, version: tr.version }
-            : { type: 'pipeline' as const, name: l2.name },
-        ]
-      : producers.map((s) => ({ type: 'sync' as const, name: s.name, id: s._id, dataset: s.dataset })),
+    layer: l2 ? 2 : def || SIDE_OUTPUTS[name] ? 1 : sim ? 4 : null,
+    producedBy: sim
+      ? [{ type: 'simulation' as const, name: 'Simulations' }]
+      : l2
+        ? [
+            tr && tOut
+              ? { type: 'transform' as const, name: tr.name, id: tr._id, version: tr.version }
+              : { type: 'pipeline' as const, name: l2.name },
+          ]
+        : producers.map((s) => ({ type: 'sync' as const, name: s.name, id: s._id, dataset: s.dataset })),
     description:
-      curated?.description ?? l2?.description ?? SIDE_OUTPUTS[name]?.description ?? def?.description ?? '',
+      curated?.description ??
+      l2?.description ??
+      SIDE_OUTPUTS[name]?.description ??
+      sim?.description ??
+      def?.description ??
+      '',
     grain:
       curated?.grain ??
       (l2
         ? l2.grain
         : SIDE_OUTPUTS[name]
           ? grainOf(SIDE_OUTPUTS[name].key)
-          : def
-            ? grainOf(def.keyFields)
-            : ''),
-    primaryKey: l2?.key ?? SIDE_OUTPUTS[name]?.key ?? def?.keyFields ?? [],
+          : sim
+            ? grainOf(sim.key)
+            : def
+              ? grainOf(def.keyFields)
+              : ''),
+    primaryKey: l2?.key ?? SIDE_OUTPUTS[name]?.key ?? sim?.key ?? def?.keyFields ?? [],
     timeSemantics,
     fields,
     coverage,

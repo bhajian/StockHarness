@@ -25,7 +25,7 @@ type LNode = {
   id: string;
   kind: 'sync' | 'collection' | 'transform';
   name: string;
-  layer?: 1 | 2 | null;
+  layer?: 1 | 2 | 4 | null;
   freshness: 'fresh' | 'stale' | 'failed' | 'unknown';
   rows?: number;
   lastRun?: { at?: string; status?: string; rows?: number; error?: string };

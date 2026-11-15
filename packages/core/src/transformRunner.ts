@@ -25,7 +25,8 @@ export type TransformRun = {
   window?: TransformWindow;
   status: 'queued' | 'running' | 'succeeded' | 'failed';
   codeJobId?: string;
-  outputs?: Record<string, { written?: number; unchanged?: number; dq?: number }>;
+  /** dqResolved: open DQ issues the run recomputed and no longer saw, so it resolved them (#386). */
+  outputs?: Record<string, { written?: number; unchanged?: number; dq?: number; dqResolved?: number }>;
   reads?: Record<string, number>;
   stdout?: string;
   stderr?: string;
@@ -171,7 +172,7 @@ export async function executeTransformRun(
   }
   const stats = (outcome.meta?.stats ?? {}) as Record<
     string,
-    { read?: number; written?: number; unchanged?: number; dq?: number }
+    { read?: number; written?: number; unchanged?: number; dq?: number; dq_resolved?: number }
   >;
   const outputNames = new Set(t.outputs.map((o) => o.collection));
   const outputs: TransformRun['outputs'] = {};
@@ -179,7 +180,12 @@ export async function executeTransformRun(
   for (const [c, s] of Object.entries(stats)) {
     if (s.read) reads[c] = s.read;
     if (outputNames.has(c) || s.written || s.dq)
-      outputs[c] = { written: s.written ?? 0, unchanged: s.unchanged ?? 0, dq: s.dq ?? 0 };
+      outputs[c] = {
+        written: s.written ?? 0,
+        unchanged: s.unchanged ?? 0,
+        dq: s.dq ?? 0,
+        ...(s.dq_resolved ? { dqResolved: s.dq_resolved } : {}),
+      };
   }
   const base = {
     codeJobId: outcome.id,
