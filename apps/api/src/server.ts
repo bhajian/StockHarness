@@ -12,7 +12,7 @@ import { deliverWebhooks } from '../../../packages/core/src/harnessEvents.js';
 import { dispatchReflections } from '../../../packages/core/src/experience.js';
 import {
   dispatchDatasetSyncs,
-  recoverInterruptedDatasetSyncRuns,
+  resumeInterruptedDatasetSyncRuns,
 } from '../../../packages/core/src/datasetSync.js';
 import { dispatchDailyCoverage } from '../../../packages/core/src/dataHealth.js';
 import { dispatchBackfills, recoverBackfills } from '../../../packages/core/src/datasetBackfill.js';
@@ -28,8 +28,16 @@ import { dispatchConfigBackup } from './configBackup.js';
 import { refreshAllCatalogs } from './catalog.js';
 
 await connectDatabase();
-const interrupted = await recoverInterruptedDatasetSyncRuns();
-if (interrupted) console.warn(`Marked ${interrupted} interrupted dataset sync run(s) as failed`);
+// Dataset sync runs the restart interrupted get a new attempt: per-symbol runs resume at their saved symbol,
+// the rest start again (#416). The interruption is not a failure.
+const interrupted = await resumeInterruptedDatasetSyncRuns();
+if (interrupted.resumed.length)
+  console.warn(
+    `Resuming ${interrupted.resumed.length} interrupted dataset sync run(s): ${interrupted.resumed
+      .map((r) => `${r.syncId}@${r.next}`)
+      .join(', ')}`,
+  );
+if (interrupted.failed) console.warn(`Closed ${interrupted.failed} interrupted run(s) that cannot resume`);
 // Backfills are persisted: ones that were running resume from their last finished symbol (#80).
 const resumed = await recoverBackfills();
 if (resumed) console.warn(`Resuming ${resumed} dataset backfill(s)`);

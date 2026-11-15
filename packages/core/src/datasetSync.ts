@@ -32,6 +32,11 @@ import {
 // The test stack points this at its FMP fixture (#83); production uses FMP.
 const FMP_BASE = process.env.FMP_BASE_URL || 'https://financialmodelingprep.com/stable';
 const MAX_RPM = Number(process.env.DATASET_SYNC_RPM) || 250;
+/** A per-symbol run saves its progress every this many symbols, or this often (#416). */
+const PROGRESS_EVERY_SYMBOLS = Math.max(1, Number(process.env.SYNC_PROGRESS_EVERY) || 25);
+const PROGRESS_EVERY_MS = 30_000;
+/** A running run with no sign of life for this long is not in progress any more (#416). */
+const HEARTBEAT_STALE_MS = 30 * 60_000;
 /** The universe screener floor: the research universe's point-in-time min_market_cap (universe_daily). */
 export const UNIVERSE_MIN_MARKET_CAP = 300_000_000;
 /** One FMP rate limit for every sync in the process; the highest-priority waiter gets the next slot (#78). */
@@ -128,6 +133,30 @@ export type DatasetSyncRun = {
   error?: string;
   startedAt: Date;
   finishedAt?: Date;
+  /**
+   * Resumable runs (#416): the attempt number (a fencing token: an older attempt's writes are ignored), the
+   * last sign of life, and, for per-symbol runs, where the loop is.
+   */
+  attempt?: number;
+  heartbeatAt?: Date;
+  progress?: SyncRunProgress;
+  /** Restarts this run survived: when, and the symbol index it resumed at. */
+  interruptions?: { at: Date; next: number }[];
+};
+export type SyncRunProgress = {
+  /** The symbols this run iterates, fixed when it started (a resume never re-resolves the universe). */
+  symbols?: string[];
+  /** Index of the next symbol to pull. */
+  next: number;
+  /** The run's date: the window end, the snapshot_date of snapshot rows and the cursor on success. */
+  runDate: string;
+  /** Totals so far, carried into the resumed attempt. */
+  rows: number;
+  covered: number;
+  errors: number;
+  calls: number;
+  /** An earnings-triggered run of a few symbols: never moves the cursor. */
+  partial?: boolean;
 };
 
 /** The sync's explicit priority, else its dataset's default. */
@@ -464,6 +493,12 @@ export async function probeDatasetDepth(
 }
 
 type PullStats = {
+  /** Resume a per-symbol run here (#416): its symbol list, next index and totals so far. */
+  resume?: SyncRunProgress;
+  /** Persist per-symbol progress (#416); called when the loop starts and every few symbols. */
+  onProgress?: (p: SyncRunProgress, opts: { withSymbols: boolean }) => Promise<void>;
+  /** The run's date (window end, snapshot_date); defaults to today. */
+  runDate?: string;
   symbolsAttempted?: number;
   symbolsCovered?: number;
   /** The first per-symbol errors of a run (#76). */
@@ -509,17 +544,31 @@ async function pullChecked(
   wsDb: ReturnType<typeof mongo.db>,
   checker: ReturnType<typeof ingestChecker>,
 ): Promise<number> {
-  const now = today();
+  const now = stats.runDate ?? today();
   const defaultFrom = sync.from || addDays(now, -365);
   let rows = 0;
 
   if (def.perSymbol) {
-    const symbols = await resolveSymbols(sync, wsDb, apikey);
+    // A resumed run (#416) keeps the symbol list, the date and the totals of the attempt that was interrupted.
+    const resume = stats.resume?.symbols ? stats.resume : undefined;
+    const symbols = resume?.symbols ?? (await resolveSymbols(sync, wsDb, apikey));
     stats.symbolsAttempted = symbols.length;
-    stats.symbolsCovered = 0;
-    let errors = 0;
+    stats.symbolsCovered = resume?.covered ?? 0;
+    let errors = resume?.errors ?? 0;
+    rows = resume?.rows ?? 0;
     let lastSymbolError: string | undefined;
-    for (const symbol of symbols) {
+    const progress = (next: number): SyncRunProgress => ({
+      next,
+      runDate: now,
+      rows,
+      covered: stats.symbolsCovered ?? 0,
+      errors,
+      calls: 0, // the run adds its call counter
+    });
+    if (!resume) await stats.onProgress?.({ ...progress(0), symbols }, { withSymbols: true });
+    let savedAt = Date.now();
+    for (let i = resume?.next ?? 0; i < symbols.length; i++) {
+      const symbol = symbols[i]!;
       // One symbol's transient throttle (402/429) must never fail the whole dataset.
       try {
         const params = perSymbolParams(def, sync, symbol, now);
@@ -540,6 +589,14 @@ async function pullChecked(
         if ((stats.symbolErrors ??= []).length < 50)
           stats.symbolErrors.push({ symbol, error: safeError(error) });
         if (errors <= 5) console.warn(`dataset ${def.id} ${symbol}: ${safeError(error)}`);
+      }
+      // Progress every few symbols or seconds: a restart resumes after the last saved symbol (#416).
+      if (
+        stats.onProgress &&
+        ((i + 1) % PROGRESS_EVERY_SYMBOLS === 0 || Date.now() - savedAt > PROGRESS_EVERY_MS)
+      ) {
+        await stats.onProgress(progress(i + 1), { withSymbols: false });
+        savedAt = Date.now();
       }
     }
     // Some symbols failing is tolerated; all of them failing means the sync itself is broken (#81).
@@ -744,14 +801,20 @@ export async function runDatasetSync(
     scheduleKey?: string;
     /** Pull only these symbols (earnings-triggered runs, #82); the cursor is left alone. */
     symbols?: string[];
+    /** The run's date (window end, snapshot_date, cursor); today unless given (tests). */
+    runDate?: string;
   } = { trigger: 'manual' },
 ) {
   if (opts.scheduleKey) {
     const existing = await datasetSyncRuns().findOne({ scheduleKey: opts.scheduleKey });
     if (existing) return existing;
   }
+  // Never two attempts of one sync at once (#416): a run that is alive (recent heartbeat) is returned instead.
+  const live = await liveRunOf(sync._id);
+  if (live) return live;
   const def = catalogById.get(sync.dataset);
   if (!def) throw new HttpError(400, `Unknown dataset: ${sync.dataset}`);
+  const now = new Date();
   const run: DatasetSyncRun = {
     _id: randomUUID(),
     ownerId: sync.ownerId,
@@ -759,35 +822,94 @@ export async function runDatasetSync(
     scheduleKey: opts.scheduleKey,
     trigger: opts.trigger,
     status: 'running',
-    startedAt: new Date(),
+    startedAt: now,
+    attempt: 1,
+    heartbeatAt: now,
+    progress: {
+      next: 0,
+      runDate: opts.runDate ?? today(),
+      rows: 0,
+      covered: 0,
+      errors: 0,
+      calls: 0,
+      ...(opts.symbols ? { partial: true } : {}),
+    },
   };
   await datasetSyncRuns().insertOne(run);
-  const stats: PullStats = {};
+  return executeSyncRun(sync, def, run, opts.symbols);
+}
+
+/** A run of this sync that is in progress: `running` with a heartbeat in the last half hour (#416). */
+async function liveRunOf(syncId: string) {
+  return datasetSyncRuns().findOne({
+    syncId,
+    status: 'running',
+    heartbeatAt: { $gt: new Date(Date.now() - HEARTBEAT_STALE_MS) },
+  });
+}
+
+/** Thrown inside an attempt that a newer attempt of the same run has taken over (#416). */
+class SupersededAttempt extends Error {}
+
+/**
+ * One attempt of a run (#416). Every write to the run is fenced on its attempt number, so an older attempt that
+ * is somehow still alive can neither report progress nor finish the run. A per-symbol attempt resumes at the
+ * saved symbol with the saved list, date and totals; any other attempt starts from the beginning.
+ */
+async function executeSyncRun(sync: DatasetSync, def: DatasetDef, run: DatasetSyncRun, symbols?: string[]) {
+  const attempt = run.attempt ?? 1;
+  const fence = { _id: run._id, status: 'running' as const, attempt };
+  const prior = run.progress;
+  const runDate = prior?.runDate ?? today();
+  const priorCalls = prior?.calls ?? 0;
+  const partial = Boolean(prior?.partial || symbols);
   const calls = { n: 0 };
+  const stats: PullStats = {
+    runDate,
+    ...(def.perSymbol && prior?.symbols?.length ? { resume: prior } : {}),
+    onProgress: async (p, o) => {
+      const set: Record<string, unknown> = {
+        heartbeatAt: new Date(),
+        'progress.next': p.next,
+        'progress.runDate': p.runDate,
+        'progress.rows': p.rows,
+        'progress.covered': p.covered,
+        'progress.errors': p.errors,
+        'progress.calls': priorCalls + calls.n,
+      };
+      if (o.withSymbols) set['progress.symbols'] = p.symbols;
+      const r = await datasetSyncRuns().updateOne(fence, { $set: set });
+      if (!r.matchedCount) throw new SupersededAttempt(`Run ${run._id} attempt ${attempt} was superseded`);
+    },
+  };
   try {
     const apikey = await fmpApiKey(sync.ownerId, sync.connectionId);
-    const windowFrom = isTimeseries(def) ? sync.cursor || sync.from || addDays(today(), -365) : undefined;
-    const target = opts.symbols ? { ...sync, symbolsMode: 'list' as const, symbols: opts.symbols } : sync;
+    const windowFrom = isTimeseries(def) ? sync.cursor || sync.from || addDays(runDate, -365) : undefined;
+    const target = symbols ? { ...sync, symbolsMode: 'list' as const, symbols } : sync;
     const rows = await syncContext.run({ priority: effectivePriority(sync), calls }, () =>
       pull(target, def, apikey, stats),
     );
-    await datasetSyncRuns().updateOne(
-      { _id: run._id },
-      {
-        $set: {
-          status: 'succeeded',
-          rows,
-          finishedAt: new Date(),
-          ...(stats.symbolsAttempted !== undefined
-            ? { symbolsAttempted: stats.symbolsAttempted, symbolsCovered: stats.symbolsCovered }
-            : {}),
-          calls: calls.n,
-          ...(stats.symbolErrors?.length ? { symbolErrors: stats.symbolErrors } : {}),
-          ...(stats.planLimit ? { planLimit: stats.planLimit } : {}),
-          ...(stats.removed ? { removed: stats.removed } : {}),
-        },
+    const done = await datasetSyncRuns().updateOne(fence, {
+      $set: {
+        status: 'succeeded',
+        rows,
+        finishedAt: new Date(),
+        heartbeatAt: new Date(),
+        ...(stats.symbolsAttempted !== undefined
+          ? {
+              symbolsAttempted: stats.symbolsAttempted,
+              symbolsCovered: stats.symbolsCovered,
+              'progress.next': stats.symbolsAttempted,
+            }
+          : {}),
+        calls: priorCalls + calls.n,
+        'progress.calls': priorCalls + calls.n,
+        ...(stats.symbolErrors?.length ? { symbolErrors: stats.symbolErrors } : {}),
+        ...(stats.planLimit ? { planLimit: stats.planLimit } : {}),
+        ...(stats.removed ? { removed: stats.removed } : {}),
       },
-    );
+    });
+    if (!done.matchedCount) return (await datasetSyncRuns().findOne({ _id: run._id }))!; // superseded
     await datasetSyncs().updateOne(
       { _id: sync._id },
       {
@@ -795,8 +917,9 @@ export async function runDatasetSync(
           lastRunAt: new Date(),
           lastRows: rows,
           consecutiveFailures: 0,
-          // A partial (earnings-triggered) run must not move the cursor past the other symbols' history.
-          ...(isTimeseries(def) && !opts.symbols ? { cursor: today() } : {}),
+          // Only a whole run moves the cursor, to the date its window ended (#416); a partial
+          // (earnings-triggered) run must not move it past the other symbols' history.
+          ...(isTimeseries(def) && !partial ? { cursor: runDate } : {}),
         },
         $unset: { lastError: '', lastFailureKind: '', pausedReason: '' },
       },
@@ -808,9 +931,9 @@ export async function runDatasetSync(
       dataset: sync.dataset,
       collection: sync.targetCollection || def.defaultCollection,
       run_id: run._id,
-      trigger: opts.trigger,
+      trigger: run.trigger,
       rows,
-      ...(windowFrom ? { date_from: windowFrom, date_to: today() } : {}),
+      ...(windowFrom ? { date_from: windowFrom, date_to: runDate } : {}),
       ...(stats.symbolsAttempted !== undefined
         ? { symbols_attempted: stats.symbolsAttempted, symbols_covered: stats.symbolsCovered }
         : {}),
@@ -822,19 +945,19 @@ export async function runDatasetSync(
     );
     return { ...run, status: 'succeeded' as const, rows };
   } catch (error) {
+    // A newer attempt owns the run: this one just stops, without failing the run or the sync.
+    if (error instanceof SupersededAttempt) return (await datasetSyncRuns().findOne({ _id: run._id }))!;
     const message = safeError(error);
-    await datasetSyncRuns().updateOne(
-      { _id: run._id },
-      {
-        $set: {
-          status: 'failed',
-          error: message,
-          finishedAt: new Date(),
-          calls: calls.n,
-          ...(stats.symbolErrors?.length ? { symbolErrors: stats.symbolErrors } : {}),
-        },
+    const failed = await datasetSyncRuns().updateOne(fence, {
+      $set: {
+        status: 'failed',
+        error: message,
+        finishedAt: new Date(),
+        calls: priorCalls + calls.n,
+        ...(stats.symbolErrors?.length ? { symbolErrors: stats.symbolErrors } : {}),
       },
-    );
+    });
+    if (!failed.matchedCount) return (await datasetSyncRuns().findOne({ _id: run._id }))!;
     await datasetSyncs().updateOne(
       { _id: sync._id },
       {
@@ -851,7 +974,7 @@ export async function runDatasetSync(
       sync_name: sync.name,
       dataset: sync.dataset,
       run_id: run._id,
-      trigger: opts.trigger,
+      trigger: run.trigger,
       error: message,
     });
     throw error;
@@ -861,7 +984,8 @@ export async function runDatasetSync(
 /**
  * Syncs run inside the API process (one replica, Recreate rollout), so at startup any run still
  * marked `running` was killed by the previous process. Fail it so it neither shows as running nor
- * blocks bulk runs. Call once after connecting, before the dispatcher starts.
+ * blocks bulk runs. The server resumes them instead (resumeInterruptedDatasetSyncRuns, #416); this is kept
+ * for callers that only want them closed.
  */
 export async function recoverInterruptedDatasetSyncRuns() {
   const orphans = await datasetSyncRuns().find({ status: 'running' }).toArray();
@@ -877,6 +1001,99 @@ export async function recoverInterruptedDatasetSyncRuns() {
     { $set: { lastError: error } },
   );
   return orphans.length;
+}
+
+export type ResumePlan =
+  { action: 'resume'; next: number } | { action: 'restart' } | { action: 'fail'; reason: string };
+
+/**
+ * What to do with a run a restart interrupted (pure; #416): a per-symbol run with a saved symbol list resumes at
+ * its saved index; any other run (feeds, windows, market snapshots, or a per-symbol run that died before its
+ * first save) starts again from the beginning; a run whose sync is gone or disabled is failed.
+ */
+export function planResume(
+  run: Pick<DatasetSyncRun, 'progress'>,
+  sync: Pick<DatasetSync, 'enabled' | 'dataset'> | null | undefined,
+): ResumePlan {
+  if (!sync) return { action: 'fail', reason: 'the dataset sync was deleted' };
+  if (sync.enabled === false) return { action: 'fail', reason: 'the sync is disabled' };
+  const def = catalogById.get(sync.dataset);
+  if (!def) return { action: 'fail', reason: `unknown dataset ${sync.dataset}` };
+  const p = run.progress;
+  if (def.perSymbol && p?.symbols?.length)
+    return { action: 'resume', next: Math.min(p.next, p.symbols.length) };
+  // An earnings-triggered run that died before saving its symbols cannot be rebuilt; the next report runs it.
+  if (p?.partial) return { action: 'fail', reason: 'a partial run interrupted before it saved its symbols' };
+  return { action: 'restart' };
+}
+
+/**
+ * At startup (#416): every run the previous process left `running` gets a new attempt, resumed where it stopped
+ * (per-symbol runs) or from the start (the rest), in the background sync queue. The interruption does not count
+ * as a failure. Returns what was resumed; `enqueue: false` only plans the attempts (tests run them directly).
+ */
+export async function resumeInterruptedDatasetSyncRuns(opts: { enqueue?: boolean } = {}) {
+  const orphans = await datasetSyncRuns().find({ status: 'running' }).toArray();
+  const resumed: { runId: string; syncId: string; attempt: number; next: number }[] = [];
+  let failed = 0;
+  for (const run of orphans) {
+    const sync = await datasetSyncs().findOne({ _id: run.syncId });
+    const plan = planResume(run, sync);
+    const was = run.attempt ?? 1;
+    const fence = { _id: run._id, status: 'running' as const, ...(run.attempt ? { attempt: was } : {}) };
+    const at = new Date();
+    if (plan.action === 'fail') {
+      const r = await datasetSyncRuns().updateOne(fence, {
+        $set: { status: 'failed', error: `Interrupted by a server restart; ${plan.reason}`, finishedAt: at },
+      });
+      if (r.matchedCount) failed++;
+      continue;
+    }
+    const next = plan.action === 'resume' ? plan.next : 0;
+    const attempt = was + 1;
+    const r = await datasetSyncRuns().updateOne(fence, {
+      $set: {
+        attempt,
+        heartbeatAt: at,
+        ...(plan.action === 'restart'
+          ? {
+              progress: {
+                next: 0,
+                runDate: run.progress?.runDate ?? today(),
+                rows: 0,
+                covered: 0,
+                errors: 0,
+                calls: run.progress?.calls ?? run.calls ?? 0,
+              },
+            }
+          : {}),
+      },
+      $push: { interruptions: { at, next } },
+    });
+    if (!r.matchedCount) continue;
+    resumed.push({ runId: run._id, syncId: run.syncId, attempt, next });
+    if (opts.enqueue !== false)
+      syncQueue.enqueue(run.syncId, effectivePriority(sync!), () =>
+        resumeDatasetSyncRun(run._id, attempt).catch(() => undefined),
+      );
+  }
+  return { resumed, failed };
+}
+
+/** Run attempt `attempt` of an interrupted run (#416); a run another attempt took over is left alone. */
+export async function resumeDatasetSyncRun(runId: string, attempt: number) {
+  const run = await datasetSyncRuns().findOne({ _id: runId, status: 'running', attempt });
+  if (!run) return null;
+  const sync = await datasetSyncs().findOne({ _id: run.syncId });
+  const def = sync ? catalogById.get(sync.dataset) : undefined;
+  if (!sync || !def) {
+    await datasetSyncRuns().updateOne(
+      { _id: runId, status: 'running', attempt },
+      { $set: { status: 'failed', error: 'The dataset sync was deleted', finishedAt: new Date() } },
+    );
+    return null;
+  }
+  return executeSyncRun(sync, def, run);
 }
 
 /** Fired every tick: run due, enabled syncs; advance nextRunAt. Mirrors dispatchSchedules(). */
@@ -1101,7 +1318,10 @@ export async function applyDatasetSyncBulk(
           ownerId,
           syncId: { $in: matchedIds },
           status: 'running',
-          startedAt: { $gt: new Date(Date.now() - STALE_RUN_MS) },
+          $or: [
+            { startedAt: { $gt: new Date(Date.now() - STALE_RUN_MS) } },
+            { heartbeatAt: { $gt: new Date(Date.now() - HEARTBEAT_STALE_MS) } },
+          ],
         })
         .project<{ syncId: string }>({ syncId: 1 })
         .toArray();
