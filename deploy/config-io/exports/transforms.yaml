@@ -521,7 +521,7 @@ spec:
         name:
           description: Company name
         security_type:
-          description: "common or ADR (equity); preferred, note, warrant, unit, right, fund or etf are kept for identity but never enter the universe"
+          description: common or ADR (equity); preferred, note, warrant, unit, right, fund or etf are kept for identity but never enter the universe
         country:
           description: Country of domicile
         currency:
