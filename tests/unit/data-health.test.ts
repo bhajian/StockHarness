@@ -122,3 +122,20 @@ test('coverage basis: listed names for current-only data, everyone for history (
   assert.match(catalogById.get('dividends_history')!.sparse!, /dividend/);
   assert.equal(catalogById.get('eod_prices')!.sparse, undefined);
 });
+
+test('a Layer 2 output keyed by date is a daily series even without a grain text (#409)', () => {
+  assert.equal(isDailySeries({ ...l2('one row per symbol × date'), primaryKey: ['symbol', 'date'] }), true);
+  assert.equal(
+    isDailySeries({ ...l2('', 'static'), primaryKey: ['symbol', 'date'] }),
+    false,
+    'static stays out',
+  );
+  assert.equal(
+    isDailySeries({
+      ...l2('one row per security × ex_date'),
+      primaryKey: ['security_id', 'action_type', 'ex_date'],
+    }),
+    false,
+    'corporate actions are events, not a daily series',
+  );
+});
