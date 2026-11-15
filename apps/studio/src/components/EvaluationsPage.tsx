@@ -11,6 +11,7 @@ import { BarChart, TimeSeriesChart } from '../charts/Charts';
 import { fmtNumber } from '../charts/chartData';
 import { ObjectTransfer } from './ObjectTransfer';
 import { SubsetPanel, SubsetResult } from './SubsetPanel';
+import { scopeLabel } from './evaluationScope';
 
 type Evaluation = {
   id: string;
@@ -21,7 +22,7 @@ type Evaluation = {
   mode: 'explore' | 'holdout';
   trial: number;
   status: 'running' | 'succeeded' | 'failed';
-  params: { start: string; end: string; symbols?: string[] };
+  params: { start: string; end: string; symbols?: string[]; universe?: { top_by_market_cap?: number } };
   error?: { type?: string; message: string; problems?: string[]; frames?: any[] };
   record?: Record<string, any>;
   createdAt: string;
@@ -153,7 +154,7 @@ function EvaluationDetail({ id }: { id: string }) {
         </h2>
         <span className="muted-line">
           {e.params.start} → {e.params.end}
-          {e.params.symbols ? ` · ${e.params.symbols.length} symbols` : ' · whole universe'}
+          {` · ${scopeLabel(e.params)}`}
           {e.subsetOf ? ' · name subset' : ''} · trial {e.trial} ·{' '}
           <code title={e.codeHash}>{e.codeHash.slice(0, 19)}</code>
           {r && ` · evaluator ${r.evaluator_version} · prices as of ${r.data_snapshot?.prices_as_of ?? '—'}`}
