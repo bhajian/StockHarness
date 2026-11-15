@@ -46,6 +46,21 @@ P = {"min_price": 5, "min_adv_20d": 1000, "min_market_cap": 1e6, "adv_days": 5}
 
 
 class Universe(unittest.TestCase):
+    def test_non_equity_never_joins(self):
+        """#393: a note or preferred with a price, volume and the issuer's market cap still fails."""
+        global SEC
+        saved = SEC
+        SEC = [dict(saved[0], security_type="note"), dict(saved[1], security_type="ADR")]
+        try:
+            prices = [{"security_id": sid, "date": d, "close": 25, "dollar_volume": 9000} for sid in ("SEC_1", "SEC_2") for d in days(10)]
+            caps = [{"symbol": t, "date": d, "marketCap": 5e9} for t in ("AAA", "DDD") for d in days(10)]
+            out = collect(u.compute(reader(prices, caps=caps), None, P))
+            last = {r["security_id"]: r for r in out["universe_daily"] if r["date"] == "2020-01-10"}
+            self.assertEqual(last["SEC_1"]["fails"], ["security_type"])
+            self.assertTrue(last["SEC_2"]["in_universe"], "ADRs are equity")
+        finally:
+            SEC = saved
+
     def test_filters_and_delisted(self):
         prices = [{"security_id": "SEC_1", "date": d, "close": 10, "dollar_volume": 5000} for d in days(20)]
         # DDD trades for 10 days, then is delisted (no more prices).

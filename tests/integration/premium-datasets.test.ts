@@ -156,11 +156,30 @@ after(async () => {
 });
 
 test(
-  'universe: every delisted page, common stock only, and leftovers removed',
+  'universe: every delisted page, US equity only, sticky, junk removed',
   { skip: skipReason },
   async () => {
-    // A leftover from an earlier, broader universe.
-    await db().collection('universe').insertOne({ symbol: '0HMG.L', exchange: 'LSE', is_delisted: true });
+    // Leftovers from an earlier, broader universe: a foreign listing and exchange-traded debt (junk), and a real
+    // second share class the screener no longer returns (sticky).
+    await db()
+      .collection('universe')
+      .insertMany([
+        { symbol: '0HMG.L', exchange: 'LSE', is_delisted: true },
+        {
+          symbol: 'DTB',
+          companyName: 'DTE Energy Company 2020 Series',
+          exchange: 'NYSE',
+          is_delisted: false,
+        },
+        { symbol: 'FOXA', companyName: 'Fox Corporation', exchange: 'NASDAQ', is_delisted: false },
+      ]);
+    // A trading profile we hold for a name that is not in the universe comes back; a fund's does not.
+    await db()
+      .collection('company_profiles')
+      .insertMany([
+        { symbol: 'NWSA', companyName: 'News Corporation', exchange: 'NASDAQ', isActivelyTrading: true },
+        { symbol: 'BXSL', companyName: 'Blackstone Secured Lending Fund', exchange: 'NYSE', isFund: true },
+      ]);
     const r = await run('uni');
     assert.equal(r.status, 'succeeded', r.error);
     const screener = seen.find((u) => u.pathname.endsWith('/company-screener'))!;
@@ -171,16 +190,17 @@ test(
       'paged to the end',
     );
     const syms = new Set((await db().collection('universe').distinct('symbol')) as string[]);
-    for (const s of ['AAPL', 'D0', 'D1', 'D2', 'A0']) assert.ok(syms.has(s), s);
-    for (const s of ['ACHRW', 'CFR-PB', 'X0.L', 'DLSAU', '0HMG.L']) assert.ok(!syms.has(s), s);
-    assert.equal(syms.size, state.activeCount + 1 + 3);
-    assert.equal((r as any).removed, 1);
-    // Every delisted row is kept in delisted_companies, foreign ones included.
-    assert.equal(await db().collection('delisted_companies').countDocuments(), 9);
+    for (const s of ['AAPL', 'D0', 'D1', 'D2', 'A0', 'FOXA', 'NWSA']) assert.ok(syms.has(s), s);
+    for (const s of ['ACHRW', 'CFR-PB', 'X0.L', 'DLSAU', '0HMG.L', 'DTB', 'BXSL']) assert.ok(!syms.has(s), s);
+    assert.equal(syms.size, state.activeCount + 1 + 3 + 2);
+    assert.equal((r as any).removed, 2, 'the foreign listing and the debt');
+    // US only: the foreign delisted rows are not stored.
+    assert.equal(await db().collection('delisted_companies').countDocuments(), 6);
+    assert.equal(await db().collection('delisted_companies').countDocuments({ exchange: 'LSE' }), 0);
   },
 );
 
-test('universe: a short screener answer never prunes', { skip: skipReason }, async () => {
+test('universe: a name the screener stops returning stays (sticky)', { skip: skipReason }, async () => {
   state.activeCount = 10;
   const before = await db().collection('universe').countDocuments();
   const r = await run('uni');
