@@ -11,7 +11,7 @@ resources:
 images:
   - name: openharness
     newName: 491085405405.dkr.ecr.us-east-1.amazonaws.com/openharness/app
-    newTag: 00b3940bc6c6
+    newTag: 0ce7d47f9eff
   - name: openharness-gateway
     newName: 491085405405.dkr.ecr.us-east-1.amazonaws.com/openharness/gateway
     newTag: c6f90af9dacf
@@ -20,7 +20,7 @@ images:
     newTag: c6f90af9dacf
   - name: openharness-python-executor
     newName: 491085405405.dkr.ecr.us-east-1.amazonaws.com/openharness/python-executor
-    newTag: 494ef85b14a1
+    newTag: 0ce7d47f9eff
 patches:
   # Drop the Caddy TLS proxy (the ALB replaces it).
   - patch: |-
