@@ -74,5 +74,5 @@ test('every catalog dataset has a sensible default priority', () => {
   assert.equal(by.analyst_estimates, 'P1');
   assert.equal(by.news_stocks, 'P2');
   assert.equal(by.revenue_product_segmentation, 'P2');
-  assert.equal(Object.keys(by).length, 42);
+  assert.equal(Object.keys(by).length, 57);
 });

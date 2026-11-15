@@ -833,7 +833,7 @@ Example (real row from the live workspace):
 
 #### 24. Key metrics (annual) → `key_metrics`
 
-Key metrics per symbol, annual (quarterly not on Premium).
+Key metrics per symbol, annual (quarterly: key_metrics_quarterly).
 
 |                     |                                                    |
 | ------------------- | -------------------------------------------------- |
@@ -872,7 +872,7 @@ Example (real row from the live workspace):
 
 #### 25. Financial ratios (annual) → `ratios`
 
-Financial ratios per symbol, annual (quarterly not on Premium).
+Financial ratios per symbol, annual (quarterly: ratios_quarterly).
 
 |                     |                                               |
 | ------------------- | --------------------------------------------- |
@@ -1253,7 +1253,7 @@ Example (real row from the live workspace):
 
 #### 36. Analyst estimates (annual) → `analyst_estimates`
 
-Consensus analyst estimates, annual (quarterly not on Premium).
+Consensus analyst estimates, annual, as of each weekly snapshot (quarterly: analyst_estimates_quarterly).
 
 |                     |                                                                                                                       |
 | ------------------- | --------------------------------------------------------------------------------------------------------------------- |
@@ -2136,12 +2136,12 @@ Simulation records (planned, M6.01):
 
 These are recorded in the catalog (M1.13), so agents and judges see them on every backtest.
 
-| Caveat                                                                                                                                          | Effect                                                                      | Fix                                        |
-| ----------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- | ------------------------------------------ |
-| Delisted companies: only about 100 names on the current FMP plan (page ≥ 1 returns 402)                                                         | Some survivorship bias remains in backtests                                 | M8.04 (plan upgrade or SEC/exchange lists) |
-| Index constituents return 402                                                                                                                   | No `index_membership` or `in_spx` features; the screener universe stands in | M8.04                                      |
-| Quarterly estimates and key metrics aren't on the plan                                                                                          | Annual estimates only                                                       | Plan upgrade                               |
-| Estimate, consensus and score history starts at the first weekly snapshot (2026-10)                                                             | Estimate-based ideas are forward-only                                       | Time; `analyst_events` proxies             |
-| Feeds (insider, congress, grades, price-target changes, news) hold only items since their sync started                                          | These ideas are forward-only until history accumulates                      | Per-symbol historical endpoints (to add)   |
-| Earnings BMO/AMC timing is unknown                                                                                                              | The conservative next-session reaction date is used                         | M8.01 (SEC 8-K acceptance times)           |
-| Current history: EOD prices 2021-10-25 → 2026-10-23 (5y, 2,081 symbols; the universe price syncs are currently disabled); statements 8 quarters | Not yet enough for the 10y / 40q targets                                    | M1.05 + M1.16 backfill                     |
+| Caveat                                                                                                                                          | Effect                                                                                   | Fix                              |
+| ----------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- | -------------------------------- |
+| FMP's delisted-companies list starts in late 2020 (Premium serves every page, about 17,000 names)                                               | Companies that died in 2016–2020 are missing; some survivorship bias remains before 2021 | SEC/exchange delisting lists     |
+| Index constituents: available on Premium (current members and every change since 1957)                                                          | `index_membership` and `in_sp500` / `in_ndx` / `in_dji` in `universe_daily`              | #388                             |
+| Quarterly estimates, key metrics and ratios: available on Premium                                                                               | `analyst_estimates_quarterly`, `key_metrics_quarterly`, `ratios_quarterly`               | #387                             |
+| Estimate, consensus and score history starts at the first weekly snapshot (2026-10)                                                             | Estimate-based ideas are forward-only                                                    | Time; `analyst_events` proxies   |
+| News and grade-news feeds hold only items since their sync started; insider, congress and price-target feeds have per-symbol history syncs      | News-based ideas are forward-only                                                        | Time                             |
+| Earnings BMO/AMC timing is unknown                                                                                                              | The conservative next-session reaction date is used                                      | M8.01 (SEC 8-K acceptance times) |
+| Current history: EOD prices 2021-10-25 → 2026-10-23 (5y, 2,081 symbols; the universe price syncs are currently disabled); statements 8 quarters | Not yet enough for the 10y / 40q targets                                                 | M1.05 + M1.16 backfill           |

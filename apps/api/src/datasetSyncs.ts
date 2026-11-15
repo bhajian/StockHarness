@@ -255,6 +255,8 @@ const backfillInput = z.object({
     .regex(/^\d{4}-\d{2}-\d{2}$/)
     .optional(),
   batchSize: z.number().int().min(1).max(500).optional(),
+  /** Rows per symbol for this backfill only (limit-based datasets), e.g. 48 quarters (#387). */
+  historyPeriods: z.number().int().min(1).max(10000).optional(),
 });
 datasetSyncRouter.post('/dataset-syncs/:id/backfill', async (req, res) => {
   assertAdmin(req.principal!.user.role);

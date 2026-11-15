@@ -1420,13 +1420,14 @@ run follows the new schedule. A new daily or weekly sync waits for its first slo
 **Screener presets** (for the **Screener preset** symbol mode; resolved with the FMP screener at each run,
 sorted by market cap, ETFs and funds excluded):
 
-| Preset                               | Rule                                                                               |
-| ------------------------------------ | ---------------------------------------------------------------------------------- |
-| **Mega-cap (> $200B)**               | NASDAQ, NYSE, AMEX above $200B                                                     |
-| **Large-cap (> $10B)**               | Above $10B                                                                         |
-| **Top 500 US (S&P 500-like)**        | The 500 largest above $1B ("proxy; exact S&P 500 membership needs a plan upgrade") |
-| **Top 100 Nasdaq (Nasdaq-100-like)** | The 100 largest Nasdaq names above $1B                                             |
-| **All NYSE** / **All Nasdaq**        | Actively trading names above $50M                                                  |
+| Preset                                       | Rule                                                            |
+| -------------------------------------------- | --------------------------------------------------------------- |
+| **Mega-cap (> $200B)**                       | NASDAQ, NYSE, AMEX above $200B                                  |
+| **Large-cap (> $10B)**                       | Above $10B                                                      |
+| **S&P 500** / **Nasdaq-100** / **Dow Jones** | The exact current members, from the **Index constituents** sync |
+| **Top 500 US (S&P 500-like)**                | The 500 largest above $1B (a proxy)                             |
+| **Top 100 Nasdaq (Nasdaq-100-like)**         | The 100 largest Nasdaq names above $1B                          |
+| **All NYSE** / **All Nasdaq**                | Actively trading names above $50M                               |
 
 A preset is today's list, so a preset sync is not survivorship-free. Research uses the universe and
 `universe_daily` instead.
@@ -1690,16 +1691,21 @@ The **Universe (screener)** sync (`L1 — Universe (screener)`, weekly, Saturday
 builds the `universe` collection:
 
 1. **Active names**: the FMP company screener for NASDAQ, NYSE and AMEX, actively trading, not ETFs or funds,
-   market cap above $2B (up to 5,000 rows). Fields: `symbol`, `companyName`, `marketCap`, `exchange`, `sector`,
-   `industry`, `is_delisted: false`.
-2. **Delisted names**: the FMP delisted-companies list, paged. The current plan serves page 0 only (page 1 is a
-   402), so the sync keeps what page 0 returns. These are also written to `delisted_companies`. Only delisted
-   names from the same exchanges join the universe (`is_delisted: true`, `delisted_date`).
-3. **Merge**: an active row overrides a delisted row for the same symbol.
+   market cap above **$300M**, the research universe's point-in-time floor (`universe_daily` `min_market_cap`).
+   A higher floor here would drop names that were above $300M in the past and fell since, which is survivorship
+   bias. Fields: `symbol`, `companyName`, `marketCap`, `exchange`, `sector`, `industry`, `is_delisted: false`.
+2. **Delisted names**: the FMP delisted-companies list, every page (about 170 pages on Premium, delistings since
+   late 2020). These are also written to `delisted_companies`. Only delisted names from the same exchanges join
+   the universe (`is_delisted: true`, `delisted_date`).
+3. **Common stock only**: warrants, units, rights and preferreds (`ABCDW`, `ABCDU`, `-WS`, `-PA`…) are left out;
+   share classes such as `BRK-B` stay.
+4. **Merge**: an active row overrides a delisted row for the same symbol.
 
-Rows are upserted and never removed, so a name that later falls below $2B stays in the sync universe. In this
-deployment the universe holds roughly 2,000 to 2,250 symbols, delisted names included. Every per-symbol sync in
-**Reuse the Universe collection** mode iterates all of them, so one daily EOD run is about 2,200 FMP calls.
+A complete pull replaces the universe: names that no longer qualify (foreign or OTC leftovers, warrants) are
+removed and stop being synced. The removal only happens when the delisted list was read to its end and the
+screener returned at least 500 names, so a short or failed answer never empties it. In this deployment the
+universe holds about 3,300 active names plus the delisted ones. Every per-symbol sync in **Reuse the Universe
+collection** mode iterates all of them.
 
 The universe is deliberately broad. The point-in-time filter (price, liquidity, market cap and exchange on each
 date) is the research universe, `universe_daily`, built in Layer 2.
@@ -1789,28 +1795,20 @@ under **Failing**; once its last planned slot is more than an hour past, it is a
    The failure counter resets only on a successful run, so if the next run hits the same plan limit the schedule
    pauses again at once.
 
-### What the current FMP plan gives
+### What the FMP plan gives
 
-From `docs/data-coverage.md` (probed live on 2026-11-06):
+The workspace is on FMP **Premium** (since 2026-11-14). `docs/data-coverage.md` has the full table from the live
+probe. In short:
 
-| Available                                                | Notes                                                                                 |
-| -------------------------------------------------------- | ------------------------------------------------------------------------------------- |
-| Daily prices, US common stocks (NASDAQ, NYSE, AMEX)      | 2016 onwards; delisted names included                                                 |
-| Index levels (`^GSPC`, VIX) and treasury rates           | The benchmark and macro regimes (`macro_daily`)                                       |
-| Quarterly income statement, balance sheet, cash flow     | About 10 years per symbol → `fundamentals_pit`                                        |
-| Annual key metrics, ratios, growth, scores               | Annual only: the plan refuses quarterly key metrics                                   |
-| Analyst estimates (annual), price-target summary, grades | Snapshots; estimates history from about 2022, so theories using them are forward-only |
-| Earnings history per symbol (EPS actual vs estimate)     | About 40 quarters; not synced yet (#304)                                              |
-| Dividends and splits history per symbol                  | → `corporate_actions`                                                                 |
-| Insider trades, congress trades, news, movers            | Feeds                                                                                 |
-
-| Limit of the plan                                        | What the platform does                                                                                  |
-| -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
-| No S&P 500 / Nasdaq / Dow constituents (current or past) | The S&P 500 proxy: the 500 largest by market cap on each date, from `universe_daily`                    |
-| News feeds serve `page=0` only                           | Feed syncs keep page 0 and record the limit                                                             |
-| Calendars serve the last ~12 months                      | Kept as a rolling year; history comes from the per-symbol syncs (`dividends_history`, `splits_history`) |
-| Non-US listings (LSE, TSX, OTC …)                        | Left out of the universe                                                                                |
-| Delisted-companies list: page 0 only                     | The universe takes what the plan returns                                                                |
+- **History**: prices, index levels, treasury curve, sector performance and reported market caps from 2016;
+  statements 48 quarters deep (back to the 1980s for large caps); quarterly and annual key metrics and ratios;
+  earnings history; analyst grade changes since about 2012; insider trades about ten years per symbol; Senate
+  and House trades since about 2016; 14 US macro series.
+- **Index membership**: current S&P 500, Nasdaq-100 and Dow members plus every change (S&P since 1957), turned
+  into point-in-time membership by the `index_membership` transform.
+- **Still limited**: FMP's delisted list starts in late 2020 (deaths in 2016–2020 are missing); calendars refuse
+  an old `from`; estimate, price-target and grade **consensus** snapshots have no history (forward-only); news
+  has no history; 13F ownership is not in Premium.
 
 ---
 
@@ -1875,22 +1873,18 @@ docs) are kept separately and never overwritten.
 
 **Built-in caveats** (attached automatically):
 
-| Id                   | Severity | Applies to                                                                             | Text (short)                                                                           |
-| -------------------- | -------- | -------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
-| `delisted-coverage`  | warn     | Per-symbol collections, `universe`, `securities`, `prices_daily`, `delisted_companies` | Survivorship bias: the plan serves only page 0 of delisted companies (about 100 names) |
-| `index-constituents` | info     | `universe`, `securities`                                                               | No S&P 500 / Nasdaq / Dow membership on the plan; the screener universe stands in      |
-| `annual-only`        | info     | `analyst_estimates`, `key_metrics`, `ratios`                                           | Annual values only                                                                     |
-| `snapshot-history`   | blocking | Weekly snapshot collections                                                            | No history before the first snapshot; strategies built on it are forward-only          |
-| `feed-history`       | blocking | Feed collections                                                                       | History starts when the sync started                                                   |
-| `earnings-timing`    | warn     | `earnings_calendar`                                                                    | Before-open / after-close timing unknown: react at the next session close              |
-| `statement-depth`    | warn     | Statements, `financial_growth`                                                         | Quarterly history is short until the 40-quarter backfill                               |
-| `current-sector`     | warn     | `securities`, `company_profiles`, `universe`                                           | Sector and industry are the current classification, not point in time                  |
+| Id                   | Severity | Applies to                                                                             | Text (short)                                                                            |
+| -------------------- | -------- | -------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `delisted-coverage`  | warn     | Per-symbol collections, `universe`, `securities`, `prices_daily`, `delisted_companies` | Survivorship bias before 2021: FMP's delisted list starts in late 2020                  |
+| `annual-only`        | info     | `analyst_estimates`, `key_metrics`, `ratios`                                           | Annual values; names the quarterly collection                                           |
+| `snapshot-history`   | blocking | Weekly snapshot collections                                                            | No history before the first snapshot; forward-only; names the history collection if any |
+| `feed-history`       | blocking | Feeds without a per-symbol history sync (news, grade news, movers)                     | History starts when the sync started                                                    |
+| `per-symbol-history` | warn     | `insider_trades`, `congress_senate`, `congress_house`, `price_target_changes`          | History from the per-symbol sync's backfill; depth varies by company                    |
+| `earnings-timing`    | warn     | `earnings_calendar`, `earnings_surprises`                                              | Before-open / after-close timing unknown: react at the next session close               |
+| `statement-depth`    | info     | Statements, `financial_growth`, quarterly key metrics and ratios                       | The weekly sync re-pulls 8 quarters; older ones come from the 48-quarter backfill       |
+| `current-sector`     | warn     | `securities`, `company_profiles`, `universe`                                           | Sector and industry are the current classification, not point in time                   |
 
-On live, the sync universe holds **168 delisted names of 2,288** (page 0 of the delisted list plus names that
-delisted while being synced), so survivorship bias is reduced but not gone.
-
-Dismiss a built-in caveat when it no longer applies, for example `statement-depth` once the statement syncs run
-with **History depth** 40 (as they do here).
+Dismiss a built-in caveat when it no longer applies to your data.
 
 Curated docs (description, grain, field docs, caveats, dismissed caveats) are a YAML object, `kind:
 CatalogEntry`, exported and imported with everything else (repository copy:

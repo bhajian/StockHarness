@@ -109,7 +109,8 @@ test(
     await syncQueue.idle();
     const runs = await datasetSyncRuns().find({ ownerId: owner }).toArray();
     assert.deepEqual(runs.map((r) => `${r.syncId}:${r.status}`).sort(), ['gdp:succeeded', 'rates:succeeded']);
-    assert.equal(fmpCalls, 2);
+    // Treasury: one call for its two-week window; GDP re-pulls ~13 months in one-year calls (#387): two.
+    assert.equal(fmpCalls, 3);
     const rows = await mongo.db(workspaceDatabase(owner)).collection('treasury_rates').countDocuments();
     assert.equal(rows, 1);
   },

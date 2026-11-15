@@ -131,7 +131,7 @@ const LAYER2: Record<
 const SIDE_OUTPUTS: Record<string, { description: string; key: string[] }> = {
   delisted_companies: {
     description:
-      'Delisted companies merged into the universe by the universe sync (about 100 names on the current plan).',
+      'Delisted companies merged into the universe by the universe sync (every page FMP serves: delistings since late 2020).',
     key: ['symbol', 'delistedDate'],
   },
 };
@@ -247,7 +247,16 @@ export async function refreshCatalogEntry(ownerId: string, name: string, syncs?:
   const curated = prior?.curated;
   const coll = db.collection(name);
   const producers = producersOf(name, allSyncs);
+  // Several datasets may fill one collection (a feed and its per-symbol history, #387): the first in catalog
+  // order among the producers describes it, so the answer does not depend on which sync was created first.
+  const own =
+    name === 'delisted_companies'
+      ? undefined
+      : DATASET_CATALOG.find(
+          (d) => d.defaultCollection === name && producers.some((p) => p.dataset === d.id),
+        );
   const def: DatasetDef | undefined =
+    own ||
     (name !== 'delisted_companies' && producers[0] && catalogById.get(producers[0].dataset)) ||
     DATASET_CATALOG.find((d) => d.defaultCollection === name);
   // Transform outputs are Layer 2 (#90): described by the transform's output declaration.

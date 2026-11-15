@@ -182,9 +182,10 @@ test(
       /\(2026-10-23\)/,
       'first snapshot date, not the fiscal date',
     );
+    // insider_trades also has a per-symbol history sync (#387): no longer forward-only.
     assert.deepEqual(
       ins.caveats.map((c) => c.id),
-      ['feed-history'],
+      ['per-symbol-history'],
     );
     const eod = (await catalogEntries().findOne({ ownerId: A, collection: 'eod_prices' }))!;
     assert.ok(eod.caveats.some((c) => c.id === 'delisted-coverage' && c.severity === 'warn'));

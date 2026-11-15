@@ -70,10 +70,9 @@ Three rules hold the system together:
 | **Agent platform**                                                                | ✅ Agents, harnesses, schedules, the Python executor (`run_python` and code steps), MongoDB over MCP, knowledge, skills and the API. See [docs/platform.md](docs/platform.md).                                                                                  |
 | **Schema Catalog, trusted evaluator, research loop, Ideas, Simulations, Signals** | ⏳ Planned in milestones M1–M7. See [ROADMAP.md](ROADMAP.md).                                                                                                                                                                                                   |
 
-Known data limits on the current FMP plan:
+Known data limits on the FMP Premium plan (see [docs/data-coverage.md](docs/data-coverage.md)):
 
-- Delisted-company history covers only about 100 names.
-- Index constituents aren't available.
+- FMP's delisted-company list starts in late 2020, so companies that died in 2016–2020 are missing.
 - Estimate and consensus history starts at the first weekly snapshot (October 2026).
 
 These limits are tracked as catalog caveats (M1.13).

@@ -86,6 +86,25 @@ export const KNOWN_AT: Record<string, KnownAtRule> = {
   key_executives: CURRENT,
   biggest_gainers: CURRENT,
   most_actives: CURRENT,
+  // Premium plan datasets (#387).
+  economic_indicators: lag(
+    45,
+    'series are dated at the period start; release lags differ (claims ~5 days, CPI ~2 weeks, GDP ~1 month), so 45 days is the safe bound',
+  ),
+  index_constituents: CURRENT,
+  index_changes: eod('date'),
+  stock_list: CURRENT,
+  symbol_changes: ts('date'),
+  key_metrics_quarterly: lag(90, "join the matching income_statement row's acceptedDate when available"),
+  ratios_quarterly: lag(90, "join the matching income_statement row's acceptedDate when available"),
+  analyst_estimates_quarterly: SNAP,
+  earnings_history: { type: 'nextSession', field: 'date' },
+  analyst_grades_history: ts('date'),
+  grades_consensus_history: lag(31, 'monthly counts dated at the month start; complete by the month end'),
+  insider_trades_history: ts('filingDate'),
+  senate_trades_history: ts('disclosureDate'),
+  house_trades_history: ts('disclosureDate'),
+  price_target_history: ts('publishedDate'),
 };
 
 /** One-line description for the catalog and the agents. */

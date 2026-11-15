@@ -22,9 +22,82 @@ export interface DatasetDef {
   paginated?: boolean; // feed endpoints paged with page/limit
   fixedSymbols?: string[]; // market datasets that still pull per fixed symbol (indexes)
   params?: Record<string, string | number>; // constant query params (period, etc.)
+  /**
+   * Several calls per pull (#387): each variant overrides the endpoint and/or params, and its `tag` fields are
+   * stamped on the rows it returns (e.g. one call per index with `index: 'sp500'`, one per sector or indicator).
+   */
+  variants?: DatasetVariant[];
+  /** Window datasets: days per request, below FMP's per-call range cap (treasury 3 months, economic 1 year). */
+  windowDays?: number;
+  /** Window datasets: the rolling window starts this many days before today (default 7). */
+  lookbackDays?: number;
+  /** Window datasets: the rolling window ends this many days after today (default 14, for calendars). */
+  lookaheadDays?: number;
+  /** Snapshot lists: rows a complete pull did not return are deleted (index members that left). */
+  replaceStale?: boolean;
+  /** Per-symbol history paged with page/limit: a backfill walks up to this many pages per symbol. */
+  pagesPerSymbol?: number;
   defaultCollection: string;
   recommendedEveryMinutes: number;
 }
+export type DatasetVariant = {
+  endpoint?: string;
+  params?: Record<string, string | number>;
+  tag?: Record<string, string>;
+};
+
+/** The calls one pull makes: the variants, else the dataset's own endpoint and params. */
+export function variantsOf(def: DatasetDef): Required<DatasetVariant>[] {
+  const base = def.variants?.length ? def.variants : [{}];
+  return base.map((v) => ({
+    endpoint: v.endpoint ?? def.endpoint,
+    params: { ...(def.params ?? {}), ...(v.params ?? {}) },
+    tag: v.tag ?? {},
+  }));
+}
+
+/** FMP sector names (historical-sector-performance takes one per call). */
+export const FMP_SECTORS = [
+  'Basic Materials',
+  'Communication Services',
+  'Consumer Cyclical',
+  'Consumer Defensive',
+  'Energy',
+  'Financial Services',
+  'Healthcare',
+  'Industrials',
+  'Real Estate',
+  'Technology',
+  'Utilities',
+];
+/** US macro series pulled into `economic_indicators` (FMP economic-indicators names). */
+export const ECONOMIC_INDICATORS = [
+  'GDP',
+  'realGDP',
+  'CPI',
+  'inflationRate',
+  'unemploymentRate',
+  'totalNonfarmPayroll',
+  'initialClaims',
+  'federalFunds',
+  'retailSales',
+  'durableGoods',
+  'consumerSentiment',
+  'industrialProductionTotalIndex',
+  'smoothedUSRecessionProbabilities',
+  '30YearFixedRateMortgageAverage',
+];
+/** Index ids used in `index_constituents` / `index_changes` and the index presets. */
+export const INDEXES = [
+  { id: 'sp500', label: 'S&P 500', current: 'sp500-constituent', history: 'historical-sp500-constituent' },
+  { id: 'ndx', label: 'Nasdaq-100', current: 'nasdaq-constituent', history: 'historical-nasdaq-constituent' },
+  {
+    id: 'dji',
+    label: 'Dow Jones',
+    current: 'dowjones-constituent',
+    history: 'historical-dowjones-constituent',
+  },
+] as const;
 
 export const UNIVERSE_COLLECTION = 'universe';
 export const UNIVERSE_DATASET_ID = 'universe';
@@ -38,9 +111,10 @@ export const DATASET_CATALOG: DatasetDef[] = [
     label: 'Universe (screener)',
     category: 'Reference',
     description:
-      'Survivorship-free SYNC universe: active screener names plus all delisted companies, so per-symbol ' +
-      'datasets also pull the history of names that later died. The point-in-time cap/tradeable filter is a ' +
-      'separate RESEARCH universe applied in Layer 3 (universe_daily), never at sync time.',
+      'Survivorship-free SYNC universe: active NASDAQ/NYSE/AMEX common stock above $300M (the research ' +
+      "universe's point-in-time floor) plus every delisted company on those exchanges, so per-symbol datasets " +
+      'also pull the history of names that later died. Warrants, units, rights and preferreds are left out. The ' +
+      'point-in-time cap/tradeable filter is a separate RESEARCH universe (universe_daily), never applied here.',
     endpoint: 'company-screener',
     scope: 'market',
     incremental: 'snapshot',
@@ -69,7 +143,7 @@ export const DATASET_CATALOG: DatasetDef[] = [
     id: 'eod_index',
     label: 'Index & VIX levels',
     category: 'Prices',
-    description: 'Daily levels for ^GSPC, ^VIX, ^DJI, ^IXIC.',
+    description: 'Daily levels for ^GSPC, ^VIX, ^DJI, ^IXIC and ^RUT (Russell 2000).',
     endpoint: 'historical-price-eod/full',
     scope: 'market',
     incremental: 'timeseries',
@@ -77,7 +151,7 @@ export const DATASET_CATALOG: DatasetDef[] = [
     dateField: 'date',
     supportsDateRange: true,
     perSymbol: false,
-    fixedSymbols: ['^GSPC', '^VIX', '^DJI', '^IXIC'],
+    fixedSymbols: ['^GSPC', '^VIX', '^DJI', '^IXIC', '^RUT'],
     defaultCollection: 'eod_index',
     recommendedEveryMinutes: DAILY,
   },
@@ -85,14 +159,19 @@ export const DATASET_CATALOG: DatasetDef[] = [
     id: 'treasury_rates',
     label: 'Treasury rates',
     category: 'Market',
-    description: 'US Treasury par yield curve.',
+    description:
+      'US Treasury par yield curve, one row per day. Each run re-pulls the last two weeks; history is backfilled ' +
+      'in two-month windows (FMP serves three months per call).',
     endpoint: 'treasury-rates',
     scope: 'market',
-    incremental: 'snapshot',
+    incremental: 'window',
     keyFields: ['date'],
     dateField: 'date',
-    supportsDateRange: false,
+    supportsDateRange: true,
     perSymbol: false,
+    windowDays: 60,
+    lookbackDays: 14,
+    lookaheadDays: 0,
     defaultCollection: 'treasury_rates',
     recommendedEveryMinutes: DAILY,
   },
@@ -100,14 +179,20 @@ export const DATASET_CATALOG: DatasetDef[] = [
     id: 'sector_performance',
     label: 'Sector performance',
     category: 'Market',
-    description: 'Daily sector performance snapshot by exchange.',
-    endpoint: 'sector-performance-snapshot',
+    description:
+      'Daily average change per sector (the NASDAQ series FMP publishes), one call per sector. Each run re-pulls ' +
+      'the last ten days; history is backfilled from 2016.',
+    endpoint: 'historical-sector-performance',
     scope: 'market',
-    incremental: 'snapshot',
+    incremental: 'window',
     keyFields: ['date', 'sector', 'exchange'],
     dateField: 'date',
-    supportsDateRange: false,
+    supportsDateRange: true,
     perSymbol: false,
+    variants: FMP_SECTORS.map((sector) => ({ params: { sector } })),
+    windowDays: 1460,
+    lookbackDays: 10,
+    lookaheadDays: 0,
     defaultCollection: 'sector_performance',
     recommendedEveryMinutes: DAILY,
   },
@@ -278,7 +363,8 @@ export const DATASET_CATALOG: DatasetDef[] = [
     id: 'analyst_estimates',
     label: 'Analyst estimates (annual)',
     category: 'Estimates',
-    description: 'Consensus analyst estimates, annual (quarterly not on Premium).',
+    description:
+      'Consensus analyst estimates, annual, as of each weekly snapshot (quarterly: analyst_estimates_quarterly).',
     endpoint: 'analyst-estimates',
     scope: 'per-symbol',
     incremental: 'snapshot',
@@ -340,7 +426,7 @@ export const DATASET_CATALOG: DatasetDef[] = [
     id: 'key_metrics',
     label: 'Key metrics (annual)',
     category: 'Fundamentals',
-    description: 'Key metrics per symbol, annual (quarterly not on Premium).',
+    description: 'Key metrics per symbol, annual (quarterly: key_metrics_quarterly).',
     endpoint: 'key-metrics',
     scope: 'per-symbol',
     incremental: 'snapshot',
@@ -356,7 +442,7 @@ export const DATASET_CATALOG: DatasetDef[] = [
     id: 'ratios',
     label: 'Financial ratios (annual)',
     category: 'Fundamentals',
-    description: 'Financial ratios per symbol, annual (quarterly not on Premium).',
+    description: 'Financial ratios per symbol, annual (quarterly: ratios_quarterly).',
     endpoint: 'ratios',
     scope: 'per-symbol',
     incremental: 'snapshot',
@@ -467,15 +553,17 @@ export const DATASET_CATALOG: DatasetDef[] = [
     id: 'historical_market_cap',
     label: 'Historical market cap',
     category: 'Reference',
-    description: 'Daily market-cap history per symbol.',
+    description:
+      'Daily reported market cap per symbol (universe_daily uses it instead of close x shares). Pulled from the ' +
+      'cursor; one call covers up to 18 years, so the backfill reaches 2016 in one call per symbol.',
     endpoint: 'historical-market-capitalization',
     scope: 'per-symbol',
-    incremental: 'snapshot',
+    incremental: 'timeseries',
     keyFields: ['symbol', 'date'],
     dateField: 'date',
-    supportsDateRange: false,
+    supportsDateRange: true,
     perSymbol: true,
-    params: { limit: 500 },
+    params: { limit: 5000 },
     defaultCollection: 'historical_market_cap',
     recommendedEveryMinutes: WEEKLY,
   },
@@ -646,12 +734,16 @@ export const DATASET_CATALOG: DatasetDef[] = [
     description: 'US GDP economic indicator.',
     endpoint: 'economic-indicators',
     scope: 'market',
-    incremental: 'snapshot',
+    incremental: 'window',
     keyFields: ['name', 'date'],
     dateField: 'date',
     supportsDateRange: true,
     perSymbol: false,
     params: { name: 'GDP' },
+    // Dated at the start of the period and published weeks later: re-pull a year, one call per year (FMP cap).
+    windowDays: 364,
+    lookbackDays: 400,
+    lookaheadDays: 0,
     defaultCollection: 'economic_gdp',
     recommendedEveryMinutes: WEEKLY,
   },
@@ -662,13 +754,282 @@ export const DATASET_CATALOG: DatasetDef[] = [
     description: 'US Consumer Price Index economic indicator.',
     endpoint: 'economic-indicators',
     scope: 'market',
-    incremental: 'snapshot',
+    incremental: 'window',
     keyFields: ['name', 'date'],
     dateField: 'date',
     supportsDateRange: true,
     perSymbol: false,
     params: { name: 'CPI' },
+    // Dated at the start of the period and published weeks later: re-pull a year, one call per year (FMP cap).
+    windowDays: 364,
+    lookbackDays: 400,
+    lookaheadDays: 0,
     defaultCollection: 'economic_cpi',
+    recommendedEveryMinutes: WEEKLY,
+  },
+  // Premium plan datasets (#387).
+  {
+    id: 'economic_indicators',
+    label: 'Economic indicators',
+    category: 'Market',
+    description:
+      'US macro series in one collection (one row per name and date): GDP, real GDP, CPI, inflation, ' +
+      'unemployment, payrolls, initial claims, fed funds, retail sales, durable goods, sentiment, industrial ' +
+      'production, recession probability, 30-year mortgage rate. Dated at the period start; published later.',
+    endpoint: 'economic-indicators',
+    scope: 'market',
+    incremental: 'window',
+    keyFields: ['name', 'date'],
+    dateField: 'date',
+    supportsDateRange: true,
+    perSymbol: false,
+    variants: ECONOMIC_INDICATORS.map((name) => ({ params: { name } })),
+    windowDays: 364,
+    lookbackDays: 400,
+    lookaheadDays: 0,
+    defaultCollection: 'economic_indicators',
+    recommendedEveryMinutes: DAILY,
+  },
+  {
+    id: 'index_constituents',
+    label: 'Index constituents',
+    category: 'Reference',
+    description:
+      'Current members of the S&P 500 (index: sp500), Nasdaq-100 (ndx) and Dow Jones (dji). Members that left ' +
+      'are removed on the next run; the point-in-time history is index_changes (Layer 2: index_membership).',
+    endpoint: 'sp500-constituent',
+    scope: 'market',
+    incremental: 'snapshot',
+    keyFields: ['index', 'symbol'],
+    supportsDateRange: false,
+    perSymbol: false,
+    variants: INDEXES.map((i) => ({ endpoint: i.current, tag: { index: i.id } })),
+    replaceStale: true,
+    defaultCollection: 'index_constituents',
+    recommendedEveryMinutes: DAILY,
+  },
+  {
+    id: 'index_changes',
+    label: 'Index changes',
+    category: 'Reference',
+    description:
+      'Every addition and removal for the S&P 500 (since 1957), Nasdaq-100 (since 1985) and Dow Jones (since ' +
+      '1994), with the date, the tickers on both sides and the reason. Each run pulls the full history.',
+    endpoint: 'historical-sp500-constituent',
+    scope: 'market',
+    incremental: 'snapshot',
+    keyFields: ['index', 'date', 'symbol', 'removedTicker'],
+    dateField: 'date',
+    supportsDateRange: false,
+    perSymbol: false,
+    variants: INDEXES.map((i) => ({ endpoint: i.history, tag: { index: i.id } })),
+    defaultCollection: 'index_changes',
+    recommendedEveryMinutes: DAILY,
+  },
+  {
+    id: 'stock_list',
+    label: 'Stock list',
+    category: 'Reference',
+    description: 'Every symbol FMP knows, with its company name (the securities transform reads it).',
+    endpoint: 'stock-list',
+    scope: 'market',
+    incremental: 'snapshot',
+    keyFields: ['symbol'],
+    supportsDateRange: false,
+    perSymbol: false,
+    defaultCollection: 'stock_list',
+    recommendedEveryMinutes: WEEKLY,
+  },
+  {
+    id: 'symbol_changes',
+    label: 'Symbol changes',
+    category: 'Reference',
+    description: 'Ticker changes (old symbol → new symbol, with the date), back to 2004.',
+    endpoint: 'symbol-change',
+    scope: 'market',
+    incremental: 'snapshot',
+    keyFields: ['date', 'oldSymbol', 'newSymbol'],
+    dateField: 'date',
+    supportsDateRange: false,
+    perSymbol: false,
+    params: { limit: 5000 },
+    defaultCollection: 'symbol_changes',
+    recommendedEveryMinutes: WEEKLY,
+  },
+  {
+    id: 'key_metrics_quarterly',
+    label: 'Key metrics (quarterly)',
+    category: 'Fundamentals',
+    description: 'Key metrics per symbol and quarter (the weekly run re-pulls 8 quarters; backfill to 48).',
+    endpoint: 'key-metrics',
+    scope: 'per-symbol',
+    incremental: 'snapshot',
+    keyFields: ['symbol', 'date', 'period'],
+    dateField: 'date',
+    supportsDateRange: false,
+    perSymbol: true,
+    params: { period: 'quarter', limit: 8 },
+    defaultCollection: 'key_metrics_quarterly',
+    recommendedEveryMinutes: WEEKLY,
+  },
+  {
+    id: 'ratios_quarterly',
+    label: 'Financial ratios (quarterly)',
+    category: 'Fundamentals',
+    description:
+      'Financial ratios per symbol and quarter (the weekly run re-pulls 8 quarters; backfill to 48).',
+    endpoint: 'ratios',
+    scope: 'per-symbol',
+    incremental: 'snapshot',
+    keyFields: ['symbol', 'date', 'period'],
+    dateField: 'date',
+    supportsDateRange: false,
+    perSymbol: true,
+    params: { period: 'quarter', limit: 8 },
+    defaultCollection: 'ratios_quarterly',
+    recommendedEveryMinutes: WEEKLY,
+  },
+  {
+    id: 'analyst_estimates_quarterly',
+    label: 'Analyst estimates (quarterly)',
+    category: 'Estimates',
+    description:
+      'Consensus analyst estimates per quarter, as of each weekly snapshot (forward-only, like annual).',
+    endpoint: 'analyst-estimates',
+    scope: 'per-symbol',
+    incremental: 'snapshot',
+    keyFields: ['symbol', 'date', 'snapshot_date'],
+    snapshotDated: true,
+    dateField: 'date',
+    supportsDateRange: false,
+    perSymbol: true,
+    params: { period: 'quarter', limit: 16 },
+    defaultCollection: 'analyst_estimates_quarterly',
+    recommendedEveryMinutes: WEEKLY,
+  },
+  {
+    id: 'earnings_history',
+    label: 'Earnings history',
+    category: 'Estimates',
+    description:
+      'Reported vs estimated EPS and revenue per quarter, including the next scheduled report (back to the ' +
+      '1980s on backfill). Report timing (before open / after close) is not given.',
+    endpoint: 'earnings',
+    scope: 'per-symbol',
+    incremental: 'snapshot',
+    keyFields: ['symbol', 'date'],
+    dateField: 'date',
+    supportsDateRange: false,
+    perSymbol: true,
+    params: { limit: 8 },
+    defaultCollection: 'earnings_surprises',
+    recommendedEveryMinutes: WEEKLY,
+  },
+  {
+    id: 'analyst_grades_history',
+    label: 'Analyst grade history',
+    category: 'Estimates',
+    description:
+      'Every analyst up/downgrade per symbol (firm, previous and new grade, action), back to about 2012.',
+    endpoint: 'grades',
+    scope: 'per-symbol',
+    incremental: 'snapshot',
+    keyFields: ['symbol', 'date', 'gradingCompany', 'previousGrade', 'newGrade'],
+    dateField: 'date',
+    supportsDateRange: false,
+    perSymbol: true,
+    params: { limit: 50 },
+    defaultCollection: 'analyst_grades_history',
+    recommendedEveryMinutes: WEEKLY,
+  },
+  {
+    id: 'grades_consensus_history',
+    label: 'Grades consensus history',
+    category: 'Estimates',
+    description:
+      'Monthly analyst buy/hold/sell counts per symbol, back to about 2018: the backtestable history of the ' +
+      'weekly grades_consensus snapshot.',
+    endpoint: 'grades-historical',
+    scope: 'per-symbol',
+    incremental: 'snapshot',
+    keyFields: ['symbol', 'date'],
+    dateField: 'date',
+    supportsDateRange: false,
+    perSymbol: true,
+    params: { limit: 6 },
+    defaultCollection: 'grades_consensus_history',
+    recommendedEveryMinutes: WEEKLY,
+  },
+  {
+    id: 'insider_trades_history',
+    label: 'Insider trades history',
+    category: 'Ownership',
+    description:
+      'Form 4 insider transactions per symbol, into the insider_trades collection (same key as the feed). The ' +
+      'weekly run re-pulls the latest 100; the backfill pages back about ten years.',
+    endpoint: 'insider-trading/search',
+    scope: 'per-symbol',
+    incremental: 'snapshot',
+    keyFields: ['symbol', 'filingDate', 'transactionDate', 'reportingCik', 'transactionType', 'price'],
+    dateField: 'transactionDate',
+    supportsDateRange: false,
+    perSymbol: true,
+    params: { page: 0, limit: 100 },
+    pagesPerSymbol: 10,
+    defaultCollection: 'insider_trades',
+    recommendedEveryMinutes: WEEKLY,
+  },
+  {
+    id: 'senate_trades_history',
+    label: 'Senate trades history',
+    category: 'Ownership',
+    description:
+      'US Senate disclosures per symbol, into congress_senate (same key as the feed), back to about 2016.',
+    endpoint: 'senate-trades',
+    scope: 'per-symbol',
+    incremental: 'snapshot',
+    keyFields: ['symbol', 'disclosureDate', 'transactionDate', 'firstName', 'lastName', 'amount'],
+    dateField: 'transactionDate',
+    supportsDateRange: false,
+    perSymbol: true,
+    params: { page: 0 },
+    pagesPerSymbol: 10,
+    defaultCollection: 'congress_senate',
+    recommendedEveryMinutes: WEEKLY,
+  },
+  {
+    id: 'house_trades_history',
+    label: 'House trades history',
+    category: 'Ownership',
+    description: 'US House disclosures per symbol, into congress_house (same key as the feed).',
+    endpoint: 'house-trades',
+    scope: 'per-symbol',
+    incremental: 'snapshot',
+    keyFields: ['symbol', 'disclosureDate', 'transactionDate', 'firstName', 'lastName', 'amount'],
+    dateField: 'transactionDate',
+    supportsDateRange: false,
+    perSymbol: true,
+    params: { page: 0 },
+    pagesPerSymbol: 10,
+    defaultCollection: 'congress_house',
+    recommendedEveryMinutes: WEEKLY,
+  },
+  {
+    id: 'price_target_history',
+    label: 'Price target history',
+    category: 'Estimates',
+    description:
+      'Analyst price targets per symbol (latest 100 per symbol, about one to two years), into ' +
+      'price_target_changes (same key as the feed).',
+    endpoint: 'price-target-news',
+    scope: 'per-symbol',
+    incremental: 'snapshot',
+    keyFields: ['symbol', 'publishedDate', 'newsURL'],
+    dateField: 'publishedDate',
+    supportsDateRange: false,
+    perSymbol: true,
+    params: { limit: 100 },
+    defaultCollection: 'price_target_changes',
     recommendedEveryMinutes: WEEKLY,
   },
 ];
@@ -680,8 +1041,17 @@ export interface TickerPreset {
   /** Screener filters; symbols are sorted by market cap desc and capped by `take`. */
   screener: Record<string, string | number>;
   take?: number;
+  /** Exact current members of an index (#387), read from the index_constituents sync instead of the screener. */
+  index?: (typeof INDEXES)[number]['id'];
 }
 export const TICKER_PRESETS: TickerPreset[] = [
+  ...INDEXES.map((i) => ({
+    id: i.id,
+    label: i.label,
+    description: `Current ${i.label} members (needs the Index constituents sync).`,
+    screener: {},
+    index: i.id,
+  })),
   {
     id: 'mega_cap',
     label: 'Mega-cap (> $200B)',
@@ -697,8 +1067,7 @@ export const TICKER_PRESETS: TickerPreset[] = [
   {
     id: 'sp500_like',
     label: 'Top 500 US (S&P 500-like)',
-    description:
-      'Largest 500 US stocks by market cap (proxy; exact S&P 500 membership needs a plan upgrade).',
+    description: 'Largest 500 US stocks by market cap (a proxy; the S&P 500 preset has the exact members).',
     screener: { exchange: 'NASDAQ,NYSE,AMEX', marketCapMoreThan: 1_000_000_000 },
     take: 500,
   },
@@ -706,7 +1075,7 @@ export const TICKER_PRESETS: TickerPreset[] = [
     id: 'nasdaq100_like',
     label: 'Top 100 Nasdaq (Nasdaq-100-like)',
     description:
-      'Largest 100 Nasdaq stocks by market cap (proxy; exact Nasdaq-100 membership needs a plan upgrade).',
+      'Largest 100 Nasdaq stocks by market cap (a proxy; the Nasdaq-100 preset has the exact members).',
     screener: { exchange: 'NASDAQ', marketCapMoreThan: 1_000_000_000 },
     take: 100,
   },
