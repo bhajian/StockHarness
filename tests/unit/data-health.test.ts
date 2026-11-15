@@ -150,3 +150,25 @@ test('logs are not daily series even when keyed by date (#428)', () => {
     false,
   );
 });
+
+test('bond-market holidays: Columbus Day and Veterans Day (observed) are not treasury gaps (#434)', async () => {
+  const { bondHolidays, gapCells } = await import('../../packages/core/src/dataHealth.js');
+  const h = bondHolidays(['2026-10-01', '2027-11-01', '2029-11-01', '2028-11-01']);
+  assert.ok(h.has('2026-10-12') && h.has('2026-11-11'), '2026: Mon Oct 12, Wed Nov 11');
+  assert.ok(h.has('2027-10-11') && h.has('2027-11-11'));
+  assert.ok(h.has('2029-11-12'), '2029: Nov 11 is a Sunday, observed Monday');
+  assert.ok(!h.has('2028-11-10') && !h.has('2028-11-11'), '2028: Nov 11 is a Saturday, no close');
+  const cells = gapCells(
+    ['2026-11-10', '2026-11-11', '2026-11-12'],
+    new Map([
+      ['2026-11-10', 1],
+      ['2026-11-12', 1],
+    ]),
+    '2026-11-13',
+    h,
+  );
+  assert.deepEqual(
+    cells.map((c) => c.date),
+    ['2026-11-10', '2026-11-12'],
+  );
+});

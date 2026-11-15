@@ -376,6 +376,8 @@
         "context",
         "date",
         "detected_at",
+        "in_universe",
+        "in_universe_at",
         "issue_type",
         "last_seen_at",
         "resolution",
