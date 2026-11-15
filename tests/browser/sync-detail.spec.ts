@@ -54,9 +54,37 @@ test('syncs list and the sync detail page', async ({ page }) => {
   await expect
     .poll(async () => (await api(`/dataset-syncs/${sync.id}/runs`))[0]?.status, { timeout: 60000 })
     .toBe('succeeded');
+  // #420: a second sync fills the same collection (3 bars for each of two more symbols): Rows shows the
+  // collection's total (3 + 6), with what this sync's last run wrote under it.
+  const other = await api('/dataset-syncs', {
+    name: 'More fixture names',
+    connectionId: fmp.id,
+    dataset: 'eod_prices',
+    symbolsMode: 'list',
+    symbols: ['AAA', 'BBB'],
+    from: '2026-10-26',
+    enabled: true,
+    schedule: { enabled: false, everyMinutes: 1440, input: 'x' },
+  });
+  await api(`/dataset-syncs/${other.id}/run`, {});
+  await expect
+    .poll(
+      async () =>
+        (await api('/catalog')).find((c: { collection: string }) => c.collection === 'eod_prices')?.coverage
+          ?.rows,
+      { timeout: 60000 },
+    )
+    .toBe(9);
 
   await page.goto('/datasets/syncs');
-  await expect(page.locator('.kpi-card', { hasText: 'FMP calls today' })).toContainText('2');
+  const rowsCell = page
+    .locator('.dataset-table tbody tr', { hasText: 'EOD fixture' })
+    .first()
+    .locator('td.rows-total');
+  await expect(rowsCell).toContainText('9');
+  await expect(rowsCell).toContainText('last run +3');
+  // Two calls for each sync's two symbols.
+  await expect(page.locator('.kpi-card', { hasText: 'FMP calls today' })).toContainText('4');
   // #303: the filters sit in a popover behind one Filters button; active ones show as chips.
   await page.getByRole('button', { name: 'Filters' }).click();
   await page.getByRole('dialog', { name: 'Filters' }).getByLabel('Cadence').selectOption('weekly');
@@ -72,6 +100,8 @@ test('syncs list and the sync detail page', async ({ page }) => {
   await expect(page).toHaveURL(new RegExp(`/datasets/syncs/${sync.id}$`));
 
   await expect(page.locator('.sync-facts')).toContainText('historical-price-eod/full');
+  await expect(page.locator('.sync-facts .rows-total')).toContainText('9');
+  await expect(page.locator('.sync-facts .rows-total')).toContainText('last run +3');
   await expect(page.locator('.sync-facts')).toContainText('symbol');
   await page.getByRole('tab', { name: 'Symbols' }).click();
   await expect(page.locator('.sync-symbols')).toContainText('2 symbols');

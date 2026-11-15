@@ -27,3 +27,13 @@ test('CSV, histogram bins and HTML escaping', () => {
   assert.deepEqual(histogramBins([]), []);
   assert.equal(escapeHtml('<img src=x onerror=1>'), '&lt;img src=x onerror=1&gt;');
 });
+
+test('row counts at a glance (#420): 5.0M, 179.8k, 2,128', async () => {
+  const { fmtCompact } = await import('../../apps/studio/src/charts/chartData.js');
+  assert.equal(fmtCompact(5_036_854), '5.0M');
+  assert.equal(fmtCompact(179_760), '179.8k');
+  assert.equal(fmtCompact(2_128), '2,128');
+  assert.equal(fmtCompact(3), '3');
+  assert.equal(fmtCompact(1_200_000_000), '1.2B');
+  assert.equal(fmtCompact(undefined), '—');
+});

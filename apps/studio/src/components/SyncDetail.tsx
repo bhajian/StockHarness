@@ -6,6 +6,7 @@ import {
   type DatasetCatalogItem,
   type DatasetSyncRun,
   type Entity,
+  fetchCatalogEntry,
   fetchSyncRuns,
   fetchSyncSymbols,
   timestamp,
@@ -17,7 +18,29 @@ import { Button } from './ui';
 import { Drawer, Skeleton, StatusPill, Tabs } from './kit';
 import { PagedRows, rankOf, SortHead, useSort } from './tableKit';
 import { DataGrid } from './DataGrid';
-import { fmtNumber } from '../charts/chartData';
+import { fmtCompact, fmtNumber } from '../charts/chartData';
+
+/**
+ * Rows of a sync (#420): the collection's total from the catalog (shared by every sync that writes it, e.g. a feed
+ * and its per-symbol history), and what the last run wrote as a muted second line.
+ */
+export function RowsTotal({ total, lastRun }: { total?: number; lastRun?: unknown }) {
+  const last = typeof lastRun === 'number' ? lastRun : undefined;
+  return (
+    <>
+      <span
+        title={total !== undefined ? `${total.toLocaleString('en-US')} rows in the collection` : undefined}
+      >
+        {total !== undefined ? fmtCompact(total) : '—'}
+      </span>
+      {last !== undefined && (
+        <small className="muted-line" title="Rows written by the last run">
+          last run +{last.toLocaleString('en-US')}
+        </small>
+      )}
+    </>
+  );
+}
 
 type Tab = 'source' | 'symbols' | 'runs' | 'history' | 'schedule' | 'data';
 const dur = (a?: string, b?: string) => {
@@ -49,11 +72,19 @@ export function SyncDetail({
   const [runs, setRuns] = useState<DatasetSyncRun[] | null>(null);
   const [symbols, setSymbols] = useState<Awaited<ReturnType<typeof fetchSyncSymbols>> | null>(null);
   const [open, setOpen] = useState<DatasetSyncRun | null>(null);
+  const collection = (sync.targetCollection as string) || def?.defaultCollection || '';
+  const [total, setTotal] = useState<number | undefined>(undefined);
   useEffect(() => {
     void fetchSyncRuns(sync.id).then(setRuns, () => setRuns([]));
     void fetchSyncSymbols(sync.id).then(setSymbols, () => undefined);
   }, [sync.id, sync.lastRunAt]);
-  const collection = (sync.targetCollection as string) || def?.defaultCollection || '';
+  useEffect(() => {
+    if (!collection) return;
+    void fetchCatalogEntry(collection).then(
+      (e) => setTotal(e?.coverage?.rows),
+      () => setTotal(undefined),
+    );
+  }, [collection, sync.lastRunAt]);
   const schedule = sync.schedule as Schedule | undefined;
   const upcoming = useMemo(() => nextRunTimes(schedule), [schedule]);
   const status = sync.running
@@ -133,6 +164,10 @@ export function SyncDetail({
             <button className="link-button" onClick={() => go({ tab: 'catalog', item: collection })}>
               <code>{collection}</code>
             </button>
+          </dd>
+          <dt>Rows</dt>
+          <dd className="rows-total">
+            <RowsTotal total={total} lastRun={sync.lastRows} />
           </dd>
           <dt>Key fields</dt>
           <dd>
