@@ -64,6 +64,9 @@ export type CatalogEntry = {
     /** What the % is measured against (#395): active universe names, or all of them (delisted included). */
     universeBasis?: 'active' | 'all';
     universeSize?: number;
+    /** History datasets (#431): coverage of listed and of delisted universe names. */
+    listedCoveragePct?: number;
+    delistedCoveragePct?: number;
     /** Why not every company has rows (dividends, splits, analyst coverage): a lower % is expected. */
     sparse?: string;
     dateField?: string;
@@ -377,11 +380,31 @@ export async function refreshCatalogEntry(ownerId: string, name: string, syncs?:
         ),
       );
       if (universe.size) {
-        coverage.universeCoveragePct =
-          Math.round((symbols.filter((s) => universe.has(s)).length / universe.size) * 1000) / 10;
+        const pct = (n: number, d: number) => Math.round((n / d) * 1000) / 10;
+        coverage.universeCoveragePct = pct(symbols.filter((s) => universe.has(s)).length, universe.size);
         coverage.universeBasis = basis;
         coverage.universeSize = universe.size;
         if (def.sparse) coverage.sparse = def.sparse;
+        // History datasets: listed and delisted names separately (#431); listed is the headline number.
+        if (basis === 'all') {
+          const listed = new Set(
+            await timed(
+              db
+                .collection(UNIVERSE_COLLECTION)
+                .distinct('symbol', { is_delisted: { $ne: true } }, { maxTimeMS: 20000 }),
+              [] as unknown[],
+            ),
+          );
+          const dead = universe.size - listed.size;
+          const has = new Set(symbols);
+          const listedHas = [...listed].filter((s) => has.has(s)).length;
+          if (listed.size) coverage.listedCoveragePct = pct(listedHas, listed.size);
+          if (dead > 0)
+            coverage.delistedCoveragePct = pct(
+              symbols.filter((s) => universe.has(s)).length - listedHas,
+              dead,
+            );
+        }
       }
     }
   }
@@ -613,7 +636,7 @@ export function agentView(e: CatalogEntry) {
     e.description,
     `Grain: ${e.grain || 'unknown'}. Key: ${e.primaryKey.join(', ') || 'none'}.`,
     `Point in time: ${e.timeSemantics.status === 'current_only' ? 'CURRENT ONLY (never use historically). ' : ''}${e.timeSemantics.text}`,
-    `Coverage: ${e.coverage.rows.toLocaleString('en-US')} rows${e.coverage.symbols !== undefined ? `, ${e.coverage.symbols} symbols` : ''}${e.coverage.universeCoveragePct !== undefined ? ` (${e.coverage.universeCoveragePct}% of the ${e.coverage.universeBasis === 'active' ? 'active ' : ''}universe${e.coverage.sparse ? `; ${e.coverage.sparse}` : ''})` : ''}${e.coverage.dateMin ? `, ${e.coverage.dateField} ${e.coverage.dateMin} → ${e.coverage.dateMax}` : ''}.`,
+    `Coverage: ${e.coverage.rows.toLocaleString('en-US')} rows${e.coverage.symbols !== undefined ? `, ${e.coverage.symbols} symbols` : ''}${e.coverage.universeCoveragePct !== undefined ? ` (${e.coverage.listedCoveragePct !== undefined ? `${e.coverage.listedCoveragePct}% of listed names, ${e.coverage.delistedCoveragePct ?? 0}% of delisted ones` : `${e.coverage.universeCoveragePct}% of the ${e.coverage.universeBasis === 'active' ? 'active ' : ''}universe`}${e.coverage.sparse ? `; ${e.coverage.sparse}` : ''})` : ''}${e.coverage.dateMin ? `, ${e.coverage.dateField} ${e.coverage.dateMin} → ${e.coverage.dateMax}` : ''}.`,
     ...((e.caveats ?? []).length
       ? ['Caveats:', ...e.caveats.map((c) => `- [${c.severity.toUpperCase()}] ${c.text}`)]
       : []),

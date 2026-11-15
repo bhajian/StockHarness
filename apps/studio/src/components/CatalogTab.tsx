@@ -526,7 +526,17 @@ function CoveragePanel({ entry }: { entry: CatalogDetail }) {
         <KpiCard label="Rows" value={fmtNumber(c.rows)} />
         {c.symbols !== undefined && <KpiCard label="Symbols" value={fmtNumber(c.symbols)} />}
         {c.universeCoveragePct !== undefined && (
-          <KpiCard label="Universe coverage" value={`${c.universeCoveragePct}%`} />
+          <KpiCard
+            label="Universe coverage"
+            value={`${c.listedCoveragePct ?? c.universeCoveragePct}%`}
+            footnote={
+              c.delistedCoveragePct !== undefined
+                ? `of listed names; ${c.delistedCoveragePct}% of delisted ones`
+                : c.universeBasis === 'active'
+                  ? 'of listed names'
+                  : undefined
+            }
+          />
         )}
         <KpiCard
           label={`Range (${c.dateField ?? 'no date field'})`}

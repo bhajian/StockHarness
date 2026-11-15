@@ -363,9 +363,16 @@ export function HealthTab({ go, isAdmin = false }: { go: Go; isAdmin?: boolean }
                   <td>
                     {r.coveragePct !== undefined ? (
                       <span
-                        title={`${r.coveragePct}% of the ${r.coverageBasis === 'active' ? 'active (listed) universe: this data exists for listed companies only' : 'whole universe, delisted names included'}${r.coverageSparse ? `; ${r.coverageSparse}` : ''}`}
+                        title={
+                          r.coverageListed !== undefined
+                            ? `${r.coverageListed}% of listed universe names, ${r.coverageDelisted ?? 0}% of delisted ones (${r.coveragePct}% overall)`
+                            : `${r.coveragePct}% of the ${r.coverageBasis === 'active' ? 'listed universe: this data exists for listed companies only' : 'universe'}${r.coverageSparse ? `; ${r.coverageSparse}` : ''}`
+                        }
                       >
-                        {r.coveragePct}%{r.coverageBasis === 'active' ? <small> active</small> : null}
+                        {r.coverageListed ?? r.coveragePct}% <small>listed</small>
+                        {r.coverageDelisted !== undefined && (
+                          <div className="muted-line">{r.coverageDelisted}% delisted</div>
+                        )}
                       </span>
                     ) : (
                       '—'
