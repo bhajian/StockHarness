@@ -17,8 +17,9 @@ SEC = [
 ]
 
 
-def reader(prices, caps=(), fund=()):
-    data = {"securities": SEC, "prices_daily": prices, "historical_market_cap": list(caps), "fundamentals_pit": list(fund)}
+def reader(prices, caps=(), fund=(), membership=()):
+    data = {"securities": SEC, "prices_daily": prices, "historical_market_cap": list(caps), "fundamentals_pit": list(fund),
+            "index_membership": list(membership)}
 
     def read(c, flt=None, cols=None, sort=None):
         rows = [dict(r) for r in data[c]]
@@ -71,3 +72,22 @@ class Universe(unittest.TestCase):
         self.assertEqual([r["date"] for r in rows], ["2020-01-15", "2020-01-16"])
         self.assertEqual((rows[0]["market_cap"], rows[0]["market_cap_source"]), (5e9, "reported"))
         self.assertIsNotNone(rows[0]["adv_20d"], "the lookback fed the ADV")
+
+    def test_index_flags_as_of_each_date(self):
+        """#388: in_sp500 from index_membership intervals [valid_from, valid_to); null where an index has no rows."""
+        prices = [{"security_id": s, "date": d, "close": 10, "dollar_volume": 5000} for s in ("SEC_1", "SEC_2") for d in days(10)]
+        membership = [
+            {"security_id": "SEC_1", "index": "sp500", "valid_from": "2020-01-05", "valid_to": None},
+            {"security_id": "SEC_2", "index": "sp500", "valid_from": None, "valid_to": "2020-01-04"},
+            {"security_id": None, "index": "dji", "valid_from": "2019-01-02", "valid_to": None},  # unresolved ticker
+        ]
+        rows = collect(u.compute(reader(prices, membership=membership), None, P))["universe_daily"]
+        on = {(r["security_id"], r["date"]): r for r in rows}
+        self.assertEqual(on[("SEC_1", "2020-01-04")]["in_sp500"], False, "the day before it joined")
+        self.assertEqual(on[("SEC_1", "2020-01-05")]["in_sp500"], True, "member from its effective date")
+        self.assertEqual(on[("SEC_2", "2020-01-03")]["in_sp500"], True)
+        self.assertEqual(on[("SEC_2", "2020-01-04")]["in_sp500"], False, "out from its removal date")
+        self.assertEqual(on[("SEC_1", "2020-01-05")]["in_dji"], False, "the Dow has rows, none for this security")
+        self.assertIsNone(on[("SEC_1", "2020-01-05")]["in_ndx"], "no Nasdaq-100 membership built: unknown, not false")
+        empty = collect(u.compute(reader(prices), None, P))["universe_daily"]
+        self.assertTrue(all(r["in_sp500"] is None for r in empty))

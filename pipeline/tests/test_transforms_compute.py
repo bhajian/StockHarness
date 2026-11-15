@@ -94,3 +94,26 @@ class MacroDaily(unittest.TestCase):
         self.assertAlmostEqual(rows[0]["curve_10y_2y"], 0.5)
         self.assertAlmostEqual(rows[1]["spx_ret_1d"], 0.01)
         self.assertEqual(rows[1]["ust_10y"], 4.0, "nearest prior treasury within 3 days")
+
+    def test_full_history_carry_limit_and_no_future_values(self):
+        """#388: every day with inputs gets the curve; holidays carry the last print up to 5 days, never a later one."""
+        data = {
+            "treasury_rates": [
+                {"date": "2016-01-04", "year10": 2.2, "year2": 1.0, "month3": 0.2, "year30": 3.0},
+                {"date": "2016-01-11", "year10": 2.1, "year2": 0.9, "month3": 0.2, "year30": 2.9},
+            ],
+            "eod_index": [{"symbol": "^GSPC", "date": d, "close": 2000 + i} for i, d in enumerate(
+                ["2016-01-01", "2016-01-04", "2016-01-08", "2016-01-10", "2016-01-11"])],
+            "sector_performance": [
+                {"date": "2016-01-04", "sector": "Technology", "exchange": "NYSE", "averageChange": 9.9},
+                {"date": "2016-01-04", "sector": "Technology", "exchange": "NASDAQ", "averageChange": 0.5},
+                {"date": "2016-01-08", "sector": "Energy", "exchange": "NYSE", "averageChange": -1.0},
+            ],
+        }
+        rows = {r["date"]: r for r in macro_daily.compute(reader(data))}
+        self.assertIsNone(rows["2016-01-01"]["ust_10y"], "before the first print: nothing, never a future value")
+        self.assertEqual(rows["2016-01-08"]["ust_10y"], 2.2, "4 days old: carried")
+        self.assertIsNone(rows["2016-01-10"]["ust_10y"], "6 days old: too stale to carry")
+        self.assertEqual(rows["2016-01-11"]["curve_10y_2y"], 2.1 - 0.9)
+        self.assertEqual(rows["2016-01-04"]["sector_returns"], {"Technology": 0.5}, "the NASDAQ series when present")
+        self.assertEqual(rows["2016-01-08"]["sector_returns"], {"Energy": -1.0}, "else the one exchange there is")

@@ -96,6 +96,9 @@ before(async () => {
     'eod_prices',
     'treasury_rates',
     'eod_index',
+    'sector_performance',
+    'index_constituents',
+    'index_changes',
   ])
     await ok('/dataset-syncs', {
       name: `L1 — ${dataset}`,
@@ -209,6 +212,31 @@ before(async () => {
   );
   await insert('historical_market_cap', [{ symbol: 'AAA', date: '2016-01-05', marketCap: 5e9 }]);
   await insert('sector_performance', [{ date: '2016-01-04', sector: 'Technology', averageChange: 0.5 }]);
+  // #388: AAA replaced DDD in the S&P 500 on 2016-01-08; no Nasdaq-100 or Dow lists (their flags stay null).
+  await insert('index_constituents', [
+    { index: 'sp500', symbol: 'AAA', name: 'Alpha Inc', dateFirstAdded: '2016-01-08' },
+  ]);
+  await insert('index_changes', [
+    {
+      index: 'sp500',
+      date: '2010-01-04',
+      symbol: 'DDD',
+      addedTicker: 'DDD',
+      removedTicker: '',
+      addedSecurity: 'Delta Ltd',
+      changeType: 'addition',
+    },
+    {
+      index: 'sp500',
+      date: '2016-01-08',
+      symbol: 'AAA',
+      addedTicker: 'AAA',
+      removedTicker: 'DDD',
+      addedSecurity: 'Alpha Inc',
+      removedSecurity: 'Delta Ltd',
+      changeType: 'replacement',
+    },
+  ]);
   await insert('eod_prices', [
     // AAA has one zero close (a DQ error) on 2016-01-07.
     ...weekdays('2016-01-04', '2016-01-15').map((date, i) => ({
@@ -377,6 +405,25 @@ test('fundamentals_pit (#100): restatement versions, known_at / as_of, TTM as kn
   assert.deepEqual([cat.layer, cat.timeSemantics.status], [2, 'pit']);
 });
 
+test('index_membership (#388): point-in-time intervals from the current list and the change history', async () => {
+  const run = await runAndWait('index_membership');
+  assert.equal(run.status, 'succeeded', run.stderr);
+  const rows = (await docs('index_membership', `&sort=${encodeURIComponent('{"ticker":1}')}`)).documents;
+  assert.deepEqual(
+    rows.map((r: any) => [r.index, r.ticker, r.valid_from, r.valid_to, Boolean(r.security_id)]),
+    [
+      ['sp500', 'AAA', '2016-01-08', null, true],
+      ['sp500', 'DDD', '2010-01-04', '2016-01-08', true],
+    ],
+  );
+  assert.equal(rows[0].as_of_date, '2016-01-08');
+  const again = await runAndWait('index_membership');
+  assert.equal(again.status, 'succeeded', again.stderr);
+  assert.equal((await docs('index_membership')).total, 2, 'rebuilt in full (replace), not appended');
+  const cat = await ok('/catalog/index_membership');
+  assert.deepEqual([cat.layer, cat.producedBy[0].name], [2, 'index_membership']);
+});
+
 test('universe_daily (#101): filters as of each date, delisted names only while listed, counts published', async () => {
   const id = await transformId('universe_daily');
   const t = await ok(`/transforms/${id}`);
@@ -406,6 +453,16 @@ test('universe_daily (#101): filters as of each date, delisted names only while 
     [aaa.in_universe, aaa.fails],
     [false, ['price']],
     'the zero close fails the price filter that day',
+  );
+  const flags = (d: string) => rows.find((r: any) => r.date === d && r.security_id === aaa.security_id);
+  assert.deepEqual(
+    [flags('2016-01-07').in_sp500, flags('2016-01-08').in_sp500, flags('2016-01-08').in_ndx],
+    [false, true, null],
+    '#388: in the S&P 500 from its effective date; no Nasdaq-100 membership built: null',
+  );
+  assert.ok(
+    ddd.every((r: any) => r.in_sp500 === false),
+    'DDD left the S&P 500 in 2016, before its 2018 bars',
   );
   const counts = (await docs('universe_counts', `&filter=${encodeURIComponent('{"date":"2018-01-03"}')}`))
     .documents[0];
@@ -450,6 +507,7 @@ test('features_daily + features_ranked (#102): PIT features, ranks per date, doc
     'fundamentals_pit',
     'universe_daily',
     'universe_counts',
+    'index_membership',
     'features_daily',
     'features_ranked',
   ];

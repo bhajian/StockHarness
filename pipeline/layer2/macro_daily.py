@@ -1,31 +1,41 @@
 """macro_daily (spec §3.15): treasury curve, VIX, index levels and sector returns per date.
 
-Run by the `macro_daily` Transform (#99): `compute(read)` rebuilds every date (a few thousand rows).
+Run by the `macro_daily` Transform (#99): `compute(read)` rebuilds every date (a few thousand rows) from the full
+history of its inputs. A day without a treasury print (a bond-market holiday) takes the latest earlier print up to
+TREASURY_CARRY_DAYS back, never a later one. Sector returns use one exchange's series per day (#388): NASDAQ, the
+one both the daily snapshot and the historical endpoint serve, else the first exchange by name.
 """
 from __future__ import annotations
+
+from bisect import bisect_right
 
 from ..core import pit
 from ._resolve import as_date
 
-TV = "2"
+TV = "3"
+TREASURY_CARRY_DAYS = 5
+SECTOR_EXCHANGE = "NASDAQ"
 
 
 def compute(read):
-    tr = {r["date"]: r for r in read("treasury_rates") if r.get("date")}
+    tr = {str(r["date"])[:10]: r for r in read("treasury_rates") if r.get("date")}
     idx = {}
     for r in read("eod_index", None, ["symbol", "date", "close"]):
         if r.get("symbol") and r.get("date"):
-            idx.setdefault(r["symbol"], {})[r["date"]] = r.get("close")
-    sectors = {}
+            idx.setdefault(r["symbol"], {})[str(r["date"])[:10]] = r.get("close")
+    by_exchange = {}
     for r in read("sector_performance"):
-        if r.get("date"):
-            sectors.setdefault(r["date"], {})[r.get("sector")] = r.get("averageChange")
+        if r.get("date") and r.get("sector") and r.get("averageChange") is not None:
+            by_exchange.setdefault(str(r["date"])[:10], {}).setdefault(r.get("exchange") or "", {})[r["sector"]] = r["averageChange"]
+    sectors = {
+        d: ex[SECTOR_EXCHANGE] if SECTOR_EXCHANGE in ex else ex[sorted(ex)[0]] for d, ex in by_exchange.items()
+    }
     spx, vix, ndx = idx.get("^GSPC", {}), idx.get("^VIX", {}), idx.get("^IXIC", {})
     tr_dates = sorted(tr)
     rows = []
     prev_spx = None
     for d in sorted(set(tr) | set(spx) | set(vix) | set(sectors)):
-        t = tr.get(d) or _nearest_prior(tr, tr_dates, d, 3)
+        t = tr.get(d) or _nearest_prior(tr, tr_dates, d, TREASURY_CARRY_DAYS)
         s = spx.get(d)
         y10, y2, m3 = _g(t, "year10"), _g(t, "year2"), _g(t, "month3")
         rows.append(
@@ -62,12 +72,11 @@ def _sub(a, b):
 
 
 def _nearest_prior(tr, tr_dates, d, max_days):
-    best = None
-    for td in tr_dates:
-        if td <= d:
-            best = td
-        else:
-            break
-    if best is None or (as_date(d) - as_date(best)).days > max_days:
+    """The latest treasury row on or before `d`, if it is at most `max_days` old (sorted dates, binary search)."""
+    i = bisect_right(tr_dates, d)
+    if i == 0:
+        return None
+    best = tr_dates[i - 1]
+    if (as_date(d) - as_date(best)).days > max_days:
         return None
     return tr[best]
