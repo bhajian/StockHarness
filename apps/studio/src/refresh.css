@@ -4353,6 +4353,49 @@ button.map-card:hover {
   font-size: 26px;
   font-weight: 600;
 }
+/* #412: everything stays inside its card. Titles wrap to two lines and then end with an ellipsis (the full name is
+   the tooltip); the status pill keeps its size and moves under the title when the card is narrow; detail lines wrap
+   anywhere and stop at three lines; links to collections wrap. */
+.map-card > *,
+.map-card-head > * {
+  min-width: 0;
+}
+.map-card-head {
+  flex-wrap: wrap;
+}
+.map-card-head > strong,
+.map-card-head > .link-button {
+  flex: 1 1 110px;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  text-align: left;
+  padding: 0;
+}
+.map-card-head .pill {
+  flex: none;
+}
+.map-card small {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  overflow: hidden;
+}
+.map-card code,
+.map-card small .link-button {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  white-space: normal;
+}
+.map-card small .link-button {
+  display: inline;
+  padding: 0;
+  text-align: left;
+}
 .map-arrow {
   flex: none;
   align-self: center;
