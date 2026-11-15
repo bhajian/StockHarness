@@ -61,6 +61,52 @@ class TestSymbolRows(unittest.TestCase):
         self.assertAlmostEqual(rows[1]["ret_1d"], 0.01)
         self.assertAlmostEqual(rows[1]["tr_1d"], 0.02)  # (101 + 1)/100 - 1
 
+    def test_as_paid_dividend_on_split_adjusted_bars(self):
+        """#443: AVGO 2023-03-21, close 63.68 split-adjusted (10:1 on 2024-07-15), dividend paid 4.60."""
+        bars = [
+            {"date": date(2023, 3, 20), "open": 63, "high": 64, "low": 62, "close": 63.20, "volume": 5},
+            {"date": date(2023, 3, 21), "open": 63, "high": 64, "low": 63, "close": 63.68, "volume": 5},
+            {"date": date(2024, 7, 12), "open": 170, "high": 172, "low": 168, "close": 170.0, "volume": 5},
+            {"date": date(2024, 7, 15), "open": 171, "high": 172, "low": 168, "close": 171.0, "volume": 5},
+        ]
+        rows = p.compute_symbol_rows(bars, {date(2023, 3, 21): 4.60}, {date(2024, 7, 15): 10.0})
+        r = rows[1]
+        self.assertAlmostEqual(r["dividend"], 0.46)
+        self.assertAlmostEqual(r["tr_1d"] - r["ret_1d"], 0.46 / 63.20, places=9)  # 0.73%, not 7.3%
+        self.assertLess(r["tr_1d"] - r["ret_1d"], 0.05)
+        self.assertAlmostEqual(r["close_raw"], 636.8)
+        self.assertAlmostEqual(rows[3]["close_raw"], 171.0)  # on and after the ex-date: as traded already
+        self.assertEqual([x["adj_factor"] for x in rows], [1.0] * 4)  # the bars reflect the split: not again
+
+    def test_adjusted_dividend_only_when_the_paid_amount_is_missing(self):
+        bars = [
+            {"date": date(2023, 3, 20), "open": 63, "high": 64, "low": 62, "close": 63.20, "volume": 5},
+            {"date": date(2023, 3, 21), "open": 63, "high": 64, "low": 63, "close": 63.68, "volume": 5},
+            {"date": date(2024, 7, 15), "open": 171, "high": 172, "low": 168, "close": 171.0, "volume": 5},
+        ]
+        rows = p.compute_symbol_rows(bars, {}, {date(2024, 7, 15): 10.0}, {date(2023, 3, 21): 0.46})
+        self.assertAlmostEqual(rows[1]["dividend"], 0.46)
+
+    def test_unadjusted_source_keeps_the_dividend_and_close_as_is(self):
+        # Bars not adjusted for a later 2:1 split (the split is applied, so close is as traded).
+        bars = [
+            {"date": date(2024, 1, 2), "open": 100, "high": 100, "low": 100, "close": 100, "volume": 5},
+            {"date": date(2024, 1, 3), "open": 101, "high": 101, "low": 101, "close": 101, "volume": 5},
+            {"date": date(2024, 2, 1), "open": 50, "high": 51, "low": 50, "close": 50.5, "volume": 5},
+        ]
+        rows = p.compute_symbol_rows(bars, {date(2024, 1, 3): 1.0}, {date(2024, 2, 1): 2.0})
+        self.assertAlmostEqual(rows[1]["dividend"], 1.0)
+        self.assertAlmostEqual(rows[1]["tr_1d"], 0.02)
+        self.assertAlmostEqual(rows[1]["close_raw"], 101)
+
+    def test_announced_split_does_not_change_the_traded_close(self):
+        bars = [
+            {"date": date(2024, 1, 2), "open": 50, "high": 50, "low": 50, "close": 50, "volume": 5},
+            {"date": date(2024, 1, 3), "open": 51, "high": 51, "low": 51, "close": 51, "volume": 5},
+        ]
+        rows = p.compute_symbol_rows(bars, {}, {date(2024, 2, 1): 2.0})
+        self.assertEqual([r["close_raw"] for r in rows], [50, 51])
+
     def test_dq_flags(self):
         bars = [
             {"date": date(2024, 1, 2), "open": 10, "high": 5, "low": 10, "close": 8, "volume": 0},  # high<low, zero_vol

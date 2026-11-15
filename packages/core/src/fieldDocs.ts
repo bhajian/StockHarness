@@ -44,10 +44,18 @@ export const FIELD_DOCS: Record<string, FieldDoc> = {
   snapshot_date: {
     description: 'The weekly snapshot this row belongs to (part of the key: each sync appends a snapshot).',
   },
-  open: { description: 'Opening price (unadjusted).', unit: 'USD' },
-  high: { description: 'High price (unadjusted).', unit: 'USD' },
-  low: { description: 'Low price (unadjusted).', unit: 'USD' },
-  close: { description: 'Closing price (unadjusted for splits/dividends).', unit: 'USD' },
+  // #444: FMP's EOD history is split-adjusted (NVDA 2016-01-04 close 0.81; it traded at ~32), not dividend-adjusted.
+  open: {
+    description: 'Opening price; FMP EOD history is split-adjusted, not dividend-adjusted.',
+    unit: 'USD',
+  },
+  high: { description: 'High price; FMP EOD history is split-adjusted, not dividend-adjusted.', unit: 'USD' },
+  low: { description: 'Low price; FMP EOD history is split-adjusted, not dividend-adjusted.', unit: 'USD' },
+  close: {
+    description:
+      "Closing price; FMP EOD history is split-adjusted (today's share basis), not dividend-adjusted. prices_daily.close_raw is the price as traded.",
+    unit: 'USD',
+  },
   volume: { description: 'Shares traded.', unit: 'shares' },
   vwap: { description: 'Volume-weighted average price.', unit: 'USD' },
   change: { description: 'Price change vs the previous close.', unit: 'USD' },

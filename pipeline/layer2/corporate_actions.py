@@ -8,7 +8,7 @@ from __future__ import annotations
 from .corporate_actions_logic import is_special_dividend, normalize_split_ratio
 from ._resolve import iso_minus_days, ticker_resolver
 
-TV = "3"
+TV = "4"  # 4: as-paid and split-adjusted dividends both kept; special dividends judged on the adjusted amount (#443)
 
 
 def _union(read, names, keys=("symbol", "date")):
@@ -48,7 +48,12 @@ def compute(read):
         rows.sort(key=lambda x: x.get("date") or "")
         prev_regular = None
         for r in rows:
-            amt = r.get("dividend") if r.get("dividend") is not None else r.get("adjDividend")
+            # As paid (on the share basis of the ex-date) and split-adjusted to today's basis (#443). prices_daily
+            # puts the as-paid amount on its bars' basis; the special test uses the adjusted one, so a split
+            # between two dividends doesn't make an ordinary one look special.
+            paid = r.get("dividend") if r.get("dividend") is not None else None
+            adj = r.get("adjDividend") if r.get("adjDividend") is not None else None
+            amt = adj if adj is not None else paid
             special = is_special_dividend(amt, prev_regular)
             out.append(
                 {
@@ -58,7 +63,8 @@ def compute(read):
                     "record_date": r.get("recordDate") or None,
                     "pay_date": r.get("paymentDate") or None,
                     "declaration_date": r.get("declarationDate") or None,
-                    "dividend_amount": amt,
+                    "dividend_amount": paid,
+                    "adj_dividend_amount": adj,
                     "currency": "USD",
                     "known_at": r.get("declarationDate") or iso_minus_days(r["date"], 1),
                     "_lineage": _lineage("dividends", r),
