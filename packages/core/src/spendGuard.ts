@@ -3,7 +3,7 @@
 // the reason recorded, so an unattended experiment can never spend past what the owner set.
 import { collection } from './db.js';
 import { HttpError } from './security.js';
-import { researchSettings, updateResearchSettings } from './researchLoop.js';
+import { researchSettings, syncResearchSchedule, updateResearchSettings } from './researchLoop.js';
 
 /** USD per 1M tokens (output includes thinking). Google's pricing page, 2026-11-06; prices double on 2027-01-01. */
 export const MODEL_PRICES: Record<string, { input: number; output: number }> = {
@@ -173,7 +173,8 @@ export async function assertWithinBudget(ownerId: string, model?: string) {
     };
     cache.set(ownerId, { at: Date.now(), key, state });
     const first = state.exceeded ?? Object.values(state.models)[0];
-    if (first && !b.stoppedAt) await stopResearch(ownerId, first);
+    // Pause once per stop; again when the owner resumed while the cap was still reached (#458).
+    if (first && (!b.stoppedAt || !s.paused)) await stopResearch(ownerId, first);
   }
   const reason = state?.exceeded ?? (model ? state?.models[model.toLowerCase()] : undefined);
   if (reason)
@@ -189,9 +190,6 @@ async function stopResearch(ownerId: string, reason: string) {
     budget: { ...(s.budget ?? {}), stoppedAt: new Date(), stopReason: reason },
   });
   // The research harness's schedule goes off, like Pause in the Research Lab.
-  await collection<any>('workflows').updateOne(
-    { ownerId, name: 'Research loop', schedule: { $exists: true } },
-    { $set: { 'schedule.enabled': false, updatedAt: new Date() } },
-  );
+  await syncResearchSchedule(ownerId);
   console.warn(`research loop paused for ${ownerId}: ${reason}`);
 }

@@ -11,8 +11,12 @@ import {
   addSteeringNote,
   makeResearchLoop,
   researchSettings,
+  syncResearchSchedule,
   updateResearchSettings,
 } from '../../../packages/core/src/researchLoop.js';
+import { harnessScheduleOf } from '../../../packages/core/src/researchState.js';
+import { budgetState, resetBudgetCache } from '../../../packages/core/src/spendGuard.js';
+import { requestCancel } from '../../../packages/core/src/runs.js';
 import { saveResource, type ResourcePrincipal } from './resources.js';
 import {
   researchActivity,
@@ -103,6 +107,15 @@ export async function installResearchLoop(
 ) {
   const ownerId = principal.tenantId;
   const name = o.name ?? 'Research loop';
+  // The settings are the one source of the schedule (#458): an install with an interval writes it there first.
+  if (o.scheduleMinutes)
+    await updateResearchSettings(ownerId, {
+      schedule: {
+        ...((await researchSettings(ownerId)).schedule ?? {}),
+        enabled: true,
+        everyMinutes: o.scheduleMinutes,
+      },
+    });
   const s = await researchSettings(ownerId);
   const connections = await ensureRoleConnections(principal);
   const skills: Record<string, string | undefined> = {};
@@ -133,8 +146,7 @@ export async function installResearchLoop(
     ).map((p) => String(p._id)),
   );
   const theoristProviders = s.theoristProviders.map((id) => (id && known.has(id) ? id : ''));
-  const schedule =
-    o.scheduleMinutes ?? (s.schedule?.enabled && !s.paused ? s.schedule.everyMinutes : undefined);
+  const schedule = harnessScheduleOf(s);
   const workflow = makeResearchLoop({
     name,
     providers: providers as { theorist: string; judge: string; coder: string },
@@ -149,11 +161,12 @@ export async function installResearchLoop(
     theorists: o.theorists ?? s.theoristsPerCycle,
     effort: s.agentEffort,
     maxTurns: s.agentMaxTurns,
-    scheduleMinutes: schedule,
-    ...(s.schedule?.until ? { scheduleUntil: s.schedule.until } : {}),
+    ...(schedule ? { schedule } : {}),
   });
   const existing = await collection<any>('workflows').findOne({ ownerId, name }, { projection: { _id: 1 } });
   const saved = await saveResource('workflows', principal, workflow, existing ? { id: existing._id } : {});
+  // A save only sets fields: a schedule the settings no longer have is removed here.
+  await syncResearchSchedule(ownerId, name);
   return {
     created: !existing,
     harness: saved,
@@ -202,19 +215,27 @@ researchRouter.get('/research/activity', async (req, res) => {
   }
   res.end();
 });
+/**
+ * Pause / Resume (#458). Pause: no new cycles; a running cycle's agents stop at their next brief. Resume: refused while
+ * an overall spend cap is still reached; otherwise it clears the spend-cap stop. Either way the harness schedule is
+ * written from the settings.
+ */
 async function setPaused(req: any, paused: boolean) {
   adminOnly(req.principal!.user.role);
   const ownerId = req.principal!.tenantId;
-  await updateResearchSettings(ownerId, { paused });
-  const h = await researchHarness(ownerId);
-  if (h?.schedule) {
+  if (!paused) {
+    resetBudgetCache(ownerId);
+    const b = await budgetState(ownerId);
+    if (b.exceeded)
+      throw new HttpError(
+        409,
+        `The spend cap is still reached (${b.exceeded}). Raise the cap in Setup, then Resume.`,
+      );
     const s = await researchSettings(ownerId);
-    // Paused: no scheduled cycles. Resumed: the schedule from the settings again.
-    await collection<any>('workflows').updateOne(
-      { _id: h._id, ownerId },
-      { $set: { 'schedule.enabled': !paused && (s.schedule?.enabled ?? true), updatedAt: new Date() } },
-    );
-  }
+    const { stoppedAt: _a, stopReason: _r, ...budget } = s.budget ?? {};
+    await updateResearchSettings(ownerId, { paused: false, budget });
+  } else await updateResearchSettings(ownerId, { paused: true });
+  await syncResearchSchedule(ownerId);
   return researchStatus(ownerId);
 }
 // The workspace map (#312): data → prep → research → ideas → evaluations → simulations on one page.
@@ -256,3 +277,20 @@ researchRouter.post('/research/run-now', async (req, res) => {
   res.status(202).json({ id: run._id, status: run.status });
 });
 researchRouter.post('/research/resume', async (req, res) => res.json(await setPaused(req, false)));
+/** Stop (#458): pause, and cancel the cycle that is queued or running now. */
+researchRouter.post('/research/stop', async (req, res) => {
+  const status = await setPaused(req, true);
+  const ownerId = req.principal!.tenantId;
+  const h = await researchHarness(ownerId);
+  if (h) {
+    const active = await collection<any>('runs')
+      .find(
+        { ownerId, workflowId: h._id, status: { $in: ['queued', 'running'] } },
+        { projection: { _id: 1 } },
+      )
+      .toArray();
+    for (const r of active) await requestCancel({ _id: r._id, ownerId });
+    if (active.length) return void res.json(await researchStatus(ownerId));
+  }
+  res.json(status);
+});

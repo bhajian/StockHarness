@@ -7,8 +7,6 @@ import {
   FlaskConical,
   Gauge,
   Lightbulb,
-  Pause,
-  Play,
   Settings2,
   Sigma,
   Sparkles,
@@ -21,6 +19,7 @@ import { go, useLocation } from './ideas/nav';
 import { ResearchSetup } from './research/ResearchSetup';
 import { ResearchHow } from './research/ResearchHow';
 import { ResearchCycles } from './research/ResearchCycles';
+import { ResearchStatusBar } from './research/ResearchStatusBar';
 import { BarChart, TimeSeriesChart } from '../charts/Charts';
 import { ObjectTransfer } from './ObjectTransfer';
 
@@ -37,6 +36,7 @@ type Card = {
 };
 type Status = {
   paused: boolean;
+  state?: import('./research/ResearchStatusBar').ResearchStateView;
   harness: { id: string; name: string; schedule: { enabled: boolean; everyMinutes: number } | null } | null;
   lastRun: { id: string; status: string; startedAt: string } | null;
   kpis: {
@@ -121,47 +121,18 @@ function ResearchLab({ data, isAdmin }: { data: Data; isAdmin: boolean }) {
   const k = status.kpis;
   return (
     <div className="research-lab">
+      <ResearchStatusBar status={status} isAdmin={isAdmin} onChanged={() => void load()} />
       <div className="section-heading">
-        <StatusPill
-          status={status.paused ? 'paused' : (status.lastRun?.status ?? 'idle')}
-          label={
-            status.paused ? 'paused' : status.lastRun ? `last cycle ${status.lastRun.status}` : 'no cycle yet'
-          }
-        />
-        {status.harness?.schedule?.enabled && (
-          <span className="muted-line">every {status.harness.schedule.everyMinutes} min</span>
-        )}
         <span className="spacer" />
         <Button variant="secondary" onClick={() => go('/ideas')}>
           <Lightbulb size={14} /> All ideas
         </Button>
         {isAdmin && (
-          <>
-            <Button
-              variant="secondary"
-              onClick={() => void send(status.paused ? '/research/resume' : '/research/pause').then(load)}
-            >
-              {status.paused ? <Play size={14} /> : <Pause size={14} />} {status.paused ? 'Resume' : 'Pause'}
-            </Button>
-            <Button variant="secondary" onClick={() => go('/research/setup')}>
-              <Settings2 size={14} /> Settings
-            </Button>
-          </>
+          <Button variant="secondary" onClick={() => go('/research/setup')}>
+            <Settings2 size={14} /> Settings
+          </Button>
         )}
       </div>
-      {!status.harness && (
-        <p className="notice">
-          No research loop yet. Open Settings and install it (the role connections and seed skills are created
-          for you).
-        </p>
-      )}
-      {status.spend?.stoppedAt && (
-        <p className="schedule-warning" role="alert">
-          <StatusPill status="blocked" label="spend cap" /> The loop paused itself on{' '}
-          {new Date(status.spend.stoppedAt).toLocaleString()}: {status.spend.stopReason}. Raise the cap in
-          Settings, then Resume.
-        </p>
-      )}
       {status.budgetAlert && (
         <p className="schedule-warning" role="alert">
           <StatusPill status="warn" label="budget" /> {status.budgetAlert}
