@@ -17,14 +17,16 @@ SEC = [
 ]
 
 
-def reader(prices, caps=(), fund=(), membership=()):
+def reader(prices, caps=(), fund=(), membership=(), actions=()):
     data = {"securities": SEC, "prices_daily": prices, "historical_market_cap": list(caps), "fundamentals_pit": list(fund),
-            "index_membership": list(membership)}
+            "index_membership": list(membership), "corporate_actions": list(actions)}
 
     def read(c, flt=None, cols=None, sort=None):
         rows = [dict(r) for r in data[c]]
         if flt and "security_id" in flt:
             rows = [r for r in rows if r.get("security_id") == flt["security_id"]]
+        if flt and "action_type" in flt:
+            rows = [r for r in rows if r.get("action_type") == flt["action_type"]]
         if flt and "symbol" in flt:
             rows = [r for r in rows if r.get("symbol") in flt["symbol"]["$in"]]
         d = (flt or {}).get("date")
@@ -106,3 +108,36 @@ class Universe(unittest.TestCase):
         self.assertIsNone(on[("SEC_1", "2020-01-05")]["in_ndx"], "no Nasdaq-100 membership built: unknown, not false")
         empty = collect(u.compute(reader(prices), None, P))["universe_daily"]
         self.assertTrue(all(r["in_sp500"] is None for r in empty))
+
+
+class AsTraded(unittest.TestCase):
+    """#444: the price filter and the estimated cap use the price as traded, not FMP's split-adjusted close."""
+
+    def test_forward_splitter_is_in_before_its_split(self):
+        # NVDA-like: split-adjusted close 0.81, traded at 32.4 (a later 40:1 in total), $86B cap.
+        prices = [{"security_id": "SEC_1", "date": d, "close": 0.81, "close_raw": 32.4, "dollar_volume": 9000} for d in days(10)]
+        caps = [{"symbol": "AAA", "date": d, "marketCap": 8.6e10} for d in days(10)]
+        out = collect(u.compute(reader(prices, caps=caps), None, P))
+        last = [r for r in out["universe_daily"] if r["security_id"] == "SEC_1" and r["date"] == "2020-01-10"][0]
+        self.assertTrue(last["in_universe"], last["fails"])
+        self.assertEqual(last["close_raw"], 32.4)
+
+    def test_reverse_splitter_is_out_while_it_traded_at_pennies(self):
+        # A later 1-for-10: split-adjusted close 8.0, traded at 0.80.
+        prices = [{"security_id": "SEC_1", "date": d, "close": 8.0, "close_raw": 0.8, "dollar_volume": 9000} for d in days(10)]
+        caps = [{"symbol": "AAA", "date": d, "marketCap": 5e9} for d in days(10)]
+        out = collect(u.compute(reader(prices, caps=caps), None, P))
+        last = [r for r in out["universe_daily"] if r["security_id"] == "SEC_1" and r["date"] == "2020-01-10"][0]
+        self.assertIn("price", last["fails"])
+
+    def test_estimated_cap_counts_splits_after_the_filing(self):
+        # 1M shares filed 2020-01-01; a 4:1 split on 2020-01-05; traded at 25 after it.
+        prices = [{"security_id": "SEC_1", "date": d, "close": 25, "close_raw": 25, "dollar_volume": 9000} for d in days(10)]
+        fund = [{"security_id": "SEC_1", "as_of_date": "2020-01-01", "version": 1, "shares_basic": 1_000_000}]
+        acts = [{"security_id": "SEC_1", "action_type": "split", "ex_date": "2020-01-05", "split_ratio": 4.0}]
+        out = collect(u.compute(reader(prices, fund=fund, actions=acts), None, P))
+        rows = {r["date"]: r for r in out["universe_daily"] if r["security_id"] == "SEC_1"}
+        self.assertEqual(rows["2020-01-04"]["market_cap"], 25_000_000)
+        self.assertEqual(rows["2020-01-05"]["market_cap"], 100_000_000)
+        self.assertEqual(rows["2020-01-05"]["market_cap_source"], "estimated")
+

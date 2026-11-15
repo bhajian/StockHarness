@@ -1,6 +1,7 @@
 """universe_daily (#101): the point-in-time tradeable universe per trading date.
 
-For each security and priced date: close, 20-day median dollar volume, market cap as of that date (reported, else
+For each security and priced date: close (split-adjusted) and close_raw (as traded, used for the price filter and
+the estimated market cap, #444), 20-day median dollar volume, market cap as of that date (reported, else
 close × shares outstanding as known from fundamentals_pit) and exchange as of that date; `in_universe` when every
 filter passes. Delisted names are included while they were listed (they have prices only then). Thresholds come
 from the Transform's params. Also `universe_counts`: members per date.
@@ -75,7 +76,7 @@ def compute(read, window=None, params=None):
         q = {"security_id": sid}
         if window:
             q["date"] = {"$gte": lookback, "$lte": end}
-        prices = read("prices_daily", q, ["date", "close", "dollar_volume"], [("date", 1)])
+        prices = read("prices_daily", q, ["date", "close", "close_raw", "dollar_volume"], [("date", 1)])
         if not prices:
             continue
         caps = {}
@@ -87,30 +88,43 @@ def compute(read, window=None, params=None):
             for r in read("fundamentals_pit", {"security_id": sid}, ["as_of_date", "version", "shares_basic"])
             if r.get("as_of_date") and r.get("shares_basic")
         )
+        # Splits after a filing change its share count (#444): 1B shares filed before a 4:1 split are 4B after it.
+        splits = sorted(
+            (a["ex_date"], float(a["split_ratio"]))
+            for a in read("corporate_actions", {"security_id": sid, "action_type": "split"}, ["ex_date", "split_ratio"])
+            if a.get("ex_date") and a.get("split_ratio")
+        )
         rows = []
         dv = []
         si = 0
         known_shares = None
+        known_shares_at = None
         for r in prices:
             day = r["date"]
             dv.append(r.get("dollar_volume"))
             dv = dv[-p["adv_days"] :]
             while si < len(shares) and shares[si][0] <= day:
-                known_shares = shares[si][2]
+                known_shares, known_shares_at = shares[si][2], shares[si][0]
                 si += 1
             if window and day < start:
                 continue  # lookback for the ADV only
             vals = [v for v in dv if v is not None]
             adv = median(vals) if len(vals) >= min(p["adv_days"], 5) else None
             close = r.get("close")
+            # The price it traded at (#444): FMP's closes are split-adjusted (NVDA 2016: 0.81, traded at ~32).
+            traded = r.get("close_raw") if r.get("close_raw") is not None else close
             if day in caps:
                 cap, src = caps[day], "reported"
-            elif known_shares and close:
-                cap, src = close * known_shares, "estimated"
+            elif known_shares and traded:
+                f = 1.0
+                for ex, ratio in splits:
+                    if known_shares_at < ex <= day:
+                        f *= ratio
+                cap, src = traded * known_shares * f, "estimated"
             else:
                 cap, src = None, None
             exchange = _interval_value(exch.get(sid), day)
-            fails = evaluate(day, close, adv, cap, exchange, p)
+            fails = evaluate(day, traded, adv, cap, exchange, p)
             if not equity.get(sid, True):
                 fails.append("security_type")
             mine = membership.get(sid, {})
@@ -122,6 +136,7 @@ def compute(read, window=None, params=None):
                     "in_universe": not fails,
                     "fails": fails,
                     "close": close,
+                    "close_raw": traded,
                     "adv_20d": adv,
                     "market_cap": cap,
                     "market_cap_source": src,

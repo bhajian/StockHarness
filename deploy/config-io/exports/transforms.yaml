@@ -43,7 +43,10 @@ spec:
         declaration_date:
           description: Declaration date
         dividend_amount:
-          description: Cash dividend per share
+          description: Cash dividend per share as paid (on the share basis of the ex-date)
+          unit: USD
+        adj_dividend_amount:
+          description: "Cash dividend per share, split-adjusted to today's share basis (FMP adjDividend; #443)"
           unit: USD
         currency:
           description: Dividend currency
@@ -432,7 +435,13 @@ spec:
           description: Low
           unit: USD
         close:
-          description: Close (as traded)
+          description: "Close as FMP serves it: split-adjusted to today's share basis, not dividend-adjusted (#444)"
+          unit: USD
+        close_raw:
+          description: "Close as traded that day: close × the ratios of the later splits the bars already reflect (#444). Use it for price levels ($5 filter); use close or adj_close for returns."
+          unit: USD
+        dividend:
+          description: Dividend per share on this bar's share basis (as paid ÷ later split ratios), the one in tr_1d (#443)
           unit: USD
         volume:
           description: Volume
@@ -660,7 +669,10 @@ spec:
         fails:
           description: "Filters that failed: price, liquidity, market_cap, exchange, security_type (not common stock or an ADR)"
         close:
-          description: Close that day
+          description: Close that day (split-adjusted, as in prices_daily)
+          unit: USD
+        close_raw:
+          description: Close as traded that day; the price filter and the estimated market cap use it (#444)
           unit: USD
         adv_20d:
           description: Median dollar volume over the last 20 trading days

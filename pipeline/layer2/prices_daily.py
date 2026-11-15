@@ -16,7 +16,7 @@ from .prices_logic import compute_symbol_rows, pick_bars
 from ._resolve import as_date, security_symbols
 
 UTC = timezone.utc
-TV = "6"  # 6: bars on non-trading days are dropped (#437); 5: notes, preferreds, warrants, units and funds are skipped (#393); 4: one ticker per date, junk quotes and ×10 days without an action carry no return (#255); 3: #240
+TV = "7"  # 7: dividends on the bars' split basis (#443), close_raw as traded (#444); 6: bars on non-trading days are dropped (#437); 5: notes, preferreds, warrants, units and funds are skipped (#393); 4: one ticker per date, junk quotes and ×10 days without an action carry no return (#255); 3: #240
 ERROR_FLAGS = ("zero_or_negative_price", "high_lt_low", "implausible_price")
 BAR_FIELDS = ["_id", "symbol", "date", "open", "high", "low", "close", "volume", "vwap"]
 
@@ -44,7 +44,7 @@ def compute(read, window=None, *, security_ids=None):
         if r.get("date")
     }
     actions = {}
-    for a in read("corporate_actions", None, ["security_id", "action_type", "ex_date", "dividend_amount", "split_ratio"]):
+    for a in read("corporate_actions", None, ["security_id", "action_type", "ex_date", "dividend_amount", "adj_dividend_amount", "split_ratio"]):
         actions.setdefault(a["security_id"], []).append(a)
     start = window.start if window else None
     end = window.end if window else None
@@ -56,6 +56,11 @@ def compute(read, window=None, *, security_ids=None):
             a["ex_date"]: a.get("dividend_amount")
             for a in acts
             if a["action_type"] in ("cash_dividend", "special_dividend") and a.get("dividend_amount")
+        }
+        adj_divs = {
+            a["ex_date"]: a.get("adj_dividend_amount")
+            for a in acts
+            if a["action_type"] in ("cash_dividend", "special_dividend") and a.get("adj_dividend_amount")
         }
         # A split inside the window changes the factor of every earlier bar: rewrite this security's history.
         full = window is None or any(ex >= lookback for ex in splits)
@@ -73,7 +78,7 @@ def compute(read, window=None, *, security_ids=None):
         # One bar per date, from the right ticker when the security has several (#255).
         bars = pick_bars(bars_raw, ticker_iv.get(sid, []))
         by_date = {b["date"]: b for b in bars}
-        rows = compute_symbol_rows([{k: b.get(k) for k in BAR_FIELDS[2:]} for b in bars], divs, splits)
+        rows = compute_symbol_rows([{k: b.get(k) for k in BAR_FIELDS[2:]} for b in bars], divs, splits, adj_divs)
         docs, issues = [], []
         for r in rows:
             d = r["date"]
