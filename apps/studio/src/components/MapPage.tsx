@@ -100,16 +100,24 @@ export function MapPage() {
               onClick={() => go(`/datasets/syncs/${s.id}`)}
             >
               <span className="map-card-head">
-                <strong>{s.name}</strong>
+                <strong title={s.name}>{s.name}</strong>
                 <StatusPill status={SYNC_PILL[s.status] ?? 'pending'} label={s.status} />
               </span>
-              <small>
+              <small title={s.collection}>
                 → <code>{s.collection}</code>
                 {s.rows !== null && s.rows !== undefined ? ` · ${n(s.rows)} rows` : ''}
               </small>
               <small>{s.runs}</small>
-              {s.pausedReason && <small className="error-line">{s.pausedReason.slice(0, 140)}</small>}
-              {!s.pausedReason && s.error && <small className="error-line">{s.error.slice(0, 140)}</small>}
+              {s.pausedReason && (
+                <small className="error-line" title={s.pausedReason}>
+                  {s.pausedReason}
+                </small>
+              )}
+              {!s.pausedReason && s.error && (
+                <small className="error-line" title={s.error}>
+                  {s.error}
+                </small>
+              )}
             </button>
           ))}
           {m.sources.length > 8 && (
@@ -139,6 +147,7 @@ export function MapPage() {
                 <button
                   type="button"
                   className="link-button"
+                  title={t.name}
                   onClick={() => go(`/datasets/transforms/${t.name}`)}
                 >
                   <strong>{t.name}</strong>
@@ -149,7 +158,7 @@ export function MapPage() {
                   <StatusPill status="pending" label="never ran" />
                 )}
               </span>
-              <small>
+              <small title={`reads ${t.reads.map((r: any) => r.collection).join(', ')}`}>
                 reads{' '}
                 {t.reads.map((r: any, i: number) => (
                   <React.Fragment key={r.collection}>
@@ -158,9 +167,9 @@ export function MapPage() {
                   </React.Fragment>
                 ))}
               </small>
-              <small>
+              <small title={`writes ${t.writes.map((w: any) => w.collection).join(', ')}`}>
                 writes{' '}
-                {t.writes.map((w: any, i: number) => (
+                {t.writes.slice(0, 3).map((w: any, i: number) => (
                   <React.Fragment key={w.collection}>
                     {i ? ', ' : ''}
                     <button
@@ -176,6 +185,7 @@ export function MapPage() {
                       : ''}
                   </React.Fragment>
                 ))}
+                {t.writes.length > 3 ? ` +${t.writes.length - 3} more` : ''}
               </small>
               <small>{t.runs}</small>
               {t.lastRun && (
@@ -223,7 +233,7 @@ export function MapPage() {
                 <strong>
                   <Database size={13} /> Data the agents can read
                 </strong>
-                <small>
+                <small title={m.research.readable.join(', ')}>
                   {m.research.readable.length} collections through the research data tools:{' '}
                   {m.research.readable.slice(0, 10).join(', ')}
                   {m.research.readable.length > 10 ? ' …' : ''}
