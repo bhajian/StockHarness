@@ -14,48 +14,6 @@ A self-hosted studio for agent harnesses, MCP tools, and knowledge, implementing
 - **Durable by design.** Runs are queued through RabbitMQ, checkpointed in MongoDB, and resumed on another runner if a process dies — without ever blindly replaying a step that may have acted on the outside world.
 - **Self-contained.** API, runner, studio, configuration and deployment assets live in this repository. No cloud account, managed database, or external login is required.
 
-[Read the OpenHarness overview (PDF, 15 pages)](../OpenHarness.pdf)
-
-[Detailed agentic capabilities guide](agentic-guide/README.md) — agent loops,
-orchestration patterns, experiment storage, scalability and recovery, with PDF
-and editable Word editions.
-
-## Product tour
-
-Explore the studio: organize harnesses, follow agent activity, retain knowledge, and share reusable skills. Select any screenshot to view it at full size.
-
-<table>
-  <tr>
-    <td width="50%" valign="top">
-      <a href="../product-screenshots/workflows.png"><img src="../product-screenshots/workflows.png" alt="Harness library with saved agents and run controls" width="480"></a>
-      <br><strong>Harness library</strong><br>Organize and launch your saved harnesses.
-    </td>
-    <td width="50%" valign="top">
-      <a href="../product-screenshots/playground.png"><img src="../product-screenshots/playground.png" alt="Playground conversation with a live agent execution trace" width="480"></a>
-      <br><strong>Playground</strong><br>Chat with agents and follow their tools and memory in the live trace.
-    </td>
-  </tr>
-  <tr>
-    <td width="50%" valign="top">
-      <a href="../product-screenshots/knowledge.png"><img src="../product-screenshots/knowledge.png" alt="Knowledge notebook listing saved findings, lessons, and experiments" width="480"></a>
-      <br><strong>Knowledge notebooks</strong><br>Keep documents, findings, and lessons available for future runs.
-    </td>
-    <td width="50%" valign="top">
-      <a href="../product-screenshots/skills.png"><img src="../product-screenshots/skills.png" alt="Skills library with reusable instructions and agent usage counts" width="480"></a>
-      <br><strong>Reusable skills</strong><br>Manage instructions that agents can load when a task needs them.
-    </td>
-  </tr>
-</table>
-
-_These screenshots show the earlier “Workflows” label, now called “Harnesses.”_
-
-<details>
-<summary>Preview the product overview PDF</summary>
-
-[![First-page preview of the OpenHarness overview](images/openharness-preview.png)](../OpenHarness.pdf)
-
-</details>
-
 ## Contents
 
 - [Product tour](#product-tour)
@@ -93,11 +51,11 @@ Allow about 4 GB of memory for the stack, plus whatever your locally hosted mode
 
 Open **Integrations → API explorer** to browse endpoints, select a harness, fill request fields, upload files, send requests, inspect streaming responses, and copy cURL examples. The explorer uses your studio session or an API key you enter for the current page. Download its OpenAPI 3.0 document for other tools.
 
-Each saved harness contains its agent cards. Existing graphs and IDs carry over automatically; `/api/workflows` and `/workflows` remain compatibility aliases. See the [API guide](openharness-api.md), [generated support matrix](openharness-support.md), and [conformance evidence](conformance.md) for the supported contract and limitations.
+Each saved harness contains its agent cards. Existing graphs and IDs carry over automatically; `/api/workflows` and `/workflows` remain compatibility aliases. See the [API guide](openharness-api.md), [generated support matrix](openharness-support.md), and conformance evidence for the supported contract and limitations.
 
 ## What you get
 
-See the [NeMo Guardrails setup](guardrails.md) for safety policies and harness attachments, and the [GPU cluster guide](gpu-clusters.md) for shared enrollment, scheduled node agents, privileged diagnostics and controlled remediation.
+See the [NeMo Guardrails setup](guardrails.md) for safety policies and harness attachments,.
 
 | Area                | What is included                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -350,7 +308,7 @@ The response is `202 Accepted` with an `id`. Poll `GET /api/runs/:id`, or open `
 - **Webhooks:** **Integrations → Webhooks** creates an authenticated URL. Send JSON with the bearer secret; the chosen field becomes `{{input}}` and every field is available as `{{payload.field}}`. Poll `/api/hooks/:id/runs/:runId` with the same secret. Retries may carry an `Idempotency-Key`.
 - **Embeds:** **Integrations → Embedded chat** issues an iframe snippet scoped to one target and your site's origins. Visitors see the conversation only — never traces, prompts or your studio. Treat the link as a credential; revoke it any time.
 
-- **Open Harness API:** OpenHarness implements the open [Open Harness API](https://github.com/jeffrschneider/OpenHarness) under `/openharness/v1`, so clients written for that spec can drive it. An administrator creates a workspace key (`oh_sk_…`) under **Integrations → API key**. The capability manifest at `/openharness/v1/harnesses/openharness/capabilities` lists what is supported; see [the adapter guide](openharness-api.md). The spec's own conformance suite runs in CI against it ([results](conformance.md)).
+- **Open Harness API:** OpenHarness implements the open [Open Harness API](https://github.com/jeffrschneider/OpenHarness) under `/openharness/v1`, so clients written for that spec can drive it. An administrator creates a workspace key (`oh_sk_…`) under **Integrations → API key**. The capability manifest at `/openharness/v1/harnesses/openharness/capabilities` lists what is supported; see [the adapter guide](openharness-api.md).
 
 See [the API reference](api.md) for every request shape and permission.
 

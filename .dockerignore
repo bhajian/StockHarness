@@ -8,7 +8,6 @@ tests/browser
 playwright-report
 test-results
 
-product-screenshots
 
 # Never send runtime credentials or generated deployment material to a builder.
 .env

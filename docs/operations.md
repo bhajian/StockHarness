@@ -32,13 +32,7 @@ rotation procedure as well.
 
 ## Shared filesystems and scaling
 
-For a host-mounted filesystem:
-
-```sh
-mkdir -p /mnt/openharness
-FILES_PATH=/mnt/openharness docker compose \
-  -f compose.yaml -f compose.shared-fs.yaml up --build -d --wait
-```
+Uploaded files live in the `files` volume (`FILES_PATH` sets a host directory instead).
 
 For NFS or another shared mount, arrange for UID 1000 to own or be able to write
 the directory. The storage initializer creates `/data/files`; root-squashed NFS

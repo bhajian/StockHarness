@@ -10,7 +10,7 @@ const document = openApiDocument(registry);
 const lines = [
   '# Open Harness API support',
   '',
-  'Generated from the mounted registry and pinned 0.2.0 contract with `npm run generate:openharness-support`. See [API guide](openharness-api.md) and [test evidence](conformance.md). Support means the listed operations are available, subject to these limits; it is not certification.',
+  'Generated from the mounted registry and pinned 0.2.0 contract with `npm run generate:openharness-support`. See [API guide](openharness-api.md) and test evidence. Support means the listed operations are available, subject to these limits; it is not certification.',
   '',
   '| Domain | Operations | Limits |',
   '| --- | --- | --- |',
