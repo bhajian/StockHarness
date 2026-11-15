@@ -248,7 +248,7 @@ test('the committed backup files and legacy bare lists import', { skip: skipReas
     'merge',
   );
   assert.deepEqual(syncs.errors, []);
-  assert.equal(syncs.items.length, 43);
+  assert.equal(syncs.items.length, 56);
   const legacy = await planObjectImport(
     who(T),
     JSON.stringify([

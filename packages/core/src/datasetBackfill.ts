@@ -7,7 +7,7 @@ import { randomUUID } from 'node:crypto';
 import { mongo, collection } from './db.js';
 import { workspaceDatabase } from './mongoMcp.js';
 import { HttpError, safeError } from './security.js';
-import { catalogById, type DatasetDef } from './datasetCatalog.js';
+import { catalogById, variantsOf, type DatasetDef } from './datasetCatalog.js';
 import {
   FmpPlanLimit,
   addDays,
@@ -18,6 +18,7 @@ import {
   perSymbolParams,
   resolveSymbols,
   syncContext,
+  tagRows,
   today,
   upsertRows,
   type DatasetSync,
@@ -65,6 +66,9 @@ export type Backfill = {
   /** E.g. how many windows were outside the plan's history (#291). */
   note?: string;
   requestedBy?: string;
+  /** Rows per symbol for limit-based datasets, for this backfill only (#387): e.g. 48 quarters of statements
+   * while the weekly sync keeps re-pulling 8. */
+  historyPeriods?: number;
 };
 export const backfills = () => collection<Backfill>('dataset_backfills');
 const ACTIVE: BackfillStatus[] = ['queued', 'running', 'paused'];
@@ -129,7 +133,9 @@ export function planBackfill(
   if (def.incremental === 'window')
     return {
       mode: 'windows',
-      batches: chunkRanges(from, to, 60).map(([a, b], i) => batch(i, `${a} → ${b}`, { from: a, to: b })),
+      batches: chunkRanges(from, to, def.windowDays ?? 60).map(([a, b], i) =>
+        batch(i, `${a} → ${b}`, { from: a, to: b }),
+      ),
     };
   return { mode: 'single', batches: [batch(0, `${from} → ${to}`, { from, to })] };
 }
@@ -137,7 +143,14 @@ export function planBackfill(
 export async function createBackfill(
   ownerId: string,
   syncId: string,
-  opts: { from?: string; to?: string; batchSize?: number; requestedBy?: string; autostart?: boolean } = {},
+  opts: {
+    from?: string;
+    to?: string;
+    batchSize?: number;
+    requestedBy?: string;
+    autostart?: boolean;
+    historyPeriods?: number;
+  } = {},
 ) {
   const sync = await datasetSyncs().findOne({ _id: syncId, ownerId });
   if (!sync) throw new HttpError(404, 'Dataset sync not found');
@@ -175,6 +188,7 @@ export async function createBackfill(
     createdAt: now,
     updatedAt: now,
     ...(opts.requestedBy ? { requestedBy: opts.requestedBy } : {}),
+    ...(opts.historyPeriods ? { historyPeriods: opts.historyPeriods } : {}),
   };
   await backfills().insertOne(doc);
   if (opts.autostart !== false) void dispatchBackfills();
@@ -292,8 +306,9 @@ export async function runBackfill(job: Backfill) {
         $currentDate: { updatedAt: true },
       },
     );
-  const call = (params: Record<string, string | number>) =>
-    syncContext.run({ priority: 'BACKFILL' }, () => fmpGet(def.endpoint, params, apikey));
+  const call = (params: Record<string, string | number>, endpoint = def.endpoint) =>
+    syncContext.run({ priority: 'BACKFILL' }, () => fmpGet(endpoint, params, apikey));
+  const depth = { ...sync, cursor: undefined, historyPeriods: job.historyPeriods ?? sync.historyPeriods };
 
   await syncContext.run({ priority: 'BACKFILL' }, async () => {
     for (const b of job.batches) {
@@ -316,17 +331,24 @@ export async function runBackfill(job: Backfill) {
               const ranges =
                 def.incremental === 'timeseries' ? yearRanges(job.from, job.to) : [[job.from, job.to]];
               for (const [a, z] of ranges) {
-                const params = perSymbolParams(def, { ...sync, cursor: undefined, from: a }, symbol, z);
+                const params = perSymbolParams(def, { ...depth, from: a }, symbol, z);
                 if (def.incremental === 'timeseries') Object.assign(params, { from: a, to: z });
-                const data = await call(params);
-                symCalls++;
-                const list = Array.isArray(data) ? data : data ? [data] : [];
-                for (const r of list)
-                  if (r && typeof r === 'object') {
-                    (r as Record<string, unknown>).symbol = symbol;
-                    if (params.period) (r as Record<string, unknown>).period ??= params.period;
-                  }
-                symRows += await upsertRows(coll, list, def.keyFields);
+                // Paged per-symbol history (insider, congress, #387): walk pages until a short or empty one.
+                const pages = def.pagesPerSymbol ?? 1;
+                for (let page = 0; page < pages; page++) {
+                  if (pages > 1) params.page = page;
+                  const data = await call(params);
+                  symCalls++;
+                  const list = Array.isArray(data) ? data : data ? [data] : [];
+                  for (const r of list)
+                    if (r && typeof r === 'object') {
+                      (r as Record<string, unknown>).symbol = symbol;
+                      if (params.period) (r as Record<string, unknown>).period ??= params.period;
+                    }
+                  symRows += await upsertRows(coll, list, def.keyFields);
+                  const pageSize = typeof params.limit === 'number' ? params.limit : 100;
+                  if (list.length < pageSize) break;
+                }
               }
             } catch (e) {
               // A symbol the plan does not serve (non-US listings) is not an error of the backfill (#291).
@@ -353,10 +375,14 @@ export async function runBackfill(job: Backfill) {
             }
           }
         } else {
-          const data = await call({ ...(def.params ?? {}), from: b.from!, to: b.to! });
-          const n = await upsertRows(coll, Array.isArray(data) ? data : [], def.keyFields);
-          rows += n;
-          await save(b.i, { rows }, { rows: n, calls: 1 });
+          // One call per variant (sector, indicator) for the window.
+          for (const v of variantsOf(def)) {
+            const data = await call({ ...v.params, from: b.from!, to: b.to! }, v.endpoint);
+            const list = tagRows(Array.isArray(data) ? data : [], v.tag);
+            const n = await upsertRows(coll, list, def.keyFields);
+            rows += n;
+            await save(b.i, { rows }, { rows: n, calls: 1 });
+          }
         }
         // A batch where most symbols failed is retried later rather than counted as done.
         const size = job.mode === 'symbols' ? b.end! - b.start! : 1;

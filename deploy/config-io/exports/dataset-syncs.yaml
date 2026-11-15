@@ -3,42 +3,6 @@
 apiVersion: stockharness/v1
 kind: DatasetSync
 metadata:
-  name: EOD AAPL/MSFT
-spec:
-  dataset: eod_prices
-  connection: FMP
-  enabled: true
-  symbolsMode: list
-  symbols:
-    - AAPL
-    - MSFT
-  from: 2026-10-01
-  schedule:
-    enabled: false
-    everyMinutes: 1440
-    input: sync
-    at: 18:56
----
-apiVersion: stockharness/v1
-kind: DatasetSync
-metadata:
-  name: EOD prices (5y, universe)
-spec:
-  dataset: eod_prices
-  connection: FMP
-  enabled: true
-  symbolsMode: universe
-  from: 2016-01-01
-  schedule:
-    enabled: true
-    everyMinutes: 1440
-    input: daily eod
-    at: 18:49
-    timezone: America/New_York
----
-apiVersion: stockharness/v1
-kind: DatasetSync
-metadata:
   name: L1 — Analyst estimates (annual)
 spec:
   dataset: analyst_estimates
@@ -56,6 +20,23 @@ spec:
 apiVersion: stockharness/v1
 kind: DatasetSync
 metadata:
+  name: L1 — Analyst estimates (quarterly)
+spec:
+  dataset: analyst_estimates_quarterly
+  connection: FMP
+  enabled: true
+  symbolsMode: universe
+  schedule:
+    enabled: true
+    everyMinutes: 10080
+    input: L1 sync analyst_estimates_quarterly
+    at: 02:20
+    weekday: 0
+    timezone: America/New_York
+---
+apiVersion: stockharness/v1
+kind: DatasetSync
+metadata:
   name: L1 — Analyst grade changes
 spec:
   dataset: analyst_grades
@@ -67,6 +48,23 @@ spec:
     everyMinutes: 1440
     input: L1 sync analyst_grades
     at: 18:00
+    timezone: America/New_York
+---
+apiVersion: stockharness/v1
+kind: DatasetSync
+metadata:
+  name: L1 — Analyst grade history
+spec:
+  dataset: analyst_grades_history
+  connection: FMP
+  enabled: true
+  symbolsMode: universe
+  schedule:
+    enabled: true
+    everyMinutes: 10080
+    input: L1 sync analyst_grades_history
+    at: 02:40
+    weekday: 0
     timezone: America/New_York
 ---
 apiVersion: stockharness/v1
@@ -206,6 +204,23 @@ spec:
 apiVersion: stockharness/v1
 kind: DatasetSync
 metadata:
+  name: L1 — EOD prices (from 2016)
+spec:
+  dataset: eod_prices
+  connection: FMP
+  enabled: true
+  symbolsMode: universe
+  from: 2016-01-01
+  schedule:
+    enabled: true
+    everyMinutes: 1440
+    input: daily eod
+    at: 18:49
+    timezone: America/New_York
+---
+apiVersion: stockharness/v1
+kind: DatasetSync
+metadata:
   name: L1 — Earnings calendar
 spec:
   dataset: earnings_calendar
@@ -217,6 +232,43 @@ spec:
     everyMinutes: 1440
     input: L1 sync earnings_calendar
     at: 18:35
+    timezone: America/New_York
+---
+apiVersion: stockharness/v1
+kind: DatasetSync
+metadata:
+  name: L1 — Earnings history
+spec:
+  dataset: earnings_history
+  connection: FMP
+  enabled: true
+  symbolsMode: universe
+  trigger:
+    after: []
+    afterEarnings:
+      days: 1
+  schedule:
+    enabled: true
+    everyMinutes: 10080
+    input: L1 sync earnings_history
+    at: 02:30
+    weekday: 0
+    timezone: America/New_York
+---
+apiVersion: stockharness/v1
+kind: DatasetSync
+metadata:
+  name: L1 — Economic indicators
+spec:
+  dataset: economic_indicators
+  connection: FMP
+  enabled: true
+  symbolsMode: universe
+  schedule:
+    enabled: true
+    everyMinutes: 1440
+    input: L1 sync economic_indicators
+    at: 09:00
     timezone: America/New_York
 ---
 apiVersion: stockharness/v1
@@ -325,6 +377,23 @@ spec:
 apiVersion: stockharness/v1
 kind: DatasetSync
 metadata:
+  name: L1 — Financial ratios (quarterly)
+spec:
+  dataset: ratios_quarterly
+  connection: FMP
+  enabled: true
+  symbolsMode: universe
+  schedule:
+    enabled: true
+    everyMinutes: 10080
+    input: L1 sync ratios_quarterly
+    at: 02:10
+    weekday: 0
+    timezone: America/New_York
+---
+apiVersion: stockharness/v1
+kind: DatasetSync
+metadata:
   name: L1 — Financial scores
 spec:
   dataset: financial_scores
@@ -359,6 +428,23 @@ spec:
 apiVersion: stockharness/v1
 kind: DatasetSync
 metadata:
+  name: L1 — Grades consensus history
+spec:
+  dataset: grades_consensus_history
+  connection: FMP
+  enabled: true
+  symbolsMode: universe
+  schedule:
+    enabled: true
+    everyMinutes: 10080
+    input: L1 sync grades_consensus_history
+    at: 02:50
+    weekday: 0
+    timezone: America/New_York
+---
+apiVersion: stockharness/v1
+kind: DatasetSync
+metadata:
   name: L1 — Historical market cap
 spec:
   dataset: historical_market_cap
@@ -371,6 +457,23 @@ spec:
     input: L1 sync historical_market_cap
     at: 03:24
     weekday: 6
+    timezone: America/New_York
+---
+apiVersion: stockharness/v1
+kind: DatasetSync
+metadata:
+  name: L1 — House trades history
+spec:
+  dataset: house_trades_history
+  connection: FMP
+  enabled: true
+  symbolsMode: universe
+  schedule:
+    enabled: true
+    everyMinutes: 10080
+    input: L1 sync house_trades_history
+    at: 03:20
+    weekday: 0
     timezone: America/New_York
 ---
 apiVersion: stockharness/v1
@@ -411,6 +514,38 @@ spec:
 apiVersion: stockharness/v1
 kind: DatasetSync
 metadata:
+  name: L1 — Index changes
+spec:
+  dataset: index_changes
+  connection: FMP
+  enabled: true
+  symbolsMode: universe
+  schedule:
+    enabled: true
+    everyMinutes: 1440
+    input: L1 sync index_changes
+    at: 20:05
+    timezone: America/New_York
+---
+apiVersion: stockharness/v1
+kind: DatasetSync
+metadata:
+  name: L1 — Index constituents
+spec:
+  dataset: index_constituents
+  connection: FMP
+  enabled: true
+  symbolsMode: universe
+  schedule:
+    enabled: true
+    everyMinutes: 1440
+    input: L1 sync index_constituents
+    at: 20:00
+    timezone: America/New_York
+---
+apiVersion: stockharness/v1
+kind: DatasetSync
+metadata:
   name: L1 — Insider trades
 spec:
   dataset: insider_trades
@@ -422,6 +557,23 @@ spec:
     everyMinutes: 1440
     input: L1 sync insider_trades
     at: 19:03
+    timezone: America/New_York
+---
+apiVersion: stockharness/v1
+kind: DatasetSync
+metadata:
+  name: L1 — Insider trades history
+spec:
+  dataset: insider_trades_history
+  connection: FMP
+  enabled: true
+  symbolsMode: universe
+  schedule:
+    enabled: true
+    everyMinutes: 10080
+    input: L1 sync insider_trades_history
+    at: 03:00
+    weekday: 0
     timezone: America/New_York
 ---
 apiVersion: stockharness/v1
@@ -456,6 +608,23 @@ spec:
     input: L1 sync key_metrics
     at: 03:45
     weekday: 6
+    timezone: America/New_York
+---
+apiVersion: stockharness/v1
+kind: DatasetSync
+metadata:
+  name: L1 — Key metrics (quarterly)
+spec:
+  dataset: key_metrics_quarterly
+  connection: FMP
+  enabled: true
+  symbolsMode: universe
+  schedule:
+    enabled: true
+    everyMinutes: 10080
+    input: L1 sync key_metrics_quarterly
+    at: 02:00
+    weekday: 0
     timezone: America/New_York
 ---
 apiVersion: stockharness/v1
@@ -522,6 +691,23 @@ spec:
     input: L1 sync price_target_consensus
     at: 03:59
     weekday: 6
+    timezone: America/New_York
+---
+apiVersion: stockharness/v1
+kind: DatasetSync
+metadata:
+  name: L1 — Price target history
+spec:
+  dataset: price_target_history
+  connection: FMP
+  enabled: true
+  symbolsMode: universe
+  schedule:
+    enabled: true
+    everyMinutes: 10080
+    input: L1 sync price_target_history
+    at: 03:30
+    weekday: 0
     timezone: America/New_York
 ---
 apiVersion: stockharness/v1
@@ -594,6 +780,23 @@ spec:
 apiVersion: stockharness/v1
 kind: DatasetSync
 metadata:
+  name: L1 — Senate trades history
+spec:
+  dataset: senate_trades_history
+  connection: FMP
+  enabled: true
+  symbolsMode: universe
+  schedule:
+    enabled: true
+    everyMinutes: 10080
+    input: L1 sync senate_trades_history
+    at: 03:10
+    weekday: 0
+    timezone: America/New_York
+---
+apiVersion: stockharness/v1
+kind: DatasetSync
+metadata:
   name: L1 — Shares float
 spec:
   dataset: shares_float
@@ -644,6 +847,23 @@ spec:
 apiVersion: stockharness/v1
 kind: DatasetSync
 metadata:
+  name: L1 — Stock list
+spec:
+  dataset: stock_list
+  connection: FMP
+  enabled: true
+  symbolsMode: universe
+  schedule:
+    enabled: true
+    everyMinutes: 10080
+    input: L1 sync stock_list
+    at: 01:50
+    weekday: 0
+    timezone: America/New_York
+---
+apiVersion: stockharness/v1
+kind: DatasetSync
+metadata:
   name: L1 — Stock news
 spec:
   dataset: news_stocks
@@ -677,6 +897,38 @@ spec:
 apiVersion: stockharness/v1
 kind: DatasetSync
 metadata:
+  name: L1 — Symbol changes
+spec:
+  dataset: symbol_changes
+  connection: FMP
+  enabled: true
+  symbolsMode: universe
+  schedule:
+    enabled: true
+    everyMinutes: 1440
+    input: L1 sync symbol_changes
+    at: 20:10
+    timezone: America/New_York
+---
+apiVersion: stockharness/v1
+kind: DatasetSync
+metadata:
+  name: L1 — Treasury rates
+spec:
+  dataset: treasury_rates
+  connection: FMP
+  enabled: true
+  symbolsMode: universe
+  schedule:
+    enabled: true
+    everyMinutes: 1440
+    input: sync
+    at: 19:52
+    timezone: America/New_York
+---
+apiVersion: stockharness/v1
+kind: DatasetSync
+metadata:
   name: L1 — Universe (screener)
 spec:
   dataset: universe
@@ -690,34 +942,3 @@ spec:
     at: 04:55
     weekday: 6
     timezone: America/New_York
----
-apiVersion: stockharness/v1
-kind: DatasetSync
-metadata:
-  name: Market cap (mega-cap)
-spec:
-  dataset: market_cap
-  connection: FMP
-  enabled: true
-  symbolsMode: preset
-  preset: mega_cap
-  schedule:
-    enabled: false
-    everyMinutes: 1440
-    input: sync
-    at: 19:10
----
-apiVersion: stockharness/v1
-kind: DatasetSync
-metadata:
-  name: Treasury rates
-spec:
-  dataset: treasury_rates
-  connection: FMP
-  enabled: true
-  symbolsMode: universe
-  schedule:
-    enabled: false
-    everyMinutes: 1440
-    input: sync
-    at: 19:52

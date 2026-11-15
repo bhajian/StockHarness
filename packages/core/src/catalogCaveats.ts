@@ -22,11 +22,40 @@ type Builtin = {
   text: (c: Ctx) => string;
 };
 
-const perSymbol = new Set(DATASET_CATALOG.filter((d) => d.perSymbol).map((d) => d.defaultCollection));
 const feeds = new Set(DATASET_CATALOG.filter((d) => d.scope === 'feed').map((d) => d.defaultCollection));
+// Feed collections a per-symbol history sync also fills stay feeds for the survivorship caveat (#387).
+const perSymbol = new Set(
+  DATASET_CATALOG.filter((d) => d.perSymbol && !feeds.has(d.defaultCollection)).map(
+    (d) => d.defaultCollection,
+  ),
+);
 const snapshots = new Set(DATASET_CATALOG.filter((d) => d.snapshotDated).map((d) => d.defaultCollection));
-const statements = new Set(['income_statement', 'balance_sheet', 'cash_flow', 'financial_growth']);
-const annualOnly = new Set(['analyst_estimates', 'key_metrics', 'ratios']);
+/** Feed collections a per-symbol history dataset also fills (#387): they have history, per symbol. */
+const historyBacked = new Map(
+  DATASET_CATALOG.filter((d) => d.perSymbol && feeds.has(d.defaultCollection)).map((d) => [
+    d.defaultCollection,
+    d.label,
+  ]),
+);
+/** Where the backtestable history of a forward-only collection lives, when FMP has one (#387). */
+const historyElsewhere: Record<string, string> = {
+  grades_consensus: 'grades_consensus_history (monthly, since about 2018)',
+  analyst_grades: 'analyst_grades_history (every grade change, since about 2012)',
+  price_target_consensus: 'price_target_changes (individual targets, latest 100 per symbol)',
+};
+const statements = new Set([
+  'income_statement',
+  'balance_sheet',
+  'cash_flow',
+  'financial_growth',
+  'key_metrics_quarterly',
+  'ratios_quarterly',
+]);
+const annualOnly: Record<string, string> = {
+  analyst_estimates: 'analyst_estimates_quarterly',
+  key_metrics: 'key_metrics_quarterly',
+  ratios: 'ratios_quarterly',
+};
 
 export const BUILTIN_CAVEATS: Builtin[] = [
   {
@@ -38,23 +67,14 @@ export const BUILTIN_CAVEATS: Builtin[] = [
       perSymbol.has(c.collection) ||
       ['universe', 'securities', 'prices_daily', 'delisted_companies'].includes(c.collection),
     text: () =>
-      'Survivorship bias: the FMP plan serves only page 0 of delisted-companies (about 100 names), so most companies that died are missing. Backtests overstate returns, most in small caps.',
-  },
-  {
-    id: 'index-constituents',
-    severity: 'info',
-    source: 'plan',
-    fix: '#136',
-    applies: (c) => ['universe', 'securities'].includes(c.collection),
-    text: () =>
-      'Index constituents (S&P 500, Nasdaq, Dow) are not available on the FMP plan (402); there is no index membership. The screener universe stands in.',
+      "Survivorship bias before 2021: the universe holds every delisted NASDAQ/NYSE/AMEX company FMP lists, but FMP's delisted list starts in late 2020. Companies that died in 2016-2020 are missing, so backtests over those years still lean toward survivors, most in small caps.",
   },
   {
     id: 'annual-only',
     severity: 'info',
-    source: 'plan',
-    applies: (c) => annualOnly.has(c.collection),
-    text: () => 'Annual values only: quarterly estimates and key metrics are not on the FMP plan.',
+    source: 'data',
+    applies: (c) => c.collection in annualOnly,
+    text: (c) => `Annual values; the quarterly series is ${annualOnly[c.collection]}.`,
   },
   {
     id: 'snapshot-history',
@@ -63,15 +83,23 @@ export const BUILTIN_CAVEATS: Builtin[] = [
     fix: '#113 (forward_only)',
     applies: (c) => snapshots.has(c.collection),
     text: (c) =>
-      `No history before the first weekly snapshot${c.firstSnapshot ? ` (${c.firstSnapshot})` : ''}: FMP keeps no estimate/consensus history. Backtests must not use this data before that date; strategies built on it are forward-only.`,
+      `No history before the first weekly snapshot${c.firstSnapshot ? ` (${c.firstSnapshot})` : ''}: FMP keeps no history of these values. Backtests must not use this data before that date; strategies built on it are forward-only.${historyElsewhere[c.collection] ? ` For history use ${historyElsewhere[c.collection]}.` : ''}`,
   },
   {
     id: 'feed-history',
     severity: 'blocking',
     source: 'data',
-    applies: (c) => feeds.has(c.collection),
+    applies: (c) => feeds.has(c.collection) && !historyBacked.has(c.collection),
     text: (c) =>
-      `Feed of the latest items only: history starts when the sync started${c.dateMin ? ` (${c.dateMin})` : ''}. Not backtestable before then; strategies built on it are forward-only.`,
+      `Feed of the latest items only: history starts when the sync started${c.dateMin ? ` (${c.dateMin})` : ''}. Not backtestable before then; strategies built on it are forward-only.${historyElsewhere[c.collection] ? ` For history use ${historyElsewhere[c.collection]}.` : ''}`,
+  },
+  {
+    id: 'per-symbol-history',
+    severity: 'warn',
+    source: 'data',
+    applies: (c) => historyBacked.has(c.collection),
+    text: (c) =>
+      `History comes from the per-symbol "${historyBacked.get(c.collection)}" sync and its backfill${c.dateMin ? ` (earliest ${c.dateMin})` : ''}; FMP serves a limited depth per symbol, so how far back it goes varies by company. The daily feed adds new rows.`,
   },
   {
     id: 'earnings-timing',
@@ -84,12 +112,11 @@ export const BUILTIN_CAVEATS: Builtin[] = [
   },
   {
     id: 'statement-depth',
-    severity: 'warn',
+    severity: 'info',
     source: 'data',
-    fix: '#77, #88',
     applies: (c) => statements.has(c.collection),
     text: () =>
-      'Quarterly history is short (the sync pulls about 8 quarters per symbol) until the 40-quarter backfill. Year-over-year features need 5+ quarters.',
+      'The weekly sync re-pulls the latest 8 quarters per symbol; older quarters come from the 48-quarter backfill. Symbols listed for less than that have shorter history.',
   },
   {
     id: 'current-sector',

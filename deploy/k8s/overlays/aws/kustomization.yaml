@@ -85,6 +85,8 @@ patches:
         # Nodes are 2 vCPU and shared; a full-CPU request never schedules. No CPU limit, so Jobs still burst.
         EXECUTOR_JOB_CPU: 500m
         GATEWAY_PUBLIC_URL: wss://openharness.faberiq.ai
+        # FMP Premium allows 750 calls/min (#387); dataset syncs take 600 and leave room for agents' FMP calls.
+        DATASET_SYNC_RPM: "600"
   # Persistent EBS for the shared files claim and every StatefulSet volume.
   - target:
       kind: PersistentVolumeClaim

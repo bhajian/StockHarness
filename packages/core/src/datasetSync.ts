@@ -9,7 +9,13 @@ import { ownedConnection } from './mcp.js';
 import { nextScheduledAt } from './schedule.js';
 import { HttpError, safeError } from './security.js';
 import { scheduleSchema, type Stored } from './schema.js';
-import { catalogById, UNIVERSE_DATASET_ID, presetById, type DatasetDef } from './datasetCatalog.js';
+import {
+  catalogById,
+  UNIVERSE_DATASET_ID,
+  presetById,
+  variantsOf,
+  type DatasetDef,
+} from './datasetCatalog.js';
 import { catalogEntries, refreshCatalogEntry } from './schemaCatalog.js';
 import { ingestChecker, recordDrift } from './ingestValidation.js';
 import { emitHarnessEvent } from './harnessEvents.js';
@@ -25,6 +31,10 @@ import {
 // The test stack points this at its FMP fixture (#83); production uses FMP.
 const FMP_BASE = process.env.FMP_BASE_URL || 'https://financialmodelingprep.com/stable';
 const MAX_RPM = Number(process.env.DATASET_SYNC_RPM) || 250;
+/** The universe screener floor: the research universe's point-in-time min_market_cap (universe_daily). */
+export const UNIVERSE_MIN_MARKET_CAP = 300_000_000;
+/** A screener answer shorter than this is treated as broken: the universe is then not pruned. */
+const UNIVERSE_MIN_ACTIVE = 500;
 /** One FMP rate limit for every sync in the process; the highest-priority waiter gets the next slot (#78). */
 export const fmpLimiter = new PriorityRateLimiter(MAX_RPM);
 /** Background sync runs: priority first, never twice at once, never blocking the dispatcher tick. */
@@ -143,6 +153,37 @@ export function chunkRanges(from: string, to: string, days: number): [string, st
 }
 const isTimeseries = (def: DatasetDef) => def.incremental === 'timeseries';
 
+/** Stamp a variant's tag fields (e.g. `index: 'sp500'`) on the rows it returned. */
+export function tagRows(rows: unknown[], tag: Record<string, string>) {
+  if (Object.keys(tag).length)
+    for (const r of rows) if (r && typeof r === 'object') Object.assign(r as Record<string, unknown>, tag);
+  return rows;
+}
+
+/** Tag an FMP answer's rows before the ingest check, so the tag is checked like any field (an error body is
+ * left as is for the check to report). */
+const tagged = (data: unknown, tag: Record<string, string>) =>
+  Array.isArray(data) ? tagRows(data, tag) : data;
+
+/** The rolling window a window dataset re-pulls each run: [today - lookback, today + lookahead]. */
+export function rollingWindow(def: DatasetDef, sync: Pick<DatasetSync, 'from' | 'to'>, now: string) {
+  return {
+    from: sync.from || addDays(now, -(def.lookbackDays ?? 7)),
+    to: sync.to || addDays(now, def.lookaheadDays ?? 14),
+  };
+}
+
+/**
+ * Common stock only (#387): drops warrants, units and rights (a NASDAQ 5-letter symbol ending in W, U or R, or a
+ * -W/-WS/-U/-R/-RT/.U/.WS suffix) and preferreds (-P, -PA…). Share classes such as BRK-B stay.
+ */
+export function isCommonStockSymbol(symbol: string) {
+  const s = symbol.toUpperCase();
+  if (/[-.](P[A-Z]?|W[A-Z]?|WS|U|UN|R|RT)$/.test(s)) return false;
+  if (/^[A-Z]{4}[WUR]$/.test(s)) return false;
+  return /^[A-Z][A-Z0-9]{0,5}([-.][A-Z])?$/.test(s);
+}
+
 export async function fmpApiKey(ownerId: string, connectionId: string) {
   const connection = await ownedConnection(ownerId, connectionId);
   let key: string | null = null;
@@ -243,6 +284,15 @@ export async function resolveSymbols(sync: DatasetSync, wsDb: ReturnType<typeof 
   if (sync.symbolsMode === 'preset' && sync.preset) {
     const preset = presetById.get(sync.preset);
     if (!preset) throw new HttpError(400, `Unknown ticker preset: ${sync.preset}`);
+    // Exact index membership (#387): the current members from the index_constituents sync.
+    if (preset.index) {
+      const members = (await wsDb
+        .collection('index_constituents')
+        .distinct('symbol', { index: preset.index })) as string[];
+      if (!members.length)
+        throw new HttpError(400, `No ${preset.label} members yet: sync the Index constituents dataset first`);
+      return members.sort();
+    }
     const data = await fmpGet(
       'company-screener',
       { ...preset.screener, isEtf: 'false', isFund: 'false', isActivelyTrading: 'true', limit: 5000 },
@@ -273,8 +323,17 @@ export async function upsertRows(
   rows: unknown[],
   keyFields: string[],
 ) {
+  return (await upsertRowsCounted(coll, rows, keyFields)).written;
+}
+
+/** upsertRows, also counting the rows that were new (a feed stops paging at a page with none). */
+export async function upsertRowsCounted(
+  coll: ReturnType<ReturnType<typeof mongo.db>['collection']>,
+  rows: unknown[],
+  keyFields: string[],
+) {
   const docs = rows.filter((r): r is Record<string, unknown> => !!r && typeof r === 'object');
-  if (!docs.length) return 0;
+  if (!docs.length) return { written: 0, inserted: 0 };
   const now = new Date();
   const ops = docs.map((doc) => {
     const clean = { ...doc, _syncedAt: now };
@@ -283,11 +342,13 @@ export async function upsertRows(
     return { updateOne: { filter, update: { $set: clean }, upsert: true } };
   });
   let written = 0;
+  let inserted = 0;
   for (let i = 0; i < ops.length; i += 1000) {
     const res = await coll.bulkWrite(ops.slice(i, i + 1000), { ordered: false });
     written += (res.upsertedCount ?? 0) + (res.modifiedCount ?? 0);
+    inserted += res.upsertedCount ?? 0;
   }
-  return written;
+  return { written, inserted };
 }
 
 /** Do the actual data pull for one sync and return the row count. */
@@ -382,6 +443,8 @@ type PullStats = {
   symbolErrors?: { symbol: string; error: string }[];
   /** A plan limit the run stopped at without failing (#291), e.g. a feed's page limit. */
   planLimit?: string;
+  /** Rows a replacing snapshot deleted (universe names that no longer qualify, index members that left). */
+  removed?: number;
 };
 async function pull(
   sync: DatasetSync,
@@ -475,7 +538,7 @@ async function pullChecked(
   } else if (def.id === UNIVERSE_DATASET_ID) {
     // Survivorship-free SYNC universe (C1 #22): active screener names UNION all delisted companies,
     // so per-symbol flows also pull the history of names that later died. The market-cap / tradeable
-    // filter is a point-in-time RESEARCH universe applied later in Layer 3 (universe_daily), never here.
+    // filter is a point-in-time RESEARCH universe applied later in Layer 2 (universe_daily), never here.
     const p = (sync.params ?? {}) as Record<string, unknown>;
     const screener = await fmpGet(
       'company-screener',
@@ -484,13 +547,16 @@ async function pullChecked(
         isEtf: 'false',
         isFund: 'false',
         isActivelyTrading: 'true',
-        marketCapMoreThan: Number(p.marketCapMoreThan ?? 2_000_000_000),
-        limit: Number(p.limit ?? 5000),
+        // The research universe's point-in-time floor (universe_daily min_market_cap): a higher floor here
+        // would drop names that were above it in the past and fell below since (#387).
+        marketCapMoreThan: Number(p.marketCapMoreThan ?? UNIVERSE_MIN_MARKET_CAP),
+        limit: Number(p.limit ?? 10000),
       },
       apikey,
     );
     const active = (Array.isArray(screener) ? screener : [])
       .filter((r): r is Record<string, unknown> => !!r && typeof r === 'object' && !!r.symbol)
+      .filter((r) => isCommonStockSymbol(String(r.symbol)))
       .map((r) => ({
         symbol: r.symbol,
         companyName: r.companyName,
@@ -500,10 +566,11 @@ async function pullChecked(
         industry: r.industry,
         is_delisted: false,
       }));
-    // Delisted companies (paginated). Non-fatal: the Premium plan only serves page 0 (page>=1 -> 402),
-    // so we take what is available and never let it fail the universe build. Refreshes delisted_companies.
+    // Delisted companies, every page (#387: the Premium plan serves about 170 pages, delistings since late 2020). Non-fatal: a page the
+    // plan refuses ends the list, and the universe keeps what came back. Refreshes delisted_companies.
     const delisted: Record<string, unknown>[] = [];
-    for (let page = 0; page < Number(p.delistedPages ?? 100); page++) {
+    let delistedComplete = false;
+    for (let page = 0; page < Number(p.delistedPages ?? 1000); page++) {
       let d: unknown;
       try {
         d = await fmpGet('delisted-companies', { page, limit: 100 }, apikey);
@@ -513,7 +580,10 @@ async function pullChecked(
       const dl = (Array.isArray(d) ? d : []).filter(
         (r): r is Record<string, unknown> => !!r && typeof r === 'object' && !!r.symbol,
       );
-      if (!dl.length) break;
+      if (!dl.length) {
+        delistedComplete = true;
+        break;
+      }
       delisted.push(...dl);
     }
     if (delisted.length) {
@@ -529,7 +599,9 @@ async function pullChecked(
         .map((x) => x.trim().toUpperCase()),
     );
     const bySymbol = new Map<string, Record<string, unknown>>();
-    for (const r of delisted.filter((x) => exchanges.has(String(x.exchange ?? '').toUpperCase())))
+    for (const r of delisted.filter(
+      (x) => exchanges.has(String(x.exchange ?? '').toUpperCase()) && isCommonStockSymbol(String(x.symbol)),
+    ))
       bySymbol.set(String(r.symbol), {
         symbol: r.symbol,
         companyName: r.companyName,
@@ -539,8 +611,13 @@ async function pullChecked(
       });
     for (const r of active) bySymbol.set(String(r.symbol), r);
     rows += await upsertRows(coll, [...bySymbol.values()], def.keyFields);
+    // A complete pull replaces the universe: names that no longer qualify (foreign or OTC leftovers, warrants,
+    // units) stop being synced. Guarded so a short or failed answer never empties it.
+    if (delistedComplete && active.length >= UNIVERSE_MIN_ACTIVE)
+      stats.removed = (await coll.deleteMany({ symbol: { $nin: [...bySymbol.keys()] } })).deletedCount;
   } else if (def.scope === 'feed') {
-    const maxPages = Number((sync.params as Record<string, unknown> | undefined)?.pages ?? 5);
+    // Feeds are newest first: page until a page brings nothing new (or the plan's page limit, #291).
+    const maxPages = Number((sync.params as Record<string, unknown> | undefined)?.pages ?? 50);
     for (let page = 0; page < maxPages; page++) {
       let data: unknown;
       try {
@@ -555,26 +632,35 @@ async function pullChecked(
       }
       const list = checker.check(data);
       if (!list.length) break;
-      rows += await upsertRows(coll, list, def.keyFields);
+      const { written, inserted } = await upsertRowsCounted(coll, list, def.keyFields);
+      rows += written;
+      if (!inserted) break;
     }
   } else if (def.incremental === 'window') {
-    const from = sync.from || addDays(now, -7);
-    const to = sync.to || addDays(now, 14);
-    for (const [a, b] of chunkRanges(from, to, 60)) {
-      rows += await upsertRows(
-        coll,
-        checker.check(await fmpGet(def.endpoint, { from: a, to: b }, apikey)),
-        def.keyFields,
-      );
-    }
+    const { from, to } = rollingWindow(def, sync, now);
+    for (const v of variantsOf(def))
+      for (const [a, b] of chunkRanges(from, to, def.windowDays ?? 60))
+        rows += await upsertRows(
+          coll,
+          checker.check(tagged(await fmpGet(v.endpoint, { ...v.params, from: a, to: b }, apikey), v.tag)),
+          def.keyFields,
+        );
   } else {
-    const params: Record<string, string | number> = { ...(def.params ?? {}) };
-    if (def.id === 'sector_performance') params.date = now;
-    if (def.supportsDateRange) {
-      params.from = sync.from || addDays(now, -365 * 5);
-      params.to = sync.to || now;
+    const startedAt = new Date();
+    let complete = true;
+    for (const v of variantsOf(def)) {
+      const params: Record<string, string | number> = { ...v.params };
+      if (def.supportsDateRange) {
+        params.from = sync.from || addDays(now, -365 * 5);
+        params.to = sync.to || now;
+      }
+      const list = checker.check(tagged(await fmpGet(v.endpoint, params, apikey), v.tag));
+      if (!list.length) complete = false;
+      rows += await upsertRows(coll, list, def.keyFields);
     }
-    rows += await upsertRows(coll, checker.check(await fmpGet(def.endpoint, params, apikey)), def.keyFields);
+    // Snapshot lists (index members): what a complete pull no longer returns has left the list.
+    if (def.replaceStale && complete)
+      stats.removed = (await coll.deleteMany({ _syncedAt: { $lt: startedAt } })).deletedCount;
   }
 
   if (sync.retentionDays && def.dateField) {
@@ -632,6 +718,7 @@ export async function runDatasetSync(
           calls: calls.n,
           ...(stats.symbolErrors?.length ? { symbolErrors: stats.symbolErrors } : {}),
           ...(stats.planLimit ? { planLimit: stats.planLimit } : {}),
+          ...(stats.removed ? { removed: stats.removed } : {}),
         },
       },
     );
