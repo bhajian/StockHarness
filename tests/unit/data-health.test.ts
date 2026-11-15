@@ -139,3 +139,14 @@ test('a Layer 2 output keyed by date is a daily series even without a grain text
     'corporate actions are events, not a daily series',
   );
 });
+
+test('logs are not daily series even when keyed by date (#428)', () => {
+  assert.equal(
+    isDailySeries({
+      ...l2('one row per issue'),
+      primaryKey: ['collection', 'issue_type', 'security_id', 'date'],
+      collection: 'dq_issues',
+    }),
+    false,
+  );
+});

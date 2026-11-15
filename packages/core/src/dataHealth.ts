@@ -3,13 +3,15 @@
 // pipelines' latest runs, and the top-bar indicator (fresh / N late / Layer 2 blocked).
 import { collection, mongo } from './db.js';
 import { workspaceDatabase } from './mongoMcp.js';
-import { listCatalog, type CatalogEntry, type CatalogLayer } from './schemaCatalog.js';
+import { catalogEntries, listCatalog, type CatalogEntry, type CatalogLayer } from './schemaCatalog.js';
 import { freshnessOf, type Freshness } from './lineage.js';
 import { datasetSyncs } from './datasetSync.js';
 import { catalogById } from './datasetCatalog.js';
 
 /** One expected session: its row count; `partial` when far below the usual count (#395). */
 export type GapCell = { date: string; rows: number | null; partial?: boolean };
+/** Logs written by the platform itself: not data with a cadence, sessions or gaps (#428). */
+const LOGS = new Set(['dq_issues']);
 /** A session with fewer rows than this share of the window's median is a partial gap (#395). */
 const PARTIAL_SHARE = 0.5;
 export type HealthRow = {
@@ -22,7 +24,8 @@ export type HealthRow = {
   dateMax?: string;
   rows: number;
   coveragePct?: number;
-  dq: { error: number; warn: number };
+  /** Open DQ issues; `research`: the part on rows in the research universe (#428). */
+  dq: { error: number; warn: number; research?: { error: number; warn: number } };
   caveats: { blocking: number; warn: number };
   producer?: { type: string; name: string };
   error?: string;
@@ -105,10 +108,14 @@ const DAILY_MARKET_SERIES = new Set(['treasury_rates', 'sector_performance']);
  * so they are fresh when their producer last succeeded within its cadence.
  */
 export function isDailySeries(
-  e: Pick<CatalogEntry, 'layer' | 'grain' | 'timeSemantics' | 'producedBy'> & { primaryKey?: string[] },
+  e: Pick<CatalogEntry, 'layer' | 'grain' | 'timeSemantics' | 'producedBy'> & {
+    primaryKey?: string[];
+    collection?: string;
+  },
   /** The producing sync's schedule interval (minutes), when it has an enabled schedule. */
   everyMinutes?: number,
 ) {
+  if (e.collection && LOGS.has(e.collection)) return false;
   // Layer 2: documented as one row per trading day, or keyed by `date` (a user transform may not say, #409).
   if (e.layer === 2)
     return (
@@ -128,17 +135,25 @@ export async function dataHealth(ownerId: string, opts: { days?: number } = {}) 
   const dq = await mongo
     .db(workspaceDatabase(ownerId))
     .collection('dq_issues')
-    .aggregate<{ _id: { c: string; s: string }; n: number }>([
+    .aggregate<{ _id: { c: string; s: string; u: boolean }; n: number }>([
       { $match: { resolved: { $ne: true } } },
-      { $group: { _id: { c: '$collection', s: '$severity' }, n: { $sum: 1 } } },
+      {
+        $group: {
+          _id: { c: '$collection', s: '$severity', u: { $eq: ['$in_universe', true] } },
+          n: { $sum: 1 },
+        },
+      },
     ])
     .toArray()
     .catch(() => []);
-  const dqBy = new Map<string, { error: number; warn: number }>();
+  const dqBy = new Map<string, HealthRow['dq']>();
   for (const d of dq) {
-    const x = dqBy.get(d._id.c) ?? { error: 0, warn: 0 };
-    if (d._id.s === 'error') x.error += d.n;
-    else if (d._id.s === 'warn') x.warn += d.n;
+    const x = dqBy.get(d._id.c) ?? { error: 0, warn: 0, research: { error: 0, warn: 0 } };
+    const sev = d._id.s === 'error' ? 'error' : d._id.s === 'warn' ? 'warn' : undefined;
+    if (sev) {
+      x[sev] += d.n;
+      if (d._id.u) x.research![sev] += d.n;
+    }
     dqBy.set(d._id.c, x);
   }
   const covs = new Map(
@@ -172,6 +187,9 @@ export async function dataHealth(ownerId: string, opts: { days?: number } = {}) 
       gaps = gapCells(expected, byDate, today);
     }
     let freshness = freshnessOf(e.freshness.lastUpdated, e.freshness.lastStatus, e.freshness.cadence);
+    // Logs and on-demand outputs (DQ issues, simulation ledgers) have no schedule to be late on (#428).
+    if (freshness === 'unknown' && (e.layer === 4 || LOGS.has(e.collection)) && e.coverage.rows)
+      freshness = 'fresh';
     const lag = e.coverage.dateField && daily ? lagSessions(expected, e.coverage.dateMax) : undefined;
     if (freshness === 'fresh' && lag !== undefined && lag > 3) freshness = 'stale';
     return {
@@ -185,7 +203,7 @@ export async function dataHealth(ownerId: string, opts: { days?: number } = {}) 
       ...(e.coverage.universeCoveragePct !== undefined
         ? { coveragePct: e.coverage.universeCoveragePct }
         : {}),
-      dq: dqBy.get(e.collection) ?? { error: 0, warn: 0 },
+      dq: dqBy.get(e.collection) ?? { error: 0, warn: 0, research: { error: 0, warn: 0 } },
       caveats: {
         blocking: e.caveats.filter((c) => c.severity === 'blocking').length,
         warn: e.caveats.filter((c) => c.severity === 'warn').length,
@@ -293,6 +311,8 @@ export async function dataHealth(ownerId: string, opts: { days?: number } = {}) 
     stale: rows.filter((r) => r.freshness === 'stale').length,
     failed: rows.filter((r) => r.freshness === 'failed').length + failedTransforms.length,
     drift: drift.length,
+    /** Open DQ errors on rows in the research universe (#428): what a strategy could actually read. */
+    dqResearchErrors: rows.reduce((n, r) => n + (r.dq.research?.error ?? 0), 0),
     /** Daily series with a missing or partial session in the strip (#395). */
     gaps: rows.filter((r) => r.gapSummary && (r.gapSummary.missing || r.gapSummary.partial)).length,
   };
@@ -387,8 +407,76 @@ async function sweepDailyCoverage() {
   const { collectionCoverage, coverageSettled } = await import('./catalogCoverage.js');
   const owners = (await collection('dataset_catalog').distinct('ownerId')) as string[];
   for (const ownerId of owners)
+    await stampDqRelevance(ownerId).catch((e) => console.warn('DQ relevance:', e));
+  for (const ownerId of owners)
     for (const name of await staleDailyCoverage(ownerId)) {
       await collectionCoverage(ownerId, name, { refresh: true });
       await coverageSettled(ownerId, name);
     }
+}
+
+/**
+ * Stamps open DQ issues with `in_universe` (#428): for prices_daily, whether the security was in the research
+ * universe on that date; for other security-keyed outputs, whether it ever was. Unstamped issues are done first;
+ * everything is re-stamped once universe_daily has been rebuilt since the last stamp.
+ */
+export async function stampDqRelevance(ownerId: string, batch = 5000) {
+  const db = mongo.db(workspaceDatabase(ownerId));
+  const issues = db.collection('dq_issues');
+  const universe = await catalogEntryUpdatedAt(ownerId, 'universe_daily');
+  if (!universe) return 0;
+  const stale = {
+    resolved: { $ne: true },
+    security_id: { $type: 'string' },
+    $or: [{ in_universe_at: { $exists: false } }, { in_universe_at: { $lt: universe } }],
+  };
+  const ever = new Set(
+    (await db.collection('universe_daily').distinct('security_id', { in_universe: true })) as string[],
+  );
+  let stamped = 0;
+  for (;;) {
+    const page = await issues
+      .find(stale, { projection: { _id: 1, collection: 1, security_id: 1, date: 1 } })
+      .limit(batch)
+      .toArray();
+    if (!page.length) break;
+    const daily = page.filter((i) => i.collection === 'prices_daily' && typeof i.date === 'string');
+    const members = new Set<string>();
+    if (daily.length) {
+      const found = await db
+        .collection('universe_daily')
+        .find(
+          { $or: daily.map((i) => ({ security_id: i.security_id, date: i.date })), in_universe: true },
+          { projection: { _id: 0, security_id: 1, date: 1 } },
+        )
+        .toArray();
+      for (const f of found) members.add(`${f.security_id}|${f.date}`);
+    }
+    const now = new Date();
+    const ops = page.map((i) => ({
+      updateOne: {
+        filter: { _id: i._id },
+        update: {
+          $set: {
+            in_universe:
+              i.collection === 'prices_daily' && typeof i.date === 'string'
+                ? members.has(`${i.security_id}|${i.date}`)
+                : ever.has(String(i.security_id)),
+            in_universe_at: now,
+          },
+        },
+      },
+    }));
+    await issues.bulkWrite(ops, { ordered: false });
+    stamped += page.length;
+  }
+  return stamped;
+}
+
+async function catalogEntryUpdatedAt(ownerId: string, name: string) {
+  const e = await catalogEntries().findOne(
+    { ownerId, collection: name },
+    { projection: { 'freshness.lastUpdated': 1 } },
+  );
+  return e?.freshness?.lastUpdated ? new Date(e.freshness.lastUpdated) : undefined;
 }
