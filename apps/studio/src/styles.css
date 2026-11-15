@@ -7470,9 +7470,9 @@ details.advanced summary {
 
 /* ---- Dataset tab v2: top table + wide grid ---- */
 .dataset-v2 { display: flex; flex-direction: column; gap: 18px; }
-/* Ten rows tall (#384): one line per row (wide cells scroll sideways), a sticky header and a sliver of row 11
-   that says "scroll for more". Rows load 20 at a time as the table scrolls (tableKit.useInfiniteRows). */
-.dataset-table { --dataset-row: 40px; max-height: calc(var(--dataset-row) * 11.5); overflow: auto; }
+/* Grows with the page (#384, #414): one line per row (wide cells scroll sideways), 20 rows at first and 20 more
+   as the page scrolls (tableKit.useInfiniteRows with the viewport as the root). No inner scroll box. */
+.dataset-table { --dataset-row: 40px; overflow-x: auto; }
 .dataset-table table { width: 100%; font-size: 13px; }
 .dataset-table th,
 .dataset-table td { white-space: nowrap; padding-top: 0; padding-bottom: 0; height: var(--dataset-row); }

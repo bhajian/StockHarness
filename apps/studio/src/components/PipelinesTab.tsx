@@ -60,7 +60,7 @@ import type { DatasetsRoute } from '../datasetsRoute';
 import { LANES, LANE_HEAD, NODE_H, NODE_W, criticalPath, ganttBars, layoutPipeline } from '../pipelineLayout';
 import { Button, Empty, Field, IconButton, Modal } from './ui';
 import { Drawer, GateChecklist, KpiCard, Skeleton, StatusPill, Tabs } from './kit';
-import { SortTh, rankOf, useSort } from './tableKit';
+import { PagedRows, rankOf, SortTh, useSort } from './tableKit';
 import { ScheduleFields } from './agentFields';
 import { ObjectTransfer } from './ObjectTransfer';
 
@@ -260,41 +260,43 @@ function PipelinesList({
                 </tr>
               </thead>
               <tbody>
-                {sorted.map((p) => (
-                  <tr key={p.id}>
-                    <td>
-                      <a
-                        href={`/datasets/pipelines/${p.name}`}
-                        onClick={(e) => {
-                          e.preventDefault();
-                          go({ tab: 'pipelines', item: p.name });
-                        }}
-                      >
-                        <strong>{p.name}</strong>
-                      </a>
-                      <div className="muted-line">
-                        v{p.version} · {p.nodes.length} nodes{!p.enabled && ' · disabled'}
-                      </div>
-                    </td>
-                    <td>{scheduleText(p)}</td>
-                    <td>{p.period}</td>
-                    <td>
-                      {p.lastRun ? (
-                        <>
-                          <StatusPill status={pillOf(p.lastRun.status)} label={p.lastRun.status} />
-                          <div className="muted-line">{p.lastRun.period.id}</div>
-                        </>
-                      ) : (
-                        <span className="muted-line">Never</span>
-                      )}
-                    </td>
-                    <td>{fmtMs(dur(p.lastRun?.startedAt, p.lastRun?.finishedAt))}</td>
-                    <td>
-                      {p.lastRun ? `${passed(p.lastRun)} / ${Object.keys(p.lastRun.nodes).length}` : '—'}
-                    </td>
-                    <td>{p.nextRunAt ? timestamp(p.nextRunAt) : '—'}</td>
-                  </tr>
-                ))}
+                <PagedRows rows={sorted} resetKey={sort}>
+                  {(p) => (
+                    <tr key={p.id}>
+                      <td>
+                        <a
+                          href={`/datasets/pipelines/${p.name}`}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            go({ tab: 'pipelines', item: p.name });
+                          }}
+                        >
+                          <strong>{p.name}</strong>
+                        </a>
+                        <div className="muted-line">
+                          v{p.version} · {p.nodes.length} nodes{!p.enabled && ' · disabled'}
+                        </div>
+                      </td>
+                      <td>{scheduleText(p)}</td>
+                      <td>{p.period}</td>
+                      <td>
+                        {p.lastRun ? (
+                          <>
+                            <StatusPill status={pillOf(p.lastRun.status)} label={p.lastRun.status} />
+                            <div className="muted-line">{p.lastRun.period.id}</div>
+                          </>
+                        ) : (
+                          <span className="muted-line">Never</span>
+                        )}
+                      </td>
+                      <td>{fmtMs(dur(p.lastRun?.startedAt, p.lastRun?.finishedAt))}</td>
+                      <td>
+                        {p.lastRun ? `${passed(p.lastRun)} / ${Object.keys(p.lastRun.nodes).length}` : '—'}
+                      </td>
+                      <td>{p.nextRunAt ? timestamp(p.nextRunAt) : '—'}</td>
+                    </tr>
+                  )}
+                </PagedRows>
               </tbody>
             </table>
           </div>

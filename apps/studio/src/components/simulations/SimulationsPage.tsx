@@ -4,7 +4,7 @@ import React, { useEffect, useState } from 'react';
 import { Plus, Play } from 'lucide-react';
 import { api } from '../../api';
 import { Skeleton, StatusPill } from '../kit';
-import { SortHead, rankOf, useSort } from '../tableKit';
+import { PagedRows, rankOf, SortHead, useSort } from '../tableKit';
 import { go, num, pct, setQuery, useLocation } from '../ideas/nav';
 import { SimulationDetail } from './SimulationDetail';
 import { ScheduleModal } from './ScheduleModal';
@@ -129,51 +129,53 @@ function SimulationList({ isAdmin }: { isAdmin: boolean }) {
               toggle={toggle}
             />
             <tbody>
-              {sorted.map((r) => (
-                <tr key={r.id} className="clickable" onClick={() => go(`/simulations/${r.id}`)}>
-                  <td>
-                    <strong>{r.name}</strong>
-                    {r.usesHoldout && <small className="muted-line">uses the holdout</small>}
-                  </td>
-                  <td>
-                    <span className="chips">
-                      {r.ideas.map((i: string) => (
-                        <button
-                          key={i}
-                          type="button"
-                          className="chip"
-                          title={`Open ${i}`}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            go(`/ideas/${i}`);
-                          }}
-                        >
-                          {i}
-                        </button>
-                      ))}
-                    </span>
-                  </td>
-                  <td className="nowrap">
-                    {r.period.start} → {r.period.end}
-                  </td>
-                  <td>
-                    <StatusPill status={r.status} />
-                    {r.status === 'running' && (
-                      <small className="muted-line">≈ {duration(r.estimateSeconds)}</small>
-                    )}
-                    {r.error && (
-                      <small className="error-line" title={r.error}>
-                        {r.error.slice(0, 60)}
-                      </small>
-                    )}
-                  </td>
-                  <td className="num">{pct(r.cagr)}</td>
-                  <td className="num">{num(r.sharpe)}</td>
-                  <td className="num">{pct(r.maxDrawdown)}</td>
-                  <td className="num">{money(r.finalNav)}</td>
-                  <td className="nowrap">{when(r.createdAt)}</td>
-                </tr>
-              ))}
+              <PagedRows rows={sorted} resetKey={sort}>
+                {(r) => (
+                  <tr key={r.id} className="clickable" onClick={() => go(`/simulations/${r.id}`)}>
+                    <td>
+                      <strong>{r.name}</strong>
+                      {r.usesHoldout && <small className="muted-line">uses the holdout</small>}
+                    </td>
+                    <td>
+                      <span className="chips">
+                        {r.ideas.map((i: string) => (
+                          <button
+                            key={i}
+                            type="button"
+                            className="chip"
+                            title={`Open ${i}`}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              go(`/ideas/${i}`);
+                            }}
+                          >
+                            {i}
+                          </button>
+                        ))}
+                      </span>
+                    </td>
+                    <td className="nowrap">
+                      {r.period.start} → {r.period.end}
+                    </td>
+                    <td>
+                      <StatusPill status={r.status} />
+                      {r.status === 'running' && (
+                        <small className="muted-line">≈ {duration(r.estimateSeconds)}</small>
+                      )}
+                      {r.error && (
+                        <small className="error-line" title={r.error}>
+                          {r.error.slice(0, 60)}
+                        </small>
+                      )}
+                    </td>
+                    <td className="num">{pct(r.cagr)}</td>
+                    <td className="num">{num(r.sharpe)}</td>
+                    <td className="num">{pct(r.maxDrawdown)}</td>
+                    <td className="num">{money(r.finalNav)}</td>
+                    <td className="nowrap">{when(r.createdAt)}</td>
+                  </tr>
+                )}
+              </PagedRows>
             </tbody>
           </table>
         </div>

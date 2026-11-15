@@ -1,5 +1,6 @@
-// #384 / #385: the Datasets syncs table is ten rows tall, loads 20 rows at a time as it scrolls, starts again at
-// the top when the search or sort changes, and sorts the whole list by a column's value from its header.
+// #384 / #385 / #414: the Datasets syncs table grows with the page (at least ten rows on a laptop screen), loads
+// 20 rows at a time as the page scrolls, starts again at the first page when the search or sort changes, and sorts
+// the whole list by a column's value from its header.
 import { readFileSync } from 'node:fs';
 import { test, expect, type Page } from '@playwright/test';
 
@@ -33,7 +34,9 @@ async function workspace(page: Page) {
   return api;
 }
 
-test('the syncs table: ten rows tall, 20 at a time as it scrolls, sortable headers', async ({ page }) => {
+test('the syncs table: grows with the page, 20 at a time as it scrolls, sortable headers', async ({
+  page,
+}) => {
   test.setTimeout(180000);
   const api = await workspace(page);
   const errors: string[] = [];
@@ -50,25 +53,39 @@ test('the syncs table: ten rows tall, 20 at a time as it scrolls, sortable heade
       schedule: { enabled: false, everyMinutes: 1440, input: 'x' },
     });
 
+  // A laptop screen (#414: the table showed about three rows).
+  await page.setViewportSize({ width: 1366, height: 768 });
   await page.goto('/datasets/syncs');
   const box = page.locator('.dataset-table');
   const rows = box.locator('tbody tr:not(.table-more)');
   await expect(rows).toHaveCount(20);
   await expect(box.locator('tr.table-more')).toContainText('Showing 20 of 45');
-  // Ten rows tall: the header, ten rows and a sliver of the eleventh.
+  // The table grows with the page: no inner scroll box, all 20 loaded rows are laid out.
+  const inner = await box.evaluate((el) => el.scrollHeight - el.clientHeight);
+  expect(inner).toBeLessThanOrEqual(1);
   const height = (await box.boundingBox())!.height;
   const rowHeight = (await rows.first().boundingBox())!.height;
-  expect(height / rowHeight).toBeGreaterThan(11);
-  expect(height / rowHeight).toBeLessThan(12.5);
+  expect(height / rowHeight).toBeGreaterThan(20);
+  // Scrolled to the table, at least ten rows are on screen at once.
+  await rows.first().evaluate((el) => el.scrollIntoView({ block: 'start' }));
+  const onScreen = await rows.evaluateAll(
+    (els) =>
+      els.filter((el) => {
+        const r = el.getBoundingClientRect();
+        return r.top >= 0 && r.bottom <= window.innerHeight;
+      }).length,
+  );
+  expect(onScreen).toBeGreaterThanOrEqual(10);
   if (process.env.SCREENSHOT)
     await page.screenshot({ path: 'test-results/datasets-table.png', fullPage: true });
 
-  // Infinite scroll: reaching the bottom loads the next 20, then the last 5.
-  await box.evaluate((el) => (el.scrollTop = el.scrollHeight));
+  // Infinite scroll with the page: reaching the bottom loads the next 20, then the last 5.
+  await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
   await expect(rows).toHaveCount(40);
-  await box.evaluate((el) => (el.scrollTop = el.scrollHeight));
+  await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
   await expect(rows).toHaveCount(45);
   await expect(box.locator('tr.table-more')).toHaveCount(0);
+  await page.evaluate(() => window.scrollTo(0, 0));
 
   // Sort by name: ascending, then descending; a new sort starts again at the first page.
   await page.getByRole('button', { name: 'Name', exact: true }).click();

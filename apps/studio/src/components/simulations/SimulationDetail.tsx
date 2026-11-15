@@ -18,7 +18,7 @@ import {
 } from 'lucide-react';
 import { api } from '../../api';
 import { Drawer, KpiCard, Skeleton, StatusPill, Tabs } from '../kit';
-import { SortHead, useSort } from '../tableKit';
+import { PagedRows, SortHead, useSort } from '../tableKit';
 import { BarChart, HeatmapChart, TimeSeriesChart } from '../../charts/Charts';
 import { go, num, pct } from '../ideas/nav';
 import { duration, money, openSchedule, when } from './SimulationsPage';
@@ -833,23 +833,25 @@ function PositionsTable({ positions }: { positions: any[] }) {
           toggle={toggle}
         />
         <tbody>
-          {sorted.map((x) => (
-            <tr key={`${x.idea_id}-${x.security_id}`}>
-              <td>
-                <strong>{x.ticker ?? x.security_id}</strong>
-              </td>
-              <td>{x.idea_id}</td>
-              <td>{x.sector ?? '—'}</td>
-              <td className="num">{num(x.shares, 2)}</td>
-              <td className="num">{num(x.price)}</td>
-              <td className="num">{money(x.value)}</td>
-              <td className="num">{pct(x.weight)}</td>
-              <td className={`num ${x.unrealized_pnl > 0 ? 'gain' : x.unrealized_pnl < 0 ? 'loss' : ''}`}>
-                {money(x.unrealized_pnl)}
-              </td>
-              <td className="nowrap">{x.entry_date}</td>
-            </tr>
-          ))}
+          <PagedRows rows={sorted} resetKey={sort}>
+            {(x) => (
+              <tr key={`${x.idea_id}-${x.security_id}`}>
+                <td>
+                  <strong>{x.ticker ?? x.security_id}</strong>
+                </td>
+                <td>{x.idea_id}</td>
+                <td>{x.sector ?? '—'}</td>
+                <td className="num">{num(x.shares, 2)}</td>
+                <td className="num">{num(x.price)}</td>
+                <td className="num">{money(x.value)}</td>
+                <td className="num">{pct(x.weight)}</td>
+                <td className={`num ${x.unrealized_pnl > 0 ? 'gain' : x.unrealized_pnl < 0 ? 'loss' : ''}`}>
+                  {money(x.unrealized_pnl)}
+                </td>
+                <td className="nowrap">{x.entry_date}</td>
+              </tr>
+            )}
+          </PagedRows>
         </tbody>
       </table>
     </div>

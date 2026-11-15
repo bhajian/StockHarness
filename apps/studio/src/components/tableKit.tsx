@@ -228,3 +228,34 @@ export function MoreRows({
     </tr>
   );
 }
+
+/**
+ * The rows of a paged table that grows with the page (#414): 20 rows, then 20 more as the page scrolls (the
+ * viewport is the scroll root), with a "Show more" row for keyboards. A new sort or a different row count (a
+ * filter) starts again at the first page. Use inside <tbody>; the render function returns one <tr> per row.
+ */
+export function PagedRows<T>({
+  rows,
+  resetKey,
+  children,
+  colSpan = 100,
+}: {
+  rows: readonly T[];
+  resetKey?: unknown;
+  children: (row: T, index: number) => ReactNode;
+  colSpan?: number;
+}) {
+  const page = useInfiniteRows(rows, { resetKey: [resetKey ?? null, rows.length] });
+  return (
+    <>
+      {page.shown.map((row, i) => children(row, i))}
+      <MoreRows
+        colSpan={colSpan}
+        shown={page.shown.length}
+        total={page.total}
+        onMore={page.more}
+        sentinelRef={page.sentinelRef}
+      />
+    </>
+  );
+}

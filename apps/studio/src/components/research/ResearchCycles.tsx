@@ -4,7 +4,7 @@ import React, { useEffect, useState } from 'react';
 import { ArrowLeft, BookOpen, Wrench } from 'lucide-react';
 import { api } from '../../api';
 import { Skeleton, StatusPill } from '../kit';
-import { SortHead, rankOf, useSort } from '../tableKit';
+import { PagedRows, rankOf, SortHead, useSort } from '../tableKit';
 import { IdeaStatus } from '../ideas/IdeaStatus';
 import { go } from '../ideas/nav';
 
@@ -72,23 +72,25 @@ function CycleList() {
           toggle={toggle}
         />
         <tbody>
-          {sorted.map((r) => (
-            <tr key={r.id} className="clickable" onClick={() => go(`/research/cycles/${r.id}`)}>
-              <td className="nowrap">{when(r.startedAt)}</td>
-              <td>
-                <StatusPill status={r.status} />
-                {r.error && <small className="error-line">{r.error.slice(0, 80)}</small>}
-              </td>
-              <td className="num">{mins(r.durationMs)}</td>
-              <td className="num">{usd(r.usd)}</td>
-              <td className="num">{r.calls}</td>
-              <td className="num">{r.theories.proposed}</td>
-              <td className="num">{r.theories.reviewed}</td>
-              <td className="num">{r.theories.coded}</td>
-              <td className="num">{r.theories.evaluated}</td>
-              <td className="num">{r.theories.judged}</td>
-            </tr>
-          ))}
+          <PagedRows rows={sorted} resetKey={sort}>
+            {(r) => (
+              <tr key={r.id} className="clickable" onClick={() => go(`/research/cycles/${r.id}`)}>
+                <td className="nowrap">{when(r.startedAt)}</td>
+                <td>
+                  <StatusPill status={r.status} />
+                  {r.error && <small className="error-line">{r.error.slice(0, 80)}</small>}
+                </td>
+                <td className="num">{mins(r.durationMs)}</td>
+                <td className="num">{usd(r.usd)}</td>
+                <td className="num">{r.calls}</td>
+                <td className="num">{r.theories.proposed}</td>
+                <td className="num">{r.theories.reviewed}</td>
+                <td className="num">{r.theories.coded}</td>
+                <td className="num">{r.theories.evaluated}</td>
+                <td className="num">{r.theories.judged}</td>
+              </tr>
+            )}
+          </PagedRows>
         </tbody>
       </table>
     </div>

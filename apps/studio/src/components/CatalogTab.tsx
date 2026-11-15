@@ -20,7 +20,7 @@ import {
 import type { DatasetsRoute } from '../datasetsRoute';
 import { Button, Empty, IconButton } from './ui';
 import { KpiCard, Skeleton, StatusPill, Tabs } from './kit';
-import { SortTh, useSort } from './tableKit';
+import { PagedRows, SortTh, useSort } from './tableKit';
 import { DataGrid } from './DataGrid';
 import { HeatmapChart, TimeSeriesChart } from '../charts/Charts';
 import { fmtNumber } from '../charts/chartData';
@@ -429,62 +429,64 @@ function FieldsTable({
           </tr>
         </thead>
         <tbody>
-          {sorted.map((f) => (
-            <tr key={f.name}>
-              <td>
-                <code>{f.name}</code>
-              </td>
-              <td>{f.type}</td>
-              <td>{f.null_pct}%</td>
-              <td className="catalog-example">{exampleText(f.example)}</td>
-              <td>
-                <span className="field-doc">
-                  {f.doc === 'dictionary' && !drafts[f.name] && (
-                    <span title="Auto-filled from the built-in field dictionary">
-                      <Bot size={13} aria-label="auto-filled" />
-                    </span>
-                  )}
-                  {f.doc === 'none' && !drafts[f.name] && <StatusPill status="warn" label="undocumented" />}
+          <PagedRows rows={sorted} resetKey={sort}>
+            {(f) => (
+              <tr key={f.name}>
+                <td>
+                  <code>{f.name}</code>
+                </td>
+                <td>{f.type}</td>
+                <td>{f.null_pct}%</td>
+                <td className="catalog-example">{exampleText(f.example)}</td>
+                <td>
+                  <span className="field-doc">
+                    {f.doc === 'dictionary' && !drafts[f.name] && (
+                      <span title="Auto-filled from the built-in field dictionary">
+                        <Bot size={13} aria-label="auto-filled" />
+                      </span>
+                    )}
+                    {f.doc === 'none' && !drafts[f.name] && <StatusPill status="warn" label="undocumented" />}
+                    {isAdmin ? (
+                      <textarea
+                        aria-label={`Description of ${f.name}`}
+                        title={value(f).description}
+                        value={value(f).description}
+                        placeholder="Describe this field"
+                        onChange={(x) =>
+                          setDrafts((d) => ({ ...d, [f.name]: { ...value(f), description: x.target.value } }))
+                        }
+                        onBlur={() => void save(f)}
+                        rows={2}
+                        onKeyDown={(x) =>
+                          x.key === 'Enter' &&
+                          !x.shiftKey &&
+                          (x.preventDefault(), (x.target as HTMLTextAreaElement).blur())
+                        }
+                      />
+                    ) : (
+                      f.description || '—'
+                    )}
+                  </span>
+                </td>
+                <td>
                   {isAdmin ? (
-                    <textarea
-                      aria-label={`Description of ${f.name}`}
-                      title={value(f).description}
-                      value={value(f).description}
-                      placeholder="Describe this field"
+                    <input
+                      aria-label={`Unit of ${f.name}`}
+                      className="unit-input"
+                      value={value(f).unit}
+                      placeholder="unit"
                       onChange={(x) =>
-                        setDrafts((d) => ({ ...d, [f.name]: { ...value(f), description: x.target.value } }))
+                        setDrafts((d) => ({ ...d, [f.name]: { ...value(f), unit: x.target.value } }))
                       }
                       onBlur={() => void save(f)}
-                      rows={2}
-                      onKeyDown={(x) =>
-                        x.key === 'Enter' &&
-                        !x.shiftKey &&
-                        (x.preventDefault(), (x.target as HTMLTextAreaElement).blur())
-                      }
                     />
                   ) : (
-                    f.description || '—'
+                    f.unit || ''
                   )}
-                </span>
-              </td>
-              <td>
-                {isAdmin ? (
-                  <input
-                    aria-label={`Unit of ${f.name}`}
-                    className="unit-input"
-                    value={value(f).unit}
-                    placeholder="unit"
-                    onChange={(x) =>
-                      setDrafts((d) => ({ ...d, [f.name]: { ...value(f), unit: x.target.value } }))
-                    }
-                    onBlur={() => void save(f)}
-                  />
-                ) : (
-                  f.unit || ''
-                )}
-              </td>
-            </tr>
-          ))}
+                </td>
+              </tr>
+            )}
+          </PagedRows>
         </tbody>
       </table>
     </div>

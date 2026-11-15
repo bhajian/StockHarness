@@ -21,7 +21,7 @@ import {
 import { WebhooksPanel } from './WebhooksPanel';
 import { ObjectTransfer } from './ObjectTransfer';
 import { ConfigBackupCard } from './ConfigBackupCard';
-import { SortHead, useSort } from './tableKit';
+import { PagedRows, SortHead, useSort } from './tableKit';
 import { PythonSecretsPanel } from './PythonSecrets';
 import {
   api,
@@ -385,49 +385,51 @@ export function SettingsPage({ user, setUser, data, refresh, edit, act }: Settin
                 extra={<th />}
               />
               <tbody>
-                {userSort.sorted.map((u) => (
-                  <tr key={u.id}>
-                    <td>
-                      <strong>{u.name}</strong>
-                      {u.id === user.id && <small> (you)</small>}
-                    </td>
-                    <td>{u.email}</td>
-                    <td>{u.role}</td>
-                    <td>
-                      <Status status={u.enabled ? 'enabled' : 'disabled'} />
-                    </td>
-                    <td>
-                      {u.id !== user.id && (
-                        <div className="row-actions">
-                          <Button
-                            variant="ghost"
-                            onClick={() =>
-                              void act(async () => {
-                                await send(`/users/${u.id}`, { enabled: !u.enabled }, 'PATCH');
-                                await loadUsers();
-                              })
-                            }
-                          >
-                            {u.enabled ? 'Disable' : 'Enable'}
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            onClick={() => {
-                              const password = prompt('New password (at least 12 characters):');
-                              if (password)
+                <PagedRows rows={userSort.sorted} resetKey={userSort.sort}>
+                  {(u) => (
+                    <tr key={u.id}>
+                      <td>
+                        <strong>{u.name}</strong>
+                        {u.id === user.id && <small> (you)</small>}
+                      </td>
+                      <td>{u.email}</td>
+                      <td>{u.role}</td>
+                      <td>
+                        <Status status={u.enabled ? 'enabled' : 'disabled'} />
+                      </td>
+                      <td>
+                        {u.id !== user.id && (
+                          <div className="row-actions">
+                            <Button
+                              variant="ghost"
+                              onClick={() =>
                                 void act(async () => {
-                                  await send(`/users/${u.id}`, { newPassword: password }, 'PATCH');
+                                  await send(`/users/${u.id}`, { enabled: !u.enabled }, 'PATCH');
                                   await loadUsers();
-                                });
-                            }}
-                          >
-                            Reset password
-                          </Button>
-                        </div>
-                      )}
-                    </td>
-                  </tr>
-                ))}
+                                })
+                              }
+                            >
+                              {u.enabled ? 'Disable' : 'Enable'}
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              onClick={() => {
+                                const password = prompt('New password (at least 12 characters):');
+                                if (password)
+                                  void act(async () => {
+                                    await send(`/users/${u.id}`, { newPassword: password }, 'PATCH');
+                                    await loadUsers();
+                                  });
+                              }}
+                            >
+                              Reset password
+                            </Button>
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  )}
+                </PagedRows>
               </tbody>
             </table>
           </div>
@@ -953,32 +955,34 @@ export function IntegrationsPage({
                 extra={<th />}
               />
               <tbody>
-                {tokenSort.sorted.map((t) => (
-                  <tr key={t.id}>
-                    <td>
-                      <strong>{t.name}</strong>
-                    </td>
-                    <td>{targetName(t)}</td>
-                    <td>{timestamp(t.expiresAt)}</td>
-                    <td>
-                      <Button
-                        variant="ghost"
-                        onClick={() => {
-                          if (confirm(`Revoke “${t.name}”? Existing clients will lose access.`))
-                            void act(async () => {
-                              await api(`/integrations/${tab === 'api' ? 'tokens' : 'embeds'}/${t.id}`, {
-                                method: 'DELETE',
+                <PagedRows rows={tokenSort.sorted} resetKey={tokenSort.sort}>
+                  {(t) => (
+                    <tr key={t.id}>
+                      <td>
+                        <strong>{t.name}</strong>
+                      </td>
+                      <td>{targetName(t)}</td>
+                      <td>{timestamp(t.expiresAt)}</td>
+                      <td>
+                        <Button
+                          variant="ghost"
+                          onClick={() => {
+                            if (confirm(`Revoke “${t.name}”? Existing clients will lose access.`))
+                              void act(async () => {
+                                await api(`/integrations/${tab === 'api' ? 'tokens' : 'embeds'}/${t.id}`, {
+                                  method: 'DELETE',
+                                });
+                                await load();
                               });
-                              await load();
-                            });
-                        }}
-                      >
-                        <Trash2 size={14} />
-                        Revoke
-                      </Button>
-                    </td>
-                  </tr>
-                ))}
+                          }}
+                        >
+                          <Trash2 size={14} />
+                          Revoke
+                        </Button>
+                      </td>
+                    </tr>
+                  )}
+                </PagedRows>
                 {!(tab === 'api' ? tokens : embeds).length && (
                   <tr>
                     <td colSpan={4} className="empty-table">

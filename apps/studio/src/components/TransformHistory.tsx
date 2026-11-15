@@ -18,7 +18,7 @@ import {
 } from '../api';
 import { Button } from './ui';
 import { Drawer, Skeleton, StatusPill } from './kit';
-import { SortHead, rankOf, useSort } from './tableKit';
+import { PagedRows, rankOf, SortHead, useSort } from './tableKit';
 import { CodeEditor } from '../editor/CodeEditor';
 
 const fmtMs = (ms?: number) =>
@@ -108,27 +108,29 @@ export function RunHistory({ runs }: { runs: TransformRun[] }) {
             toggle={toggle}
           />
           <tbody>
-            {sorted.map((r) => (
-              <tr
-                key={r.id}
-                className="clickable"
-                onClick={() => setOpen(r)}
-                tabIndex={0}
-                onKeyDown={(e) => e.key === 'Enter' && setOpen(r)}
-              >
-                <td>{timestamp(r.startedAt ?? r.createdAt)}</td>
-                <td>v{r.version}</td>
-                <td>{r.trigger}</td>
-                <td>{r.window ? `${r.window.start} → ${r.window.end}` : 'full'}</td>
-                <td>
-                  <StatusPill status={r.status} />
-                </td>
-                <td>{sumReads(r.reads).toLocaleString()}</td>
-                <td>{sum(r.outputs, 'written').toLocaleString()}</td>
-                <td>{sum(r.outputs, 'dq') || '—'}</td>
-                <td>{fmtMs(r.durationMs)}</td>
-              </tr>
-            ))}
+            <PagedRows rows={sorted} resetKey={sort}>
+              {(r) => (
+                <tr
+                  key={r.id}
+                  className="clickable"
+                  onClick={() => setOpen(r)}
+                  tabIndex={0}
+                  onKeyDown={(e) => e.key === 'Enter' && setOpen(r)}
+                >
+                  <td>{timestamp(r.startedAt ?? r.createdAt)}</td>
+                  <td>v{r.version}</td>
+                  <td>{r.trigger}</td>
+                  <td>{r.window ? `${r.window.start} → ${r.window.end}` : 'full'}</td>
+                  <td>
+                    <StatusPill status={r.status} />
+                  </td>
+                  <td>{sumReads(r.reads).toLocaleString()}</td>
+                  <td>{sum(r.outputs, 'written').toLocaleString()}</td>
+                  <td>{sum(r.outputs, 'dq') || '—'}</td>
+                  <td>{fmtMs(r.durationMs)}</td>
+                </tr>
+              )}
+            </PagedRows>
           </tbody>
         </table>
       </div>
@@ -254,27 +256,29 @@ export function VersionsPanel({
             extra={<th />}
           />
           <tbody>
-            {versionSort.sorted.map((v) => (
-              <tr key={v.version} className={v.version === a || v.version === b ? 'selected' : ''}>
-                <td>
-                  <strong>v{v.version}</strong>
-                  {v.version === transform.version && <StatusPill status="ok" label="current" />}
-                </td>
-                <td>{timestamp(v.createdAt)}</td>
-                <td>{v.note ?? ''}</td>
-                <td className="row-actions">
-                  {isAdmin && v.version !== transform.version && (
-                    <Button
-                      variant="ghost"
-                      onClick={() => void restore(v.version)}
-                      title={`Save v${v.version} as a new version`}
-                    >
-                      <RotateCcw size={14} /> Restore
-                    </Button>
-                  )}
-                </td>
-              </tr>
-            ))}
+            <PagedRows rows={versionSort.sorted} resetKey={versionSort.sort}>
+              {(v) => (
+                <tr key={v.version} className={v.version === a || v.version === b ? 'selected' : ''}>
+                  <td>
+                    <strong>v{v.version}</strong>
+                    {v.version === transform.version && <StatusPill status="ok" label="current" />}
+                  </td>
+                  <td>{timestamp(v.createdAt)}</td>
+                  <td>{v.note ?? ''}</td>
+                  <td className="row-actions">
+                    {isAdmin && v.version !== transform.version && (
+                      <Button
+                        variant="ghost"
+                        onClick={() => void restore(v.version)}
+                        title={`Save v${v.version} as a new version`}
+                      >
+                        <RotateCcw size={14} /> Restore
+                      </Button>
+                    )}
+                  </td>
+                </tr>
+              )}
+            </PagedRows>
           </tbody>
         </table>
         <Button
@@ -360,17 +364,19 @@ function OutputsTable({ run: r }: { run: TransformRun }) {
         toggle={toggle}
       />
       <tbody>
-        {sorted.map((x) => (
-          <tr key={x.c}>
-            <td>
-              <code>{x.c}</code>
-            </td>
-            <td>{x.read?.toLocaleString() ?? '—'}</td>
-            <td>{x.written?.toLocaleString() ?? '—'}</td>
-            <td>{x.unchanged?.toLocaleString() ?? '—'}</td>
-            <td>{x.dq || '—'}</td>
-          </tr>
-        ))}
+        <PagedRows rows={sorted} resetKey={sort}>
+          {(x) => (
+            <tr key={x.c}>
+              <td>
+                <code>{x.c}</code>
+              </td>
+              <td>{x.read?.toLocaleString() ?? '—'}</td>
+              <td>{x.written?.toLocaleString() ?? '—'}</td>
+              <td>{x.unchanged?.toLocaleString() ?? '—'}</td>
+              <td>{x.dq || '—'}</td>
+            </tr>
+          )}
+        </PagedRows>
       </tbody>
     </table>
   );
@@ -398,17 +404,19 @@ function DqTable({ dq }: { dq: DqIssue[] }) {
         toggle={toggle}
       />
       <tbody>
-        {sorted.map((d, i) => (
-          <tr key={i}>
-            <td>{d.issue_type}</td>
-            <td>{d.severity}</td>
-            <td>
-              <code>{d.collection}</code>
-            </td>
-            <td>{d.security_id ?? '—'}</td>
-            <td>{d.date ?? '—'}</td>
-          </tr>
-        ))}
+        <PagedRows rows={sorted} resetKey={sort}>
+          {(d, i) => (
+            <tr key={i}>
+              <td>{d.issue_type}</td>
+              <td>{d.severity}</td>
+              <td>
+                <code>{d.collection}</code>
+              </td>
+              <td>{d.security_id ?? '—'}</td>
+              <td>{d.date ?? '—'}</td>
+            </tr>
+          )}
+        </PagedRows>
       </tbody>
     </table>
   );

@@ -6,7 +6,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { ArrowLeft, Activity, AlertTriangle, BarChart3, Gauge, TrendingDown, TrendingUp } from 'lucide-react';
 import { api } from '../api';
 import { KpiCard, Skeleton, StatusPill } from './kit';
-import { SortHead, SortTh, rankOf, useSort } from './tableKit';
+import { PagedRows, rankOf, SortHead, SortTh, useSort } from './tableKit';
 import { BarChart, TimeSeriesChart } from '../charts/Charts';
 import { fmtNumber } from '../charts/chartData';
 import { ObjectTransfer } from './ObjectTransfer';
@@ -94,25 +94,27 @@ function EvaluationList() {
             toggle={toggle}
           />
           <tbody>
-            {sorted.map((e) => (
-              <tr key={e.id} className="clickable" onClick={() => go(`/evaluations/${e.id}`)}>
-                <td>{new Date(e.createdAt).toLocaleString()}</td>
-                <td>
-                  {e.pluginName} v{e.pluginVersion}{' '}
-                  {e.mode === 'holdout' && <StatusPill status="warn" label="holdout" />}
-                </td>
-                <td>
-                  {e.params.start} → {e.params.end}
-                </td>
-                <td>
-                  <StatusPill status={e.status === 'succeeded' ? 'succeeded' : e.status} />
-                </td>
-                <td>{pct(e.record?.summary?.cagr)}</td>
-                <td>{num(e.record?.summary?.sharpe)}</td>
-                <td>{pct(e.record?.summary?.max_drawdown)}</td>
-                <td>{e.trial}</td>
-              </tr>
-            ))}
+            <PagedRows rows={sorted} resetKey={sort}>
+              {(e) => (
+                <tr key={e.id} className="clickable" onClick={() => go(`/evaluations/${e.id}`)}>
+                  <td>{new Date(e.createdAt).toLocaleString()}</td>
+                  <td>
+                    {e.pluginName} v{e.pluginVersion}{' '}
+                    {e.mode === 'holdout' && <StatusPill status="warn" label="holdout" />}
+                  </td>
+                  <td>
+                    {e.params.start} → {e.params.end}
+                  </td>
+                  <td>
+                    <StatusPill status={e.status === 'succeeded' ? 'succeeded' : e.status} />
+                  </td>
+                  <td>{pct(e.record?.summary?.cagr)}</td>
+                  <td>{num(e.record?.summary?.sharpe)}</td>
+                  <td>{pct(e.record?.summary?.max_drawdown)}</td>
+                  <td>{e.trial}</td>
+                </tr>
+              )}
+            </PagedRows>
           </tbody>
         </table>
       </div>
