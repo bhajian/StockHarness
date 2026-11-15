@@ -49,6 +49,8 @@ export type TheoryActor = {
   /** Model that made the decision (provider name / model id), for the debate history. */
   model?: string;
   runId?: string;
+  /** The harness step that acted (e.g. theorist_2), so an idea says which Theorist proposed it (#413). */
+  nodeId?: string;
 };
 export type TheoryEvent = {
   /** A transition, `edit` when the Theorist changed the content in draft / revise, `comment` from a person (#122). */

@@ -1,6 +1,6 @@
-// Research → Setup (#301): set up and start an experiment in one place — the scope (the S&P 500 proxy, top N by
-// market cap, or a symbol list), the agents (model and skills per role), the budget (overall and per model), the
-// schedule (every N minutes, until a date) and the gates; then Start, Pause or run one cycle now.
+// Research → Setup (#301, #413): set up and start an experiment in one place, grouped by what each setting affects:
+// the Theorists (how many; a model and an idea profile each), the Judge and Coder (model and skills), effort, the
+// evaluation scope, the budget (overall and per model), the schedule and the gates; then Start, Pause or run a cycle.
 import React, { useEffect, useMemo, useState } from 'react';
 import { CirclePause, CirclePlay, Play, Save } from 'lucide-react';
 import { api, send, type Data } from '../../api';
@@ -69,15 +69,29 @@ export function ResearchSetup({
     setS({ ...s, budget: { ...(s.budget ?? {}), ...patch, stoppedAt: undefined, stopReason: undefined } });
   const setAgent = (role: string, patch: Record<string, unknown>) =>
     set({ agents: { ...s.agents, [role]: { ...(s.agents?.[role] ?? {}), ...patch } } });
+  // #413: one row per Theorist, with its own model (empty = the default) and idea profile (Theorist i takes the
+  // i-th profile, counting again from the first).
+  const n: number = s.theoristsPerCycle ?? 2;
+  const baseProfiles: string[] = s.profiles?.length ? s.profiles : DEFAULT_PROFILES;
+  const theoristRows = Array.from({ length: n }, (_, i) => ({
+    i,
+    providerId: (s.theoristProviders ?? [])[i] ?? '',
+    profile: baseProfiles[i % baseProfiles.length],
+  }));
+  const defaultTheoristModel = llms.find((p: any) => p.id === s.agents?.theorist?.providerId)?.model;
+  const setTheoristModel = (i: number, v: string) =>
+    set({ theoristProviders: theoristRows.map((r) => (r.i === i ? v : r.providerId)) });
+  const setTheoristProfile = (i: number, v: string) =>
+    set({ profiles: theoristRows.map((r) => (r.i === i ? v : r.profile)) });
   const scopeKind = s.scope?.kind === 'top_market_cap' ? (s.scope.top === 500 ? 'sp500' : 'top') : 'symbols';
   const spend = status.spend ?? {};
   const models: any[] = spend.models ?? [];
   // Models of the agents, so they appear in the budget table before they have spent anything.
   const agentModels = [
     ...new Set(
-      ROLES.map((r) => llms.find((p: any) => p.id === s.agents?.[r.id]?.providerId)?.model).filter(
-        Boolean,
-      ) as string[],
+      [...ROLES.map((r) => s.agents?.[r.id]?.providerId), ...(s.theoristProviders ?? [])]
+        .map((id) => llms.find((p: any) => p.id === id)?.model)
+        .filter(Boolean) as string[],
     ),
   ];
   const modelRows = [...new Set([...models.map((m) => m.model), ...agentModels])].map(
@@ -206,12 +220,166 @@ export function ResearchSetup({
         )}
       </div>
 
-      <section className="setup-section" aria-label="Scope">
-        <h3>Scope</h3>
+      <section className="setup-section" aria-label="Theorists">
+        <h3>Theorists</h3>
         <p className="muted-line">
-          The stocks every evaluation ranks. The FMP plan has no S&P 500 constituents list, so the S&P 500
-          proxy is the 500 largest US stocks by market cap on each date (point in time, delisted names
-          included).
+          Each Theorist proposes one idea per cycle, in parallel with the others. Choose how many, and give
+          each its own model and the kind of idea it looks for.
+        </p>
+        <div className="form-row">
+          <Field label="Number of Theorists">
+            <input
+              aria-label="Number of Theorists"
+              type="number"
+              min={1}
+              max={8}
+              value={s.theoristsPerCycle}
+              onChange={(e) =>
+                set({ theoristsPerCycle: Math.max(1, Math.min(8, Number(e.target.value) || 1)) })
+              }
+            />
+          </Field>
+          <Field label="Default model" hint="For every Theorist set to the default">
+            <ModelSelect
+              label="Theorist default model"
+              llms={llms}
+              value={s.agents?.theorist?.providerId ?? ''}
+              empty="First chat model"
+              onChange={(v) => setAgent('theorist', { providerId: v })}
+            />
+          </Field>
+          <Field label="Pause new ideas at" hint="Ideas waiting for code; revisions still go">
+            <input
+              type="number"
+              min={1}
+              max={200}
+              value={s.maxCoderBacklog ?? 8}
+              onChange={(e) => set({ maxCoderBacklog: Number(e.target.value) })}
+            />
+          </Field>
+        </div>
+        <table className="compact-table setup-theorists" aria-label="Theorist models">
+          <thead>
+            <tr>
+              <th>Theorist</th>
+              <th>Model</th>
+              <th>Idea profile</th>
+            </tr>
+          </thead>
+          <tbody>
+            {theoristRows.map((row) => (
+              <tr key={row.i}>
+                <td>
+                  <strong>Theorist {row.i + 1}</strong>
+                </td>
+                <td>
+                  <ModelSelect
+                    label={`Theorist ${row.i + 1} model`}
+                    llms={llms}
+                    value={row.providerId}
+                    empty={`Default${defaultTheoristModel ? ` (${defaultTheoristModel})` : ''}`}
+                    onChange={(v) => setTheoristModel(row.i, v)}
+                  />
+                </td>
+                <td>
+                  <select
+                    aria-label={`Theorist ${row.i + 1} idea profile`}
+                    value={row.profile}
+                    onChange={(e) => setTheoristProfile(row.i, e.target.value)}
+                  >
+                    {ALL_PROFILES.map((p) => (
+                      <option key={p.id} value={p.id} disabled={!p.available}>
+                        {p.label}
+                        {p.available ? '' : ' (when the options evaluator is ready)'}
+                      </option>
+                    ))}
+                  </select>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <Field label="Skills every Theorist loads">
+          <SkillPicks role="theorist" skills={data.skills} s={s} inUse={inUse} setAgent={setAgent} />
+        </Field>
+        <Field label="Focus for the Theorists" hint="Shown in every Theorist's brief">
+          <textarea rows={4} value={s.focus} onChange={(e) => set({ focus: e.target.value })} />
+        </Field>
+      </section>
+
+      <section className="setup-section" aria-label="Judge and Coder">
+        <h3>Judge and Coder</h3>
+        <p className="muted-line">
+          The Judge reviews each idea before any code is written, then judges the results against the gates.
+          The Coder writes and tests the strategy code, then runs the evaluation.
+        </p>
+        <table className="compact-table setup-agents">
+          <thead>
+            <tr>
+              <th>Role</th>
+              <th>Model</th>
+              <th>Skills it loads</th>
+            </tr>
+          </thead>
+          <tbody>
+            {ROLES.filter((r) => r.id !== 'theorist').map((r) => (
+              <tr key={r.id}>
+                <td>
+                  <strong>{r.label}</strong>
+                  <small className="muted-line">{r.what}</small>
+                </td>
+                <td>
+                  <ModelSelect
+                    label={`${r.label} model`}
+                    llms={llms}
+                    value={s.agents?.[r.id]?.providerId ?? ''}
+                    empty="Default (first chat model)"
+                    onChange={(v) => setAgent(r.id, { providerId: v })}
+                  />
+                </td>
+                <td>
+                  <SkillPicks role={r.id} skills={data.skills} s={s} inUse={inUse} setAgent={setAgent} />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <p className="muted-line">
+          A dashed skill is loaded by default because no choice was saved for the role; tick or untick to
+          choose.
+        </p>
+      </section>
+
+      <section className="setup-section" aria-label="Effort">
+        <h3>How hard the agents work</h3>
+        <p className="muted-line">
+          Applies to every agent above. More effort and more turns go deeper and cost more.
+        </p>
+        <div className="form-row">
+          <Field label="Effort">
+            <select value={s.agentEffort} onChange={(e) => set({ agentEffort: e.target.value })}>
+              {['light', 'medium', 'high', 'extra-high', 'max'].map((v) => (
+                <option key={v}>{v}</option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Turns per agent" hint="Tool calls and replies an agent may take per cycle">
+            <input
+              type="number"
+              min={3}
+              max={200}
+              value={s.agentMaxTurns}
+              onChange={(e) => set({ agentMaxTurns: Number(e.target.value) })}
+            />
+          </Field>
+        </div>
+      </section>
+
+      <section className="setup-section" aria-label="Scope">
+        <h3>Evaluation scope</h3>
+        <p className="muted-line">
+          What every evaluation tests: the stocks it ranks and the years before the holdout. The S&P 500 proxy
+          is the 500 largest US stocks by market cap on each date (point in time, delisted names included).
         </p>
         <div className="segmented" role="radiogroup" aria-label="Scope kind">
           {[
@@ -272,123 +440,6 @@ export function ResearchSetup({
             />
           </Field>
         )}
-      </section>
-
-      <section className="setup-section" aria-label="Agents">
-        <h3>Agents</h3>
-        <table className="compact-table setup-agents">
-          <thead>
-            <tr>
-              <th>Role</th>
-              <th>Model</th>
-              <th>Skills it loads</th>
-            </tr>
-          </thead>
-          <tbody>
-            {ROLES.map((r) => (
-              <tr key={r.id}>
-                <td>
-                  <strong>{r.label}</strong>
-                  <small className="muted-line">{r.what}</small>
-                </td>
-                <td>
-                  <select
-                    aria-label={`${r.label} model`}
-                    value={s.agents?.[r.id]?.providerId ?? ''}
-                    onChange={(e) => setAgent(r.id, { providerId: e.target.value })}
-                  >
-                    <option value="">Default (first chat model)</option>
-                    {llms.map((p: any) => (
-                      <option key={p.id} value={p.id}>
-                        {p.name} · {p.model}
-                      </option>
-                    ))}
-                  </select>
-                </td>
-                <td>
-                  <div className="skill-picks">
-                    {data.skills.map((k: any) => {
-                      const chosen = s.agents?.[r.id]?.skillIds;
-                      const byDefault = !chosen?.length;
-                      const current: string[] = byDefault ? (inUse[r.id] ?? []) : chosen;
-                      const on = current.includes(k.id);
-                      return (
-                        <label
-                          key={k.id}
-                          className={`chip${on ? ' on' : ''}${on && byDefault ? ' default' : ''}`}
-                          title={on && byDefault ? 'Loaded by default (no choice saved)' : undefined}
-                        >
-                          <input
-                            type="checkbox"
-                            checked={on}
-                            onChange={() =>
-                              setAgent(r.id, {
-                                skillIds: on ? current.filter((x: string) => x !== k.id) : [...current, k.id],
-                              })
-                            }
-                          />
-                          {k.name}
-                        </label>
-                      );
-                    })}
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        <p className="muted-line">
-          A dashed skill is loaded by default because no choice was saved for the role; tick or untick to
-          choose.
-        </p>
-        <div className="form-row">
-          <Field label="Theorists per cycle">
-            <input
-              type="number"
-              min={1}
-              max={8}
-              value={s.theoristsPerCycle}
-              onChange={(e) => set({ theoristsPerCycle: Number(e.target.value) })}
-            />
-          </Field>
-          <Field label="Pause Theorists at (ideas waiting for code)">
-            <input
-              type="number"
-              min={1}
-              max={200}
-              value={s.maxCoderBacklog ?? 8}
-              onChange={(e) => set({ maxCoderBacklog: Number(e.target.value) })}
-            />
-          </Field>
-          <Field label="Effort">
-            <select value={s.agentEffort} onChange={(e) => set({ agentEffort: e.target.value })}>
-              {['light', 'medium', 'high', 'extra-high', 'max'].map((v) => (
-                <option key={v}>{v}</option>
-              ))}
-            </select>
-          </Field>
-          <Field label="Turns per agent">
-            <input
-              type="number"
-              min={3}
-              max={200}
-              value={s.agentMaxTurns}
-              onChange={(e) => set({ agentMaxTurns: Number(e.target.value) })}
-            />
-          </Field>
-        </div>
-        <Field label="Focus for the Theorists">
-          <textarea rows={4} value={s.focus} onChange={(e) => set({ focus: e.target.value })} />
-        </Field>
-      </section>
-
-      <section className="setup-section" aria-label="Idea profiles">
-        <h3>Idea profiles</h3>
-        <p className="muted-line">
-          What the Theorists propose, in order: Theorist 1 takes the first ticked profile, Theorist 2 the
-          second, and so on (counting again from the first). None ticked: equity long, short and long / short.
-        </p>
-        <ProfilePicker value={s.profiles ?? []} onChange={(profiles) => set({ profiles })} />
       </section>
 
       <section className="setup-section" aria-label="Budget">
@@ -528,43 +579,72 @@ export function ResearchSetup({
   );
 }
 
-const capitalize = (x: string) => x.charAt(0).toUpperCase() + x.slice(1);
-/** #323: pick the idea profiles; the order is the Theorists' order. Options wait for the options evaluator. */
-function ProfilePicker({ value, onChange }: { value: string[]; onChange: (v: string[]) => void }) {
-  const toggle = (id: string) =>
-    onChange(value.includes(id) ? value.filter((x) => x !== id) : [...value, id]);
-  const groups = [
-    { label: 'Equity', items: ALL_PROFILES.filter((p) => p.instrument === 'equity') },
-    ...['income', 'directional', 'hedge', 'volatility'].map((g) => ({
-      label: `Options · ${g}`,
-      items: ALL_PROFILES.filter((p) => p.group === g),
-    })),
-  ];
+const DEFAULT_PROFILES = ['equity_long', 'equity_short', 'equity_long_short'];
+
+/** A chat model picker; the empty value is the default named by `empty`. */
+function ModelSelect({
+  label,
+  llms,
+  value,
+  empty,
+  onChange,
+}: {
+  label: string;
+  llms: any[];
+  value: string;
+  empty: string;
+  onChange: (v: string) => void;
+}) {
   return (
-    <div className="profile-picker">
-      {groups.map((g) => (
-        <fieldset key={g.label}>
-          <legend>{g.label}</legend>
-          {g.items.map((p) => {
-            const at = value.indexOf(p.id);
-            return (
-              <label key={p.id} className={p.available ? '' : 'unavailable'}>
-                <input
-                  type="checkbox"
-                  checked={at >= 0}
-                  disabled={!p.available && at < 0}
-                  onChange={() => toggle(p.id)}
-                />
-                {capitalize(p.label.replace(/^(Equity|Options) · /, ''))}
-                {at >= 0 && <span className="order-badge">Theorist {at + 1}</span>}
-              </label>
-            );
-          })}
-        </fieldset>
+    <select aria-label={label} value={value} onChange={(e) => onChange(e.target.value)}>
+      <option value="">{empty}</option>
+      {llms.map((p: any) => (
+        <option key={p.id} value={p.id}>
+          {p.name} · {p.model}
+        </option>
       ))}
-      {!ALL_PROFILES.some((p) => p.instrument === 'options' && p.available) && (
-        <p className="muted-line">Options profiles open when the options evaluator is ready (#329).</p>
-      )}
+    </select>
+  );
+}
+
+/** The skills a role's agents load; dashed = loaded by default because no choice was saved. */
+function SkillPicks({
+  role,
+  skills,
+  s,
+  inUse,
+  setAgent,
+}: {
+  role: string;
+  skills: any[];
+  s: any;
+  inUse: Record<string, string[]>;
+  setAgent: (role: string, patch: Record<string, unknown>) => void;
+}) {
+  const chosen: string[] | undefined = s.agents?.[role]?.skillIds;
+  const byDefault = !chosen?.length;
+  const current: string[] = byDefault ? (inUse[role] ?? []) : chosen!;
+  return (
+    <div className="skill-picks">
+      {skills.map((k: any) => {
+        const on = current.includes(k.id);
+        return (
+          <label
+            key={k.id}
+            className={`chip${on ? ' on' : ''}${on && byDefault ? ' default' : ''}`}
+            title={on && byDefault ? 'Loaded by default (no choice saved)' : undefined}
+          >
+            <input
+              type="checkbox"
+              checked={on}
+              onChange={() =>
+                setAgent(role, { skillIds: on ? current.filter((x) => x !== k.id) : [...current, k.id] })
+              }
+            />
+            {k.name}
+          </label>
+        );
+      })}
     </div>
   );
 }

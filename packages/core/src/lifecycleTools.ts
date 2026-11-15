@@ -168,6 +168,7 @@ const actorOf = (role: TheoryRole, meta: Meta): TheoryActor => ({
   ...(meta.agentId ? { agentId: meta.agentId } : {}),
   ...(meta.runId ? { runId: meta.runId } : {}),
   ...(meta.model ? { model: meta.model } : {}),
+  ...(meta.nodeId ? { nodeId: meta.nodeId } : {}),
 });
 const need = (role: ResearchRole | undefined, allowed: ResearchRole[], tool: string) => {
   if (!role || !allowed.includes(role))
