@@ -5,6 +5,9 @@ close × shares outstanding as known from fundamentals_pit) and exchange as of t
 filter passes. Delisted names are included while they were listed (they have prices only then). Thresholds come
 from the Transform's params. Also `universe_counts`: members per date.
 
+Index flags (#388): in_sp500 / in_ndx / in_dji from `index_membership` intervals [valid_from, valid_to) as of each
+date; null for an index with no membership rows at all (not built yet), so "unknown" never reads as "not a member".
+
 Run by the `universe_daily` Transform: `compute(read, window, params)` yields ("universe_daily", rows) per
 security, then ("universe_counts", rows).
 """
@@ -14,6 +17,9 @@ from statistics import median
 
 from ..core import pit
 from ._resolve import as_date, security_symbols
+from .index_membership_logic import member_on
+
+INDEX_FLAGS = {"sp500": "in_sp500", "ndx": "in_ndx", "dji": "in_dji"}
 
 DEFAULTS = {
     "min_price": 5.0,
@@ -55,6 +61,12 @@ def compute(read, window=None, params=None):
     start = window.start if window else None
     end = window.end if window else None
     lookback = window.lookback_start if window else None
+    membership, indexed = {}, set()
+    for iv in read("index_membership", None, ["security_id", "index", "valid_from", "valid_to"]):
+        if iv.get("index") in INDEX_FLAGS:
+            indexed.add(iv["index"])
+            if iv.get("security_id"):
+                membership.setdefault(iv["security_id"], {}).setdefault(iv["index"], []).append(iv)
     counts = {}
     for sid in sorted(syms):
         q = {"security_id": sid}
@@ -96,6 +108,8 @@ def compute(read, window=None, params=None):
                 cap, src = None, None
             exchange = _interval_value(exch.get(sid), day)
             fails = evaluate(day, close, adv, cap, exchange, p)
+            mine = membership.get(sid, {})
+            flags = {f: (member_on(mine.get(i, []), day) if i in indexed else None) for i, f in INDEX_FLAGS.items()}
             rows.append(
                 {
                     "security_id": sid,
@@ -107,6 +121,7 @@ def compute(read, window=None, params=None):
                     "market_cap": cap,
                     "market_cap_source": src,
                     "exchange": exchange,
+                    **flags,
                     "known_at": pit.eod_known_at(as_date(day)).isoformat(),
                     "as_of_date": day,
                 }

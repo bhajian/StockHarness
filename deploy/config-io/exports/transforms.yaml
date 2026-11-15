@@ -233,10 +233,82 @@ spec:
 apiVersion: stockharness/v1
 kind: Transform
 metadata:
+  name: index_membership
+  version: "1"
+spec:
+  description: "Point-in-time S&P 500, Nasdaq-100 and Dow membership: one row per security and membership interval [valid_from, valid_to), rebuilt backwards from today's constituent lists through FMP's change history (a renamed member is paired with its addition under the earlier ticker). universe_daily turns it into in_sp500 / in_ndx / in_dji per day."
+  code: |
+    import oh
+    from pipeline.layer2.index_membership import compute
+
+    # Intervals [valid_from, valid_to) rebuilt in full each run (#388); unresolved tickers and unknown starts are DQ.
+    rows, issues = compute(lambda c, f=None, cols=None: oh.read(c, f, columns=cols), oh.params)
+    oh.output("index_membership").upsert(rows)
+    for i in issues:
+        oh.dq(i["issue_type"], i["severity"], security_id=i["security_id"], date=i["date"],
+              ticker=i["ticker"], index=i["index"], detail=i["detail"])
+  inputs:
+    - index_constituents
+    - index_changes
+    - securities
+  outputs:
+    - collection: index_membership
+      key:
+        - membership_id
+      write_mode: replace
+      known_at_field: known_at
+      as_of_field: as_of_date
+      static: false
+      description: "Index membership intervals. A security is in the index on date D when valid_from <= D < valid_to (valid_to null: still a member). Filter as_of_date <= D."
+      grain: index × security × membership interval
+      fields:
+        membership_id:
+          description: index:security (or T:ticker when unresolved):valid_from
+        index:
+          description: sp500 (S&P 500), ndx (Nasdaq-100) or dji (Dow Jones Industrial Average)
+        security_id:
+          description: StockHarness security id; null when the ticker matches no security
+        ticker:
+          description: Ticker at the end of the interval
+        tickers:
+          description: Tickers over the interval, oldest first (a rename adds one)
+        name:
+          description: Company name from the constituent list or the change record
+        valid_from:
+          description: Effective date it joined (inclusive); null when before the history
+        valid_to:
+          description: Effective date it left (exclusive); null while still a member
+        start_known:
+          description: False when the start lies before the change history
+        source:
+          description: "Where valid_from came from: change (an addition), rename (an addition under an earlier ticker), first_added (the current list) or unknown"
+        known_at:
+          description: "When the row became known (UTC): the close of valid_from"
+        as_of_date:
+          description: "First date it may be used: filter as_of_date <= D"
+        transform_name:
+          description: Producing transform
+        transform_version:
+          description: Logic version
+  trigger:
+    after:
+      - dataset:index_changes
+      - dataset:index_constituents
+  incremental:
+    mode: full
+    lookback_days: 0
+  params:
+    history_from: 2016-01-01
+  secrets: []
+  enabled: true
+---
+apiVersion: stockharness/v1
+kind: Transform
+metadata:
   name: macro_daily
   version: "2"
 spec:
-  description: "One row per date: the treasury curve (3m, 2y, 10y, 30y and spreads), VIX, S&P 500 and Nasdaq levels with the S&P daily return, and sector returns."
+  description: "One row per date: the treasury curve (3m, 2y, 10y, 30y and spreads), VIX, S&P 500 and Nasdaq levels with the S&P daily return, and sector returns. Built from the full history of its inputs; a day without a treasury print carries the last one up to 5 days back."
   code: |
     import oh
     from pipeline.layer2.macro_daily import compute
@@ -301,6 +373,7 @@ spec:
     after:
       - dataset:treasury_rates
       - dataset:eod_index
+      - dataset:sector_performance
   incremental:
     mode: full
     lookback_days: 0
@@ -551,7 +624,7 @@ metadata:
   name: universe_daily
   version: "1"
 spec:
-  description: "The point-in-time tradeable universe: for every security and priced date, whether it passed the price, liquidity (20-day median dollar volume), market cap (as of that date) and exchange filters. Delisted names count while they were listed. universe_counts publishes the size per date."
+  description: "The point-in-time tradeable universe: for every security and priced date, whether it passed the price, liquidity (20-day median dollar volume), market cap (as of that date) and exchange filters, and whether it was in the S&P 500, Nasdaq-100 or Dow that day. Delisted names count while they were listed. universe_counts publishes the size per date."
   code: |
     import oh
     from pipeline.layer2.universe_daily import compute
@@ -565,6 +638,7 @@ spec:
     - prices_daily
     - historical_market_cap
     - fundamentals_pit
+    - index_membership
   outputs:
     - collection: universe_daily
       key:
@@ -598,6 +672,12 @@ spec:
           description: reported (historical_market_cap) or estimated (close × shares outstanding as known then)
         exchange:
           description: Exchange as of this date (securities.exchange_history)
+        in_sp500:
+          description: In the S&P 500 on this date (index_membership); null until membership is built
+        in_ndx:
+          description: In the Nasdaq-100 on this date (index_membership); null until membership is built
+        in_dji:
+          description: In the Dow Jones Industrial Average on this date (index_membership); null until membership is built
         known_at:
           description: When the row became known (UTC)
         as_of_date:
