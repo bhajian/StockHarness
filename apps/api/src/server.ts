@@ -13,6 +13,7 @@ import { dispatchReflections } from '../../../packages/core/src/experience.js';
 import {
   dispatchDatasetSyncs,
   resumeInterruptedDatasetSyncRuns,
+  requeueLostDatasetSyncs,
 } from '../../../packages/core/src/datasetSync.js';
 import { dispatchDailyCoverage } from '../../../packages/core/src/dataHealth.js';
 import { dispatchBackfills, recoverBackfills } from '../../../packages/core/src/datasetBackfill.js';
@@ -38,6 +39,9 @@ if (interrupted.resumed.length)
       .join(', ')}`,
   );
 if (interrupted.failed) console.warn(`Closed ${interrupted.failed} interrupted run(s) that cannot resume`);
+// Syncs queued by the previous process that never started are due again (#439).
+const lostSyncs = await requeueLostDatasetSyncs();
+if (lostSyncs) console.warn(`Re-queued ${lostSyncs} dataset sync(s) the restart dropped before they started`);
 // Backfills are persisted: ones that were running resume from their last finished symbol (#80).
 const resumed = await recoverBackfills();
 if (resumed) console.warn(`Resuming ${resumed} dataset backfill(s)`);
