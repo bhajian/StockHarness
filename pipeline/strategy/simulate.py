@@ -27,11 +27,11 @@ from . import EVALUATOR_VERSION, contract, delisting, metrics
 from .broker import PaperBroker
 from .config import load_config
 from .context import StrategyContext
-from .engine import (EvaluationError, _current, _universe_on, ensure_indexes, plan_books, resolve_scope, top_scope,
+from .engine import (EvaluationError, _current, _universe_on, sector_on, ensure_indexes, plan_books, resolve_scope, top_scope,
                      trading_days, universe_top)
 from .reader import PitReader
 
-SIMULATOR_VERSION = "1.2.0"  # 1.2: delisting returns by class and side (#448); 1.1: total-return benchmark, rf_return per session, Sharpe over cash (#445)
+SIMULATOR_VERSION = "1.3.0"  # 1.3: sector caps as of each date (#454); 1.2: delisting returns by class and side (#448); 1.1: total-return benchmark, rf_return per session, Sharpe over cash (#445)
 COLLECTIONS = ("sim_orders", "sim_trades", "sim_portfolio_daily", "sim_positions")
 DEFAULTS = {
     "capital": 1_000_000.0,
@@ -133,7 +133,8 @@ def simulate(ideas: list[dict], *, source, policies: dict, params: dict, config:
         final_bar[r["security_id"]] = max(final_bar.get(r["security_id"], r["date"]), r["date"])
     sec_rows = source.find("securities", {"security_id": {"$in": names}},
                            ["security_id", "is_active", "sector_history", "identifiers", "hard_to_borrow"]) if names else []
-    sector = {r["security_id"]: _current(r.get("sector_history")) or "Unknown" for r in sec_rows}
+    sector = {r["security_id"]: _current(r.get("sector_history")) or "Unknown" for r in sec_rows}  # labels only
+    sector_hist = {r["security_id"]: r.get("sector_history") or [] for r in sec_rows}
     ticker = {r["security_id"]: next((i.get("value") for i in r.get("identifiers") or [] if i.get("type") == "ticker"), None)
               for r in sec_rows}
     htb = set(sim.get("hard_to_borrow") or []) | {r["security_id"] for r in sec_rows if r.get("hard_to_borrow")}
@@ -184,7 +185,9 @@ def simulate(ideas: list[dict], *, source, policies: dict, params: dict, config:
         if books:
             alloc = _allocation(sim["allocation"], ids, shadow)
             sized = {idea: _size(book, sim["sizing"], shadow[idea][:-1], alloc[idea]) for idea, book in books.items()}
-            sized = _constrain(sized, broker, sim["constraints"], sector)
+            # #454: sector caps use each name's sector as of today.
+            today = {s: sector_on(sector_hist.get(s), d) for s in {k[1] for k in broker.lots} | {s for b in sized.values() for s in b}}
+            sized = _constrain(sized, broker, sim["constraints"], today)
             # A name waiting on an exit that the rebalance sells first leaves with the exit's reason.
             broker.rebalance(d, sized, signals, {k: why for k, (_, why) in blocked.items()})
             for key in list(blocked):

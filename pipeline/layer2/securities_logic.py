@@ -53,20 +53,42 @@ def match_security(candidate: dict, existing: list[dict], name_threshold: float 
     return None
 
 
+def compact_intervals(intervals: list[dict]) -> list[dict]:
+    """#454: drop zero-length intervals and merge back-to-back intervals with the same value.
+
+    A security with two live tickers whose profiles disagree (Utilities / Industrials) used to add two zero-length
+    intervals on every run; a same-day change now replaces the value instead (see upsert_interval)."""
+    out: list[dict] = []
+    for i in intervals:
+        vf, vt = i.get("valid_from"), i.get("valid_to")
+        if vt is not None and vf is not None and vt <= vf:
+            continue
+        prev = out[-1] if out else None
+        if prev is not None and prev.get("value") == i.get("value") and prev.get("valid_to") == vf:
+            prev["valid_to"] = vt
+            continue
+        out.append(dict(i))
+    return out
+
+
 def upsert_interval(intervals: list[dict], value, valid_from, valid_to=None):
     """Append a validity interval for a changing attribute (ticker/sector/industry/exchange).
 
     If the newest open interval already carries `value`, do nothing. Otherwise close the open
-    interval at `valid_from` and open a new one. Returns the updated list (new object).
+    interval at `valid_from` and open a new one; one that opened the same day takes the new value instead (#454).
+    Returns the updated, compacted list (new object).
     """
-    intervals = [dict(i) for i in intervals]
+    intervals = compact_intervals([dict(i) for i in intervals])
     open_iv = next((i for i in reversed(intervals) if i.get("valid_to") is None), None)
     if open_iv is not None and open_iv.get("value") == value:
         return intervals
+    if open_iv is not None and open_iv.get("valid_from") == valid_from:
+        open_iv["value"] = value
+        return compact_intervals(intervals)
     if open_iv is not None:
         open_iv["valid_to"] = valid_from
     intervals.append({"value": value, "valid_from": valid_from, "valid_to": valid_to})
-    return intervals
+    return compact_intervals(intervals)
 
 
 def ticker_on(identifiers: list[dict], on_date):
