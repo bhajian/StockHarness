@@ -485,7 +485,7 @@ spec:
           description: close × volume
           unit: USD
         dq_flags:
-          description: zero_or_negative_price, high_lt_low, close_outside_range, zero_volume, jump_no_action, stale_price, implausible_price, return_suppressed, dividend_basis_uncertain, implausible_dividend
+          description: zero_or_negative_price, high_lt_low, close_outside_range, zero_volume, jump_no_action, stale_price, implausible_price, bad_print (a ×10 / ÷10 print that reverts, no return), large_move (a ×10 / ÷10 move kept as real), dividend_basis_uncertain, implausible_dividend
         known_at:
           description: When the row became known (UTC)
         as_of_date:

@@ -16,7 +16,7 @@ from .prices_logic import compute_symbol_rows, pick_bars
 from ._resolve import as_date, security_symbols
 
 UTC = timezone.utc
-TV = "8"  # 8: implausible or ambiguous-basis dividends (#481); 7: dividends on the bars' split basis (#443), close_raw as traded (#444); 6: bars on non-trading days are dropped (#437); 5: notes, preferreds, warrants, units and funds are skipped (#393); 4: one ticker per date, junk quotes and ×10 days without an action carry no return (#255); 3: #240
+TV = "9"  # 9: real crashes keep their return, only reverting prints are dropped (#451); 8: implausible or ambiguous-basis dividends (#481); 7: dividends on the bars' split basis (#443), close_raw as traded (#444); 6: bars on non-trading days are dropped (#437); 5: notes, preferreds, warrants, units and funds are skipped (#393); 4: one ticker per date, junk quotes and ×10 days without an action carry no return (#255); 3: #240
 ERROR_FLAGS = ("zero_or_negative_price", "high_lt_low", "implausible_price")
 BAR_FIELDS = ["_id", "symbol", "date", "open", "high", "low", "close", "volume", "vwap"]
 

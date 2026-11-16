@@ -104,6 +104,8 @@ def bar_dividend(paid, adj, k, prev_close):
 MIN_PRICE = 1e-4
 # A day's total return beyond ×10 or ÷10 with no split or dividend is a data error, not a return.
 MAX_RATIO = 10.0
+# #451: a ×10 / ÷10 day is a bad print only if the price is back within ×2 of where it was inside this many sessions.
+REVERT_SESSIONS = 5
 
 
 def pick_bars(bars, tickers):
@@ -156,7 +158,23 @@ def compute_symbol_rows(bars, dividends_by_exdate, splits_by_exdate, adj_dividen
     rows = []
     prev_close = None
     recent_closes: list[float] = []
-    for b in bars:
+    closes = [_num(b.get("close")) for b in bars]
+
+    def bad_print(i: int, base: float, up: bool) -> bool:
+        """#451: is bar i's ×10 / ÷10 move bad data? A drop is real (a bankruptcy day) unless the price is back near
+        `base` within REVERT_SESSIONS sessions. A jump is bad unless the next sessions confirm it (at least two of
+        them, none back near `base`): a real ×10 day is far rarer than a bad print."""
+        later = []
+        for j in range(i + 1, min(len(bars), i + 1 + REVERT_SESSIONS)):
+            if splits_by_exdate.get(bars[j]["date"]):
+                break
+            c = closes[j]
+            if c is not None and c >= MIN_PRICE:
+                later.append(c)
+        back = any(0.5 <= c / base <= 2.0 for c in later)
+        return back or (up and len(later) < 2)
+
+    for i, b in enumerate(bars):
         d = b["date"]
         close = _num(b.get("close"))
         f = factors.get(d, 1.0)
@@ -171,10 +189,16 @@ def compute_symbol_rows(bars, dividends_by_exdate, splits_by_exdate, adj_dividen
         if prev_close and prev_close > 0 and usable:
             ret_1d = (close * r) / prev_close - 1.0
             tr_1d = ((close + div) * r) / prev_close - 1.0
-            # No corporate action can explain a ×10 / ÷10 day: keep the bar, drop the return (#255).
+            # No corporate action explains a ×10 / ÷10 day. A print that comes straight back is bad data: no return,
+            # and it is not the base of the next one (#255). Otherwise the move is real (a -95% bankruptcy day) and
+            # is kept, flagged (#451).
             if r == 1.0 and not div and not (1 / MAX_RATIO < 1 + tr_1d < MAX_RATIO):
-                ret_1d = tr_1d = None
-                flags.append("return_suppressed")
+                if bad_print(i, prev_close, tr_1d > 0):
+                    ret_1d = tr_1d = None
+                    usable = False
+                    flags.append("bad_print")
+                else:
+                    flags.append("large_move")
         row = {
             "date": d,
             "open": _num(b.get("open")),
