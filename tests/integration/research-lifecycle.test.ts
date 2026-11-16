@@ -608,3 +608,23 @@ test('a person parks an idea in progress and resumes it (#379)', async () => {
   assert.equal(back.status, 'approved_for_code');
   await ok('/research/settings', { maxCoderBacklog: 8 }, 'PUT');
 });
+
+test('#459: the research vault: index, a family note, an idea post-mortem, search and backlinks', async () => {
+  const { theorist } = clients;
+  const index = await theorist.call('vault_index', {});
+  assert.match(index.start, /# Research vault/);
+  assert.ok(index.families.length >= 1, JSON.stringify(index));
+  const fam = await theorist.call('vault_read', { path: index.families[0].path });
+  assert.ok(
+    fam.sections.includes('Lessons') && fam.sections.includes('All ideas'),
+    JSON.stringify(fam.sections),
+  );
+  const idea = fam.links.find((l: string) => l.startsWith('ideas/'));
+  const note = await theorist.call('vault_read', { path: idea, section: 'Post-mortem' });
+  assert.equal(note.section, 'Post-mortem');
+  const back = await theorist.call('vault_backlinks', { path: index.families[0].path });
+  assert.ok(back.backlinks.some((b: any) => b.path === idea));
+  const found = await theorist.call('vault_search', { text: 'leaders' });
+  assert.ok(Array.isArray(found.results));
+  assert.match((await theorist.call('vault_read', { path: 'nope' })).error, /No note/);
+});
