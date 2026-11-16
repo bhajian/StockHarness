@@ -281,7 +281,7 @@ async function coderQueue(queue: Theory[], role: ResearchRole | undefined) {
 export async function researchBrief(
   ownerId: string,
   role: ResearchRole | undefined,
-  meta: { agentId?: string; nodeId?: string; runId?: string } = {},
+  meta: { agentId?: string; nodeId?: string; runId?: string; model?: string } = {},
 ) {
   const s = await researchSettings(ownerId);
   const counts = Object.fromEntries(
@@ -341,6 +341,8 @@ export async function researchBrief(
       status: t.status,
       family: t.family,
     })),
+    // #460: a Theorist sees its own record (what it proposed and how it ended), to learn from it.
+    ...(role === 'theorist' ? { your_track_record: await ownRecordSafe(ownerId, meta) } : {}),
     // The Coder's real queue size, whatever the role asking (#273).
     coder_queue: coderQueueSize,
     coder_backlog_limit: s.maxCoderBacklog,
@@ -358,6 +360,18 @@ async function noteOnCycle(runId: string | undefined, note: 'paused' | 'backlog_
   const r = await runs.findOne({ _id: runId }, { projection: { parentRunId: 1 } });
   const ids = [runId, ...(r?.parentRunId ? [r.parentRunId] : [])];
   await runs.updateMany({ _id: { $in: ids } }, { $addToSet: { researchNotes: note } });
+}
+/** #460: the asking Theorist's record (by agent id); none for a new agent. */
+async function ownRecordSafe(ownerId: string, meta: { agentId?: string; model?: string }) {
+  const { ownRecord } = await import('./researchKpis.js');
+  const r = await ownRecord(ownerId, { agentId: meta.agentId, model: meta.model }).catch(() => undefined);
+  return (
+    r && {
+      ...r,
+      how_to_use:
+        'Your past ideas and how they ended (yield = promising or successful per 100). Lean towards the families where your ideas survived the gates and away from those that keep failing; say what you change from your failed ideas.',
+    }
+  );
 }
 /** Ideas waiting for the Coder (#336). */
 export const coderBacklog = (ownerId: string) =>

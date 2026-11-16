@@ -215,3 +215,11 @@ profile.
 Options profiles cannot be submitted until the options evaluator exists (#329). Until then `submit_theory`
 refuses them with the reason, and Setup shows them greyed out. Theory YAML carries `instrument` and
 `structure`.
+
+## Scorecards (#460)
+
+The Lab shows a scorecard per Theorist model and per strategy family, for all time and the last 90 and 30 days:
+ideas proposed, the Judge's pre-code approval rate, ideas evaluated, promising and successful verdicts, **yield**
+(promising + successful per 100 proposals), the median exploration Sharpe and excess, and the Coder's attempts per
+idea (`GET /api/research/kpis`). Each Theorist's brief carries its own record (`your_track_record`, by agent id or
+else its model), with its families, so it can lean towards what survived the gates.

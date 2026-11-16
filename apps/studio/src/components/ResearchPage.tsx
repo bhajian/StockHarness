@@ -81,14 +81,20 @@ const pct = (v: number | null | undefined) =>
 function ResearchLab({ data, isAdmin }: { data: Data; isAdmin: boolean }) {
   const [status, setStatus] = useState<Status | null>(null);
   const [charts, setCharts] = useState<any>(null);
+  const [kpis, setKpis] = useState<any>(null);
   const [feed, setFeed] = useState<Item[]>([]);
   const [note, setNote] = useState('');
   const [error, setError] = useState('');
   const load = useCallback(async () => {
     try {
-      const [s, c] = await Promise.all([api<Status>('/research/status'), api('/research/charts?days=30')]);
+      const [s, c, k] = await Promise.all([
+        api<Status>('/research/status'),
+        api('/research/charts?days=30'),
+        api('/research/kpis').catch(() => null),
+      ]);
       setStatus(s);
       setCharts(c);
+      setKpis(k);
     } catch (e: any) {
       setError(e?.message ?? String(e));
     }
@@ -170,6 +176,7 @@ function ResearchLab({ data, isAdmin }: { data: Data; isAdmin: boolean }) {
             .join(' · ')}
         />
       </div>
+      {kpis && <Scorecards kpis={kpis} />}
       <div className="research-board" aria-label="Pipeline board">
         {[
           ...status.board.columns,
@@ -305,6 +312,86 @@ export function ResearchPage({ data, isAdmin }: { data: Data; isAdmin: boolean }
       )}
       {tab === 'how' && <ResearchHow />}
       {tab === 'cycles' && <ResearchCycles id={parts[2]} />}
+    </section>
+  );
+}
+
+/** #460: how each Theorist model and each strategy family has done (yield = promising or successful per 100). */
+function Scorecards({ kpis }: { kpis: any }) {
+  const [win, setWin] = useState<'all' | 'last90' | 'last30'>('all');
+  const [by, setBy] = useState<'byModel' | 'byFamily'>('byModel');
+  const rows: any[] = kpis?.[win]?.[by] ?? [];
+  const n = (x: number | null | undefined, d = 2) => (x === null || x === undefined ? '—' : x.toFixed(d));
+  const pc = (x: number | null | undefined) =>
+    x === null || x === undefined ? '—' : `${(x * 100).toFixed(0)}%`;
+  return (
+    <section className="research-scorecards" aria-label="Scorecards">
+      <div className="section-heading">
+        <h3>Scorecards</h3>
+        <span className="spacer" />
+        <Tabs
+          compact
+          label="Group by"
+          value={by}
+          onChange={setBy}
+          tabs={[
+            { id: 'byModel', label: 'By model' },
+            { id: 'byFamily', label: 'By family' },
+          ]}
+        />
+        <Tabs
+          compact
+          label="Window"
+          value={win}
+          onChange={setWin}
+          tabs={[
+            { id: 'all', label: 'All time' },
+            { id: 'last90', label: '90 days' },
+            { id: 'last30', label: '30 days' },
+          ]}
+        />
+      </div>
+      <div className="table-wrap">
+        <table aria-label={by === 'byModel' ? 'Scorecards by model' : 'Scorecards by family'}>
+          <thead>
+            <tr>
+              <th>{by === 'byModel' ? 'Model' : 'Family'}</th>
+              <th className="num">Proposed</th>
+              <th className="num">Approved</th>
+              <th className="num">Evaluated</th>
+              <th className="num">Promising</th>
+              <th className="num">Successful</th>
+              <th className="num">Yield / 100</th>
+              <th className="num">Median Sharpe</th>
+              <th className="num">Median excess</th>
+              <th className="num">Code attempts</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.key}>
+                <td>{r.key}</td>
+                <td className="num">{r.proposed}</td>
+                <td className="num">{pc(r.approvedRate)}</td>
+                <td className="num">{r.evaluated}</td>
+                <td className="num">{r.promising}</td>
+                <td className="num">{r.successful}</td>
+                <td className="num">{n(r.yieldPer100, 1)}</td>
+                <td className="num">{n(r.medianSharpe)}</td>
+                <td className="num">{pc(r.medianExcess)}</td>
+                <td className="num">{n(r.meanCodeAttempts, 1)}</td>
+              </tr>
+            ))}
+            {!rows.length && (
+              <tr>
+                <td colSpan={10} className="muted-line">
+                  No ideas in this window.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
     </section>
   );
 }

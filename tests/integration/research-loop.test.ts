@@ -175,6 +175,17 @@ test('one research cycle produces evaluated theories with verdicts, no manual st
   assert.ok(brief, 'the steering note reached the Theorists');
 });
 
+test("#460: scorecards by model and family count the cycle's ideas", async () => {
+  const k = await ok('/research/kpis');
+  assert.ok(k.all.overall.proposed >= 1, JSON.stringify(k.all.overall));
+  assert.ok(k.all.byModel.length >= 1);
+  assert.equal(
+    k.all.byModel.reduce((n: number, c: any) => n + c.proposed, 0),
+    k.all.overall.proposed,
+    'every idea counted once by model',
+  );
+  assert.ok(k.last30.overall.proposed <= k.all.overall.proposed);
+});
 test('the research loop is a Harness object with its connections and skills by name', async () => {
   const yaml = await ok('/objects/export?kinds=Harness&names=Research%20loop');
   assert.match(yaml, /kind: Harness\nmetadata:\n  name: Research loop/);
