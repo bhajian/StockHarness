@@ -18,7 +18,7 @@ import json
 import math
 from datetime import date, datetime, timedelta
 
-from . import EVALUATOR_MAJOR, EVALUATOR_VERSION, contract, costs, delisting, metrics
+from . import EVALUATOR_MAJOR, EVALUATOR_VERSION, contract, delisting, metrics
 from .config import load_config
 from .context import StrategyContext
 from .reader import PitReader
@@ -134,50 +134,8 @@ def _tie(s: str) -> str:
     return hashlib.sha1(s.encode()).hexdigest()
 
 
-def _with_buffer(ranked: list[str], held: set[str], n: int, buffer: float) -> list[str]:
-    """#466: the n names of one side: held names stay while ranked within n × buffer, the rest come from the top."""
-    keep = [s for s in ranked[: max(n, int(n * buffer))] if s in held][:n]
-    fill = [s for s in ranked if s not in keep][: n - len(keep)]
-    return keep + fill
-
-
-def cap_book(book: dict[str, float], max_weight: float | None, sector_cap: float | None, sector_of) -> dict[str, float]:
-    """#465: no name above max_weight and no sector above sector_cap (of gross weight); the excess stays in cash."""
-    out = {s: (math.copysign(min(abs(w), max_weight), w) if max_weight else w) for s, w in book.items()}
-    if sector_cap:
-        by: dict[str, float] = {}
-        for s, w in out.items():
-            by[sector_of(s)] = by.get(sector_of(s), 0.0) + abs(w)
-        for sec, total in by.items():
-            if sec != "Unknown" and total > sector_cap + 1e-12:
-                k = sector_cap / total
-                out = {s: (w * k if sector_of(s) == sec else w) for s, w in out.items()}
-    return out
-
-
-def concentration(targets: dict[str, dict[str, float]], sector_of) -> dict:
-    """#465: how concentrated the books are, averaged over rebalances (weights as a share of each book's gross)."""
-    rows = []
-    for d, book in targets.items():
-        g = sum(abs(w) for w in book.values())
-        if g <= 0:
-            continue
-        ws = sorted((abs(w) / g for w in book.values()), reverse=True)
-        sec: dict[str, float] = {}
-        for s, w in book.items():
-            sec[sector_of(s, d)] = sec.get(sector_of(s, d), 0.0) + abs(w) / g
-        rows.append((1 / sum(x * x for x in ws), ws[0], sum(ws[:5]), max(sec.values())))
-    if not rows:
-        return {"rebalances": 0}
-    n = len(rows)
-    return {"rebalances": n, "effective_names": sum(r[0] for r in rows) / n, "max_name": sum(r[1] for r in rows) / n,
-            "top5": sum(r[2] for r in rows) / n, "max_sector": sum(r[3] for r in rows) / n}
-
-
-def build_book(scores: dict, eligible: set[str] | None, side: str, top_n: int, gross: float,
-               held: dict[str, float] | None = None, buffer: float = 1.0) -> dict[str, float]:
-    """Equal-weight target weights; ties break on a hash of the security_id, so the book is deterministic. With a
-    `buffer` above 1 (#466), names of the previous book stay while they rank within top_n × buffer."""
+def build_book(scores: dict, eligible: set[str] | None, side: str, top_n: int, gross: float) -> dict[str, float]:
+    """Equal-weight target weights; ties break on a hash of the security_id, so the book is deterministic."""
     ranked = sorted(
         ((s, float(v)) for s, v in (scores or {}).items()
          if isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
@@ -191,20 +149,17 @@ def build_book(scores: dict, eligible: set[str] | None, side: str, top_n: int, g
     if n < 1:
         return book
     long_w, short_w = (gross / 2, gross / 2) if side == "long_short" else (gross, gross)
-    held = held or {}
-    order = [s for s, _ in ranked]
     if side in ("long", "long_short"):
-        for s in _with_buffer(order, {s for s, w in held.items() if w > 0}, n, buffer):
+        for s, _ in ranked[:n]:
             book[s] = long_w / n
     if side in ("short", "long_short"):
-        for s in _with_buffer(order[::-1], {s for s, w in held.items() if w < 0}, n, buffer):
+        for s, _ in ranked[-n:]:
             book[s] = book.get(s, 0.0) - short_w / n
     return book
 
 
 def plan_books(plugin, meta: dict, *, source, reader, days: list[str], scope, lag: int, gross: float,
-               plugin_params: dict, top: int | None = None, rank_buffer: float = 1.0,
-               caps: dict | None = None) -> dict:
+               plugin_params: dict, top: int | None = None) -> dict:
     """Pass 1 of the evaluator, shared with the paper broker (#124): signals on the rebalance dates -> target
     books, each executed `lag` sessions later. Returns targets {exec day: book}, eligible_at {exec day: (signal
     day, eligible names)}, rebalances (the record's list) and signals {exec day: {security: (score, rank, of)}}
@@ -213,7 +168,6 @@ def plan_books(plugin, meta: dict, *, source, reader, days: list[str], scope, la
     eligible_at: dict[str, tuple[str, list[str]]] = {}
     signals: dict[str, dict[str, tuple[float, int, int]]] = {}
     rebalances = []
-    sector_hist: dict[str, list] = {}
     for d in rebalance_dates(days, meta["rebalance"]):
         i = days.index(d)
         if i + lag >= len(days):
@@ -225,17 +179,7 @@ def plan_books(plugin, meta: dict, *, source, reader, days: list[str], scope, la
         scores = plugin.signal(ctx)
         if not isinstance(scores, dict):
             raise EvaluationError(f"signal(ctx) returned {type(scores).__name__} on {d}; it must return a dict")
-        prev = targets[max(targets)] if targets else None
-        book = build_book(scores, eligible, meta["side"], int(meta["top_n"]), gross, prev, rank_buffer)
-        if caps and book:  # #465: name and sector caps, by each name's sector on the signal date
-            missing = [s for s in book if s not in sector_hist]
-            if missing:
-                for r in source.find("securities", {"security_id": {"$in": missing}}, ["security_id", "sector_history"]):
-                    sector_hist[r["security_id"]] = r.get("sector_history") or []
-                for s in missing:
-                    sector_hist.setdefault(s, [])
-            book = cap_book(book, caps.get("max_weight"), caps.get("sector_cap"),
-                            lambda s, d=d: sector_on(sector_hist.get(s), d))
+        book = build_book(scores, eligible, meta["side"], int(meta["top_n"]), gross)
         exec_day = days[i + lag]
         targets[exec_day] = book
         eligible_at[exec_day] = (d, sorted(eligible))
@@ -285,10 +229,8 @@ def evaluate(code: str, *, source, policies: dict, params: dict, config: dict | 
     reader = PitReader(source, policies, end=readable_end or end, start=start, scope_ids=read_ids,
                        scope_tickers=read_tickers if top else tickers)
     gross = float(cfg["sizing"].get("gross_limit", 1.0))
-    turnover_cfg = costs.turnover_settings(cfg)
     plan = plan_books(plugin, meta, source=source, reader=reader, days=days, scope=scope, lag=lag, gross=gross,
-                      plugin_params={**plugin.params, **(params.get("plugin_params") or {})}, top=top,
-                      rank_buffer=turnover_cfg["rank_buffer"], caps=cfg.get("evaluation_caps"))
+                      plugin_params={**plugin.params, **(params.get("plugin_params") or {})}, top=top)
     targets, eligible_at, rebalances = plan["targets"], plan["eligible_at"], plan["rebalances"]
 
     # Pass 2: daily total returns of every name held (and, at small scale, of the whole eligible universe, for
@@ -303,9 +245,7 @@ def evaluate(code: str, *, source, policies: dict, params: dict, config: dict | 
     held_flags: list[tuple[str, str, list[str]]] = []
     last_price: dict[str, str] = {}
     history: dict[str, list[tuple[str, float | None, float | None]]] = {}  # (date, close_raw, ret_1d), for #448
-    # A month before the first trade too, for each name's volatility in the impact model (#452).
-    price_from = (date.fromisoformat(first_exec) - timedelta(days=45)).isoformat()
-    for r in source.find("prices_daily", {"security_id": {"$in": load}, "date": {"$gte": price_from, "$lte": end}},
+    for r in source.find("prices_daily", {"security_id": {"$in": load}, "date": {"$gte": first_exec, "$lte": end}},
                          ["security_id", "date", "tr_1d", "ret_1d", "close", "close_raw", "dq_flags"]) if load else []:
         v = r.get("tr_1d") if r.get("tr_1d") is not None else r.get("ret_1d")
         s, d = r["security_id"], r["date"]
@@ -329,23 +269,6 @@ def evaluate(code: str, *, source, policies: dict, params: dict, config: dict | 
     comm = (float(cfg["commission_bps"]) + float(cfg["slippage_bps"])) / 1e4
     periods = int(cfg["trading_days_per_year"])
     borrow_daily = float(cfg["borrow_cost_bps_default"]) / 1e4 / periods
-    # #452: market impact at the assumed book size and borrow by size, from each name's ADV and market cap.
-    impact_cfg = costs.settings(cfg)
-    liq: dict[str, dict[str, tuple]] = {}
-    for u in source.find("universe_daily", {"security_id": {"$in": held}, "date": {"$gte": first_exec, "$lte": end}},
-                         ["security_id", "date", "adv_20d", "market_cap"]) if held else []:
-        liq.setdefault(u["security_id"], {})[u["date"]] = (u.get("adv_20d"), u.get("market_cap"))
-    liq_now: dict[str, tuple] = {}
-    day_index = {x: k for k, x in enumerate(days)}
-    participations: list[float] = []
-    impact_paid = 0.0
-    nav_growth = 1.0
-    out_before_costs: list[float] = []
-
-    def vol_on(s: str, d: str):
-        k = day_index.get(d, 0)
-        return costs.vol_of([rets.get(x, {}).get(s) for x in days[max(0, k - int(impact_cfg["vol_days"])):k]],
-                            int(impact_cfg["vol_days"]))
     delist_cfg = delisting.settings(cfg)
     delistings: list[dict] = []
 
@@ -367,8 +290,7 @@ def evaluate(code: str, *, source, policies: dict, params: dict, config: dict | 
     extreme = []  # held names with a daily return beyond ±50% (data problems or real events worth a look)
     contrib: dict[str, float] = {}  # sector -> summed daily contribution
     exposure: dict[str, float] = {}  # sector -> summed |weight| (for the average)
-    open_trades: dict[str, list] = {}  # security -> [side, growth, entry day index]
-    churn = {"entries": 0, "reentries": 0, "hold_days": [], "last_exit": {}, "now": 0}  # #466
+    open_trades: dict[str, list] = {}  # security -> [side, growth]
     trade_returns: list[float] = []
     names_acc: dict[str, dict] = {}  # security -> per-name results (#324)
 
@@ -376,16 +298,12 @@ def evaluate(code: str, *, source, policies: dict, params: dict, config: dict | 
         return names_acc.setdefault(s, {"contribution": 0.0, "days_long": 0, "days_short": 0, "abs_weight": 0.0,
                                         "trades": [], "by_year": {}, "days_by_year": {}})
 
-    def close_trade(s, side, growth, entered=None):
-        if entered is not None:
-            churn["hold_days"].append(churn["now"] - entered)
-            churn["last_exit"][s] = churn["now"]
+    def close_trade(s, side, growth):
         trade_returns.append(side * (growth - 1))
         name_acc(s)["trades"].append(side * (growth - 1))
 
     eligible_now: list[str] = []
     for d in days[days.index(first_exec):]:
-        churn["now"] = day_index[d]
         day = rets.get(d, {})
         extreme += [(d, s, day[s]) for s in w if s in day and abs(day[s]) > 0.5]
         held_flags += [(d, s, dq[d][s]) for s in w if s in dq.get(d, {})]  # #451: data issues on names held
@@ -416,16 +334,11 @@ def evaluate(code: str, *, source, policies: dict, params: dict, config: dict | 
             bench += wt * sector_ew.get(sec, r)
             if s in open_trades:
                 open_trades[s][1] *= 1 + r
-        for s in w:  # the latest ADV and market cap known for each held name
-            if d in liq.get(s, {}):
-                liq_now[s] = liq[s][d]
-        borrow = sum(-wt * costs.borrow_bps((liq_now.get(s) or (None, None))[1], borrow_daily * 1e4 * periods)
-                     for s, wt in w.items() if wt < 0) / 1e4 / periods
+        borrow = sum(-wt for wt in w.values() if wt < 0) * borrow_daily
         w = {s: v / (1 + port) for s, v in moved.items() if s not in delisted} if 1 + port > 0 else {}
         for s in [s for s in open_trades if s in delisted]:
             close_trade(s, *open_trades.pop(s))
         ret = port - borrow
-        before_costs = port
         turnover = 0.0
         if d in targets:
             # Only names with a price at this close can be traded (a delisted or halted name stays out).
@@ -433,37 +346,19 @@ def evaluate(code: str, *, source, policies: dict, params: dict, config: dict | 
             names = set(tgt) | set(w)
             turnover = sum(abs(tgt.get(s, 0.0) - w.get(s, 0.0)) for s in names)
             trades += sum(1 for s in names if abs(tgt.get(s, 0.0) - w.get(s, 0.0)) > 1e-12)
-            cost = turnover * comm
-            for s in names:
-                dw = abs(tgt.get(s, 0.0) - w.get(s, 0.0))
-                if dw <= 1e-12:
-                    continue
-                if d in liq.get(s, {}):
-                    liq_now[s] = liq[s][d]
-                imp, part = costs.impact(dw, impact_cfg["aum"] * nav_growth, (liq_now.get(s) or (None, None))[0],
-                                         vol_on(s, d), impact_cfg)
-                cost += dw * imp
-                impact_paid += dw * imp
-                if part is not None:
-                    participations.append(part)
-            ret = (1 + ret) * (1 - cost) - 1
-            costs_paid += cost
+            ret = (1 + ret) * (1 - turnover * comm) - 1
+            costs_paid += turnover * comm
             for s in names:  # a trade is a holding from entry to exit (or a side flip)
                 old_side = (open_trades.get(s) or [0])[0]
                 new_side = (tgt.get(s, 0.0) > 0) - (tgt.get(s, 0.0) < 0)
                 if old_side and old_side != new_side:
                     close_trade(s, *open_trades.pop(s))
                 if new_side and s not in open_trades:
-                    open_trades[s] = [new_side, 1.0, churn["now"]]
-                    churn["entries"] += 1
-                    if churn["now"] - churn["last_exit"].get(s, -10**9) <= int(turnover_cfg["reentry_cooldown_days"]):
-                        churn["reentries"] += 1
+                    open_trades[s] = [new_side, 1.0]
             w = dict(tgt)
         borrow_paid += borrow
-        nav_growth *= 1 + ret
         out_dates.append(d)
         out_ret.append(ret)
-        out_before_costs.append(before_costs)
         # #445: the benchmark is the S&P 500 total return (SPY + dividends); the price index only where it is missing.
         m = macro.get(d) or {}
         if isinstance(m.get("spx_tr_1d"), (int, float)):
@@ -476,8 +371,8 @@ def evaluate(code: str, *, source, policies: dict, params: dict, config: dict | 
         out_gross.append(sum(abs(v) for v in w.values()))
         out_turn.append(turnover)
     open_at_end = len(open_trades)
-    for s, (side, growth, entered) in list(open_trades.items()):  # marked to market
-        close_trade(s, side, growth, entered)
+    for s, (side, growth) in list(open_trades.items()):  # marked to market
+        close_trade(s, side, growth)
 
     # #445: Sharpe, Sortino, alpha and the folds are over the risk-free rate (the raw Sharpe is kept as sharpe_raw).
     summary = metrics.summary(out_ret, periods, out_rf)
@@ -492,7 +387,7 @@ def evaluate(code: str, *, source, policies: dict, params: dict, config: dict | 
         "plugin": {**(plugin_ref or {}), "hash": plugin.hash, "evaluator_major": EVALUATOR_MAJOR, "meta": meta},
         "params": {k: params[k] for k in sorted(params) if k not in ("code", "trials")},
         "costs": {k: cfg[k] for k in ("execution_lag_days", "commission_bps", "slippage_bps", "borrow_cost_bps_default")}
-        | {"gross_limit": gross, "delisting": delist_cfg, "impact": impact_cfg, "borrow_tiers": costs.BORROW_TIERS},
+        | {"gross_limit": gross, "delisting": delist_cfg},
         "period": {"start": start, "end": end, "first_trade": first_exec, "days": len(out_dates),
                    "readable_end": readable_end or end},
         "data_snapshot": _snapshot(source, end),
@@ -503,21 +398,8 @@ def evaluate(code: str, *, source, policies: dict, params: dict, config: dict | 
         | {"spx_total_return": _round(metrics.total_return(spx_clean)), "trades": trades,
            "avg_turnover": _round(sum(out_turn) / max(1, len(rebalances))),
            "annual_turnover": _round(sum(out_turn) / n_days * periods), "costs_paid": _round(costs_paid),
-           "impact_paid": _round(impact_paid),
-           # #466: how much the book churns.
-           "churn": _rounded({
-               "avg_holding_days": (sum(churn["hold_days"]) / len(churn["hold_days"])) if churn["hold_days"] else None,
-               "round_trips_per_name_year": (len(trade_returns) / max(1, len(names_acc)) / max(1e-9, n_days / periods))
-               if names_acc else None,
-               "reentry_rate": churn["reentries"] / churn["entries"] if churn["entries"] else None,
-               "cost_drag": costs_paid / sum(out_before_costs) if sum(out_before_costs) > 0 else None,
-               "rank_buffer": turnover_cfg["rank_buffer"]}),
            "borrow_paid": _round(borrow_paid), "delisted": sorted(delisted), "rebalances": len(rebalances)},
         "delistings": delistings,
-        # #465: how concentrated the (capped) books were.
-        "concentration": _rounded(concentration(targets, lambda s, d: sector_on(sector_hist.get(s), d))),
-        # #452: the book size the strategy can take (the median trade at max_participation of ADV).
-        "capacity": _rounded(costs.capacity(participations, impact_cfg["aum"], impact_cfg["max_participation"])),
         "excess": {
             "spx": _rounded(metrics.excess(out_ret, spx_clean, periods)),
             "sector": _rounded(metrics.excess(out_ret, out_sector_bench, periods)) if benchmarks else None,
@@ -533,8 +415,7 @@ def evaluate(code: str, *, source, policies: dict, params: dict, config: dict | 
             "drawdown": [_round(x) for x in metrics.drawdown_series(out_ret)],
             "rolling_sharpe_126": [_round(x, 6) if x is not None else None for x in metrics.rolling_sharpe(ex_ret, 126, periods)],
             "spx_returns": [_round(x) if isinstance(x, (int, float)) else None for x in out_spx],
-            "gross": [_round(x, 6) for x in out_gross], "turnover": [_round(x, 6) for x in out_turn],
-            "returns_before_costs": [_round(x) for x in out_before_costs]}},
+            "gross": [_round(x, 6) for x in out_gross], "turnover": [_round(x, 6) for x in out_turn]}},
         "folds": [_rounded(f) for f in metrics.folds(out_dates, out_ret, int(cfg["walk_forward"].get("min_days", 20)), periods, out_rf)],
         "warnings": _warnings(rebalances, extreme, held_flags),
         "rebalances": rebalances,

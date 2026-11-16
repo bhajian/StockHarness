@@ -133,10 +133,16 @@ test('the Research Lab shows a cycle: KPIs, board, activity, debate, steering, p
   await expect
     .poll(async () => (await api('/research/settings')).steering?.at(-1)?.note)
     .toBe('Look at low-volatility names next.');
-  await page.getByRole('button', { name: 'Pause' }).click();
-  await expect(page.getByRole('button', { name: 'Resume' })).toBeVisible();
-  await page.getByRole('button', { name: 'Resume' }).click();
-  await expect(page.getByRole('button', { name: 'Pause' })).toBeVisible();
+  // #458: one status and the controls that apply to it: not scheduled → Start → idle → Pause → paused → Resume.
+  const status = page.getByRole('region', { name: 'Research status' });
+  await expect(status.getByText('not scheduled', { exact: true })).toBeVisible();
+  await status.getByRole('button', { name: 'Start' }).click();
+  await expect(status.getByRole('button', { name: 'Pause' })).toBeVisible({ timeout: 15000 });
+  await status.getByRole('button', { name: 'Pause' }).click();
+  await expect(status.getByText('paused', { exact: true })).toBeVisible();
+  await status.getByRole('button', { name: 'Resume' }).click();
+  await expect(status.getByRole('button', { name: 'Pause' })).toBeVisible();
+  await api('/research/settings', { schedule: { enabled: false, everyMinutes: 60 } }, 'PUT');
   if (process.env.SCREENSHOT)
     await page.screenshot({ path: 'test-results/research-page.png', fullPage: true });
   // #301: Settings opens Research → Setup: scope, agents, budget per model, schedule, gates.

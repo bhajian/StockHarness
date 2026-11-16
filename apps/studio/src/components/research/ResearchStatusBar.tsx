@@ -86,7 +86,11 @@ export function ResearchStatusBar({
     }
   };
   return (
-    <div className={`research-status${compact ? ' compact' : ''}`} role="status" aria-label="Research status">
+    <section
+      className={`research-status${compact ? ' compact' : ''}`}
+      aria-label="Research status"
+      aria-live="polite"
+    >
       <div className="research-status-main">
         <StatusPill status={st.tone} label={st.label} />
         <span className="research-status-detail">{st.detail}</span>
@@ -121,6 +125,6 @@ export function ResearchStatusBar({
           {msg && <span className="muted-line">{msg}</span>}
         </div>
       )}
-    </div>
+    </section>
   );
 }

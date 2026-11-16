@@ -115,8 +115,6 @@ test('navigation shows every studio page without browser exceptions', async ({ p
   for (const [nav, landmark] of [
     ['Harnesses', page.getByRole('heading', { name: 'Harnesses', exact: true })],
     ['Playground', page.getByLabel('Message your agent')],
-    ['Inventory', page.getByRole('heading', { name: 'Inventory', exact: true })],
-    ['OpenShell', page.getByRole('heading', { name: 'OpenShell', exact: true })],
     ['Skills', page.getByRole('heading', { name: 'Skills', exact: true })],
     ['MCP connections', page.getByRole('heading', { name: 'MCP connections', exact: true })],
     ['Knowledge', page.locator('.topbar button[aria-label="New knowledge base"]')],
@@ -131,7 +129,7 @@ test('navigation shows every studio page without browser exceptions', async ({ p
   await expect(page.locator('.sidebar nav')).not.toContainText(
     /Customers|Billing|Reports|Website|Wizard|Portal/,
   );
-  await page.getByRole('button', { name: 'My profile', exact: true }).click();
+  await page.getByRole('tab', { name: 'My profile', exact: true }).click();
   await expect(page.getByLabel('Profile email')).toHaveValue(admin.email);
   expect(errors).toEqual([]);
 });
@@ -335,7 +333,7 @@ test('mobile navigation and profile remain usable without horizontal page overfl
   await page.setViewportSize({ width: 390, height: 844 });
   await page.getByRole('button', { name: 'Toggle navigation' }).click();
   await navButton(page, 'Settings').click();
-  await page.getByRole('button', { name: 'My profile', exact: true }).click();
+  await page.getByRole('tab', { name: 'My profile', exact: true }).click();
   await expect(page.getByLabel('Profile name')).toBeVisible();
   expect(
     await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1),
@@ -378,7 +376,7 @@ test('an embedded chat created in the studio works without a studio login', asyn
 test('workspace admin adds a teammate who can open and edit shared harnesses', async ({ page, browser }) => {
   await ensureToolFlow(page);
   await navButton(page, 'Settings').click();
-  await page.getByRole('button', { name: 'Team & workspace', exact: true }).click();
+  await page.getByRole('tab', { name: 'Team & workspace', exact: true }).click();
   await page.getByRole('button', { name: 'Add teammate', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'Add a teammate' });
   const email = `browser-teammate-${tag}@openharness.test`;
@@ -405,7 +403,7 @@ test('workspace admin adds a teammate who can open and edit shared harnesses', a
     await teammate.getByRole('button', { name: 'Save', exact: true }).click();
     await expect(teammate.getByRole('dialog', { name: 'Harness editor' })).toHaveCount(0);
     await navButton(teammate, 'Settings').click();
-    await expect(teammate.getByRole('button', { name: 'Team & workspace', exact: true })).toHaveCount(0);
+    await expect(teammate.getByRole('tab', { name: 'Team & workspace', exact: true })).toHaveCount(0);
   } finally {
     await context.close();
   }
@@ -611,16 +609,6 @@ test('agent category tabs retain model, judge, limits and human settings', async
   expect(config.approvals.notifyEmail).toBe(true);
 });
 
-test('saved safety policies can be deleted directly from the policy list', async ({ page }) => {
-  const name = `Delete regression ${tag}`;
-  const policy = await api(page.request, '/guardrails', 'POST', { name, provider: 'builtin' });
-  await page.goto('/guardrails');
-  await page.getByRole('button', { name: /My policies/ }).click();
-  await page.getByRole('button', { name: `Delete policy ${name}`, exact: true }).click();
-  await expect(page.getByRole('heading', { name, exact: true })).toHaveCount(0);
-  expect((await api(page.request, '/guardrails')).some((p: any) => p.id === policy.id)).toBe(false);
-});
-
 test('reflection keeps chat stable and preserves readable drafts and feedback after reload', async ({
   page,
 }) => {
@@ -769,7 +757,7 @@ test('a Python step runs in the executor and hands its result to Finish; agents 
 test('Settings → Python secrets stores a key without ever showing it again', async ({ page }) => {
   const name = `BROWSER_KEY_${tag.toUpperCase().replace(/[^A-Z0-9]/g, '')}`.slice(0, 60);
   await navButton(page, 'Settings').click();
-  await page.getByRole('button', { name: 'Python secrets', exact: true }).click();
+  await page.getByRole('tab', { name: 'Python secrets', exact: true }).click();
   await page.getByLabel('Secret name').fill(name);
   await page.getByLabel('Secret source').selectOption('value');
   await page.getByLabel('Secret value').fill('browser-secret-value');

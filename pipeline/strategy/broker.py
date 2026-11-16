@@ -63,9 +63,6 @@ class PaperBroker:
     commission_bps: float = 1.0
     slippage_bps: float = 5.0
     borrow_bps: float = 50.0
-    # #452: impact(security, day, traded value, nav) -> fraction of the traded value; borrow_of(security) -> annual bps.
-    impact_of: object = None
-    borrow_of: object = None
     delisting_return: float = -0.30  # the old flat value, used only without `delisting` (#448)
     delisting: dict = field(default_factory=dict)  # delisting.settings(): returns by class, shorts never gain
     delist_class: dict = field(default_factory=dict)  # security -> merger | distress | unknown
@@ -110,8 +107,7 @@ class PaperBroker:
         daily = float(self.borrow_bps) / 1e4 / self.periods
         for lot in self.lots.values():
             if lot.shares < 0:
-                rate = (self.borrow_of(lot.security_id) / 1e4 / self.periods) if self.borrow_of else daily
-                b = -lot.shares * self.close.get(lot.security_id, 0.0) * rate
+                b = -lot.shares * self.close.get(lot.security_id, 0.0) * daily
                 lot.borrow += b
                 st["borrow"] += b
         self.cash -= st["borrow"]
@@ -157,19 +153,12 @@ class PaperBroker:
                 self.close[s] = gone
                 self._fill(day, key, -self.lots[key].shares, "delisted", cost=0.0)
 
-    def _impact(self, s: str, day: str, traded: float) -> float:
-        """#452: market impact of trading `traded` dollars of `s` today, as a fraction of it."""
-        if not self.impact_of or traded <= 0:
-            return 0.0
-        return self.impact_of(s, day, traded, self.nav())
-
     def exit(self, day: str, key: tuple[str, str], reason: str) -> bool:
         """Close a lot at today's close (an exit decided earlier). False when it is already gone or has no price."""
         if key not in self.lots or key[1] not in self._day.get("bars", {}):
             return False
         lot = self.lots[key]
-        value = abs(self.value(key))
-        cost = self.cost_rate * value + value * self._impact(key[1], day, value)
+        cost = self.cost_rate * abs(self.value(key))
         self._fill(day, key, -lot.shares, reason, cost=cost)
         return True
 
@@ -199,7 +188,7 @@ class PaperBroker:
         # Costs on the traded value at the pre-trade NAV; targets on the NAV after costs (the evaluator's rule).
         traded = [(k, w, why, abs((w or 0.0) * n_pre - current[k]) if w is not None else abs(current[k]))
                   for k, w, why in plan]
-        costs = {k: self.cost_rate * t + t * self._impact(k[1], day, t) for k, _, _, t in traded}
+        costs = {k: self.cost_rate * t for k, _, _, t in traded}
         n_post = n_pre - sum(costs.values())
         for key, w, why, _ in traded:
             price = self.close.get(key[1])

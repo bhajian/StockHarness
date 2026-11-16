@@ -7090,71 +7090,6 @@ details.advanced summary {
 [role='tabpanel'][hidden] {
   display: none;
 }
-
-/* OpenShell console */
-.openshell-layout {
-  display: grid;
-  grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr);
-  gap: 18px;
-  align-items: start;
-}
-.openshell-panel {
-  border: 1px solid var(--border);
-  background: var(--white);
-  border-radius: 12px;
-  padding: 22px;
-  min-width: 0;
-}
-.openshell-panel .fleet-section-heading {
-  margin-bottom: 16px;
-}
-.openshell-panel .fleet-table-wrap {
-  border-radius: 10px;
-}
-.openshell-table tbody tr.selected {
-  background: var(--blue-bg, #e8f6fc);
-}
-.openshell-table th,
-.openshell-table td {
-  padding: 12px 12px;
-}
-.openshell-table .fleet-machine-name {
-  min-width: 0;
-  gap: 10px;
-}
-.openshell-table .fleet-machine-name small {
-  white-space: normal;
-  max-width: none;
-}
-.openshell-table .fleet-row-actions {
-  gap: 2px;
-}
-.openshell-actions {
-  display: flex;
-  justify-content: flex-end;
-  align-items: center;
-  gap: 10px;
-  margin-top: 12px;
-}
-.openshell-actions.between {
-  justify-content: space-between;
-}
-.openshell-actions.between > small {
-  flex: 1;
-  margin: 0;
-}
-.openshell-stat-value {
-  text-transform: capitalize;
-  font-size: 22px !important;
-}
-.openshell-panel .tabs.compact {
-  margin: 0 0 16px;
-}
-.openshell-panel .tabs.compact button {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
 .policy-editor textarea,
 .policy-textarea {
   width: 100%;
@@ -7176,14 +7111,6 @@ details.advanced summary {
   margin-top: 20px;
   padding-top: 18px;
   border-top: 1px solid var(--border);
-}
-.rule-form h3,
-.openshell-subheading {
-  font-size: 13px;
-  margin: 0 0 12px;
-}
-.openshell-subheading {
-  margin-top: 22px;
 }
 .rule-grid {
   display: grid;
@@ -7253,33 +7180,10 @@ details.advanced summary {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
-.openshell-global {
-  margin-top: 16px;
-  font-size: 12px;
-}
-.openshell-global summary {
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--amber-ink, #84601d);
-}
-.openshell-global pre {
-  margin-top: 10px;
-  font-family: var(--mono);
-  font-size: 11px;
-  background: var(--pale);
-  padding: 12px;
-  border-radius: 8px;
-  overflow: auto;
-}
 .platform-picker.deployment {
   margin-top: -6px;
 }
 @media (max-width: 1100px) {
-  .openshell-layout {
-    grid-template-columns: minmax(0, 1fr);
-  }
 }
 .sandboxed-tag {
   display: inline-block;

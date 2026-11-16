@@ -1172,13 +1172,16 @@ function LatestRun({
           <RefreshCw size={14} />
         </IconButton>
       </div>
-      <div className="tabs compact" role="tablist">
-        {(['summary', 'stdout', 'stderr'] as const).map((t) => (
-          <button key={t} className={tab === t ? 'active' : ''} onClick={() => setTab(t)}>
-            {t === 'summary' ? 'Outputs' : t}
-          </button>
-        ))}
-      </div>
+      <Tabs
+        compact
+        label="Run output"
+        tabs={(['summary', 'stdout', 'stderr'] as const).map((t) => ({
+          id: t,
+          label: t === 'summary' ? 'Outputs' : t,
+        }))}
+        value={tab}
+        onChange={setTab}
+      />
       {tab === 'summary' ? (
         <>
           {run.error && <div className="notice error">{run.error}</div>}

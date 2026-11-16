@@ -36,8 +36,9 @@ export function Field({ label, hint, children }: { label: string; hint?: string;
   const id = useId();
   const isControl =
     isValidElement(children) &&
-    typeof children.type === 'string' &&
-    ['input', 'select', 'textarea'].includes(children.type);
+    ((typeof children.type === 'string' && ['input', 'select', 'textarea'].includes(children.type)) ||
+      // A wrapper that passes the id on to its control (e.g. an input with its unit, #469).
+      Boolean((children.type as { forwardsId?: boolean }).forwardsId));
   return (
     <div className="field">
       <label htmlFor={isControl ? id : undefined}>{label}</label>
