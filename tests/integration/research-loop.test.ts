@@ -293,6 +293,32 @@ test('Research Lab: pause / resume, settings rebuild the harness, gates edits ma
   assert.equal((await ok('/research/resume', {})).paused, false);
 });
 
+test('#365: a daily-cap pause from a previous UTC day lifts by itself, with a note; a total-cap pause does not', async () => {
+  const yesterday = new Date(Date.now() - 26 * 3600_000).toISOString();
+  const stop = (stopKind: 'daily' | 'total') =>
+    ok(
+      '/research/settings',
+      {
+        paused: true,
+        budget: { dailyCapUsd: 1000, stoppedAt: yesterday, stopReason: `test ${stopKind}`, stopKind },
+      },
+      'PUT',
+    );
+  await stop('total');
+  await new Promise((r) => setTimeout(r, 65_000));
+  let s = await ok('/research/status');
+  assert.equal(s.paused, true, 'a total-cap pause waits for the owner');
+  await stop('daily');
+  for (let i = 0; i < 70 && s.paused; i++) {
+    await new Promise((r) => setTimeout(r, 1000));
+    s = await ok('/research/status');
+  }
+  assert.equal(s.paused, false, 'the daily-cap pause lifted');
+  assert.equal(s.spend.stoppedAt, undefined);
+  assert.match(s.state.notes.join(' '), /Resumed by itself/);
+  await ok('/research/settings', { budget: {}, paused: false }, 'PUT');
+});
+
 test('a spend cap below the spend stops the next cycle at its first model call and pauses the loop (#297)', async () => {
   let s = await ok('/research/status');
   assert.ok(s.spend.today > 0, 'the cycle above was priced');

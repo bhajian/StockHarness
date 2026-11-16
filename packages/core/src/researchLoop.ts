@@ -76,6 +76,10 @@ export const researchSettingsSchema = z.object({
         .optional(),
       stoppedAt: z.coerce.date().optional(),
       stopReason: z.string().optional(),
+      /** #365: a daily cap's pause lifts by itself at the next UTC day; a total cap's waits for the owner. */
+      stopKind: z.enum(['daily', 'total']).optional(),
+      /** #365: when a daily-cap pause last lifted by itself. */
+      autoResumedAt: z.coerce.date().optional(),
     })
     .default({}),
   /** Model and skills per role (provider ids, skill ids); the harness is rebuilt when they change. */

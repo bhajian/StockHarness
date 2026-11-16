@@ -128,6 +128,8 @@ export async function researchStatus(ownerId: string) {
       : null,
     stoppedAt: spend.stoppedAt,
     stopReason: spend.stopReason,
+    stopKind: spend.stopKind,
+    autoResumedAt: spend.autoResumedAt,
     capExceeded: spend.exceeded,
     backlog: { size: await coderBacklog(ownerId), limit: s.maxCoderBacklog },
   });

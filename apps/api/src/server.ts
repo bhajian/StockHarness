@@ -23,6 +23,7 @@ import { dispatchTransformTriggers } from '../../../packages/core/src/transformT
 import { dispatchPipelines } from '../../../packages/core/src/pipelineEngine.js';
 import { dispatchSyncTriggers } from '../../../packages/core/src/syncTriggers.js';
 import { safeError } from '../../../packages/core/src/security.js';
+import { liftDailyCapPauses } from '../../../packages/core/src/spendGuard.js';
 import { dispatchConfigBackup } from './configBackup.js';
 import { refreshAllCatalogs } from './catalog.js';
 
@@ -59,10 +60,16 @@ const server = app.listen(config.PORT, '0.0.0.0', () =>
 );
 attachSessionSockets(server);
 let dispatching = false;
+// #365: a daily-cap pause lifts after 00:00 UTC; checked once a minute (a cheap query when nothing is paused).
+let liftCheckedAt = 0;
 async function tick() {
   if (dispatching) return;
   dispatching = true;
   try {
+    if (Date.now() - liftCheckedAt >= 60_000) {
+      liftCheckedAt = Date.now();
+      await liftDailyCapPauses();
+    }
     await recoverStaleJobs();
     await dispatchHumanRequests();
     await dispatchPending();
