@@ -110,6 +110,10 @@ def test_plugin(code: str, *, source, policies: dict, params: dict | None = None
             last_days = trading_days(source, (date.fromisoformat(dates[-1]) - timedelta(days=10)).isoformat(), dates[-1])
             on = _universe_on(source, dates[-1], None, last_days) if dates[-1] in last_days else []
             scope_size = min(int(want["top"]), len(on))
+        elif want.get("index"):  # #455: the index's members on the last date
+            last_days = trading_days(source, (date.fromisoformat(dates[-1]) - timedelta(days=10)).isoformat(), dates[-1])
+            on = _universe_on(source, dates[-1], None, last_days, f"index:{want['index']}") if dates[-1] in last_days else []
+            scope_size = len(on)
         elif want.get("symbols"):
             scope_size = len(resolve_scope(source, list(want["symbols"]))[0] or [])
     # Only where the scope can hold it: a tiny test scope (a few names) cannot meet a 10-name gate.

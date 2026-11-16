@@ -518,11 +518,13 @@ export function ScheduleModal({
                   About <strong>{duration(estimate.estimate.seconds)}</strong> · {estimate.estimate.days}{' '}
                   sessions · code{' '}
                   {estimate.config.ideas.map((i: any) => `${i.idea} v${i.version}`).join(', ')}
-                  {estimate.config.universeTop
-                    ? ` · the ${estimate.config.universeTop} largest by market cap on each date`
-                    : estimate.config.symbols
-                      ? ` · ${estimate.config.symbols.length} symbols`
-                      : ' · whole universe'}
+                  {estimate.config.universeIndex
+                    ? ` · ${({ sp500: 'S&P 500', ndx: 'Nasdaq-100', dji: 'Dow' } as Record<string, string>)[estimate.config.universeIndex]} members on each date`
+                    : estimate.config.universeTop
+                      ? ` · the ${estimate.config.universeTop} largest by market cap on each date`
+                      : estimate.config.symbols
+                        ? ` · ${estimate.config.symbols.length} symbols`
+                        : ' · whole universe'}
                 </span>
               ) : (
                 <span className="muted-line">

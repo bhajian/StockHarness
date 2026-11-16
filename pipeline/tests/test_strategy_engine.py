@@ -33,7 +33,7 @@ class Engine(unittest.TestCase):
         b = run(MOMENTUM, src, days[70], days[-1])
         self.assertEqual(a, b)
         self.assertTrue(a["record_hash"].startswith("sha256:"))
-        self.assertEqual(a["evaluator_version"], "1.7.0")
+        self.assertEqual(a["evaluator_version"], "1.8.0")
         self.assertGreater(a["summary"]["rebalances"], 30)
         self.assertEqual(len(a["series"]["dates"]), len(a["series"]["series"]["equity"]))
         c = run(MOMENTUM, src, days[70], days[-1], params={"top_n": 3})
@@ -279,3 +279,25 @@ class HeldDataQuality(unittest.TestCase):
         w = [x for x in r["warnings"] if x["code"] == "data_quality_on_held_names"]
         self.assertEqual(len(w), 1)
         self.assertEqual(w[0]["by_flag"], {"large_move": 1})
+
+
+class IndexScope(unittest.TestCase):
+    """#455: a scope of an index's point-in-time members, and a warning for hand-picked name lists."""
+
+    def test_only_members_on_each_date_are_eligible(self):
+        src, days = synthetic.market(n_sec=20, n_days=160, seed=5)
+        members = {f"SEC_{k:06d}" for k in range(5)}
+        for u in src.collections["universe_daily"]:
+            u["in_sp500"] = u["security_id"] in members and u["date"] >= days[60] or (
+                u["security_id"] == "SEC_000010" and u["date"] < days[60])
+        r = run(MOMENTUM, src, days[30], days[-1], params={"universe": {"index": "sp500"}})
+        held = {s for b in r["rebalances"] for s in []} | set(r["holdings"]["weights"])
+        self.assertTrue(held <= members, held)
+        self.assertTrue(all(x["eligible"] <= 5 for x in r["rebalances"]))
+        with self.assertRaises(engine.EvaluationError):
+            run(MOMENTUM, src, days[30], days[-1], params={"universe": {"index": "ftse"}})
+
+    def test_a_symbol_list_is_flagged_hindsight(self):
+        src, days = synthetic.market(n_sec=10, n_days=120, seed=5)
+        r = run(MOMENTUM, src, days[30], days[-1], params={"symbols": [f"T{k:06d}" for k in range(6)]})
+        self.assertIn("hindsight_scope", [w["code"] for w in r["warnings"]])

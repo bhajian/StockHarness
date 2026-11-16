@@ -101,7 +101,11 @@ test('the Research Lab shows a cycle: KPIs, board, activity, debate, steering, p
   });
   await api(
     '/research/settings',
-    { evaluationSymbols: ['T0', 'T1', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'], evaluationYears: 1 },
+    {
+      scope: { kind: 'symbols' },
+      evaluationSymbols: ['T0', 'T1', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'],
+      evaluationYears: 1,
+    },
     'PUT',
   );
   const installed = await api('/research/loop', { providers: { theorist: provider.id, judge: provider.id } });

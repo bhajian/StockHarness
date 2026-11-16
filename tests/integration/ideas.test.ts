@@ -114,7 +114,7 @@ before(async () => {
   await ok('/catalog/refresh', {});
   await ok('/evaluator/settings', { holdoutMonths: 1 }, 'PUT');
   // A theory's evaluation runs on the research scope (#319): the synthetic names.
-  await ok('/research/settings', { evaluationSymbols: ids }, 'PUT');
+  await ok('/research/settings', { scope: { kind: 'symbols' }, evaluationSymbols: ids }, 'PUT');
 
   process.env.ENCRYPTION_KEY = env
     .split('\n')
