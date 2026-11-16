@@ -728,6 +728,11 @@ async function mechanicalVerdict(
     ...(holdout ? { holdoutEvaluationId: holdout._id } : {}),
   });
   await lockGates(gates);
+  // Owner request: a successful or promising idea is simulated over 10 years to today, labelled with its verdict.
+  if (to === 'successful' || to === 'promising') {
+    const { autoSimulateAfterVerdict } = await import('./autoSimulate.js');
+    autoSimulateAfterVerdict(ownerId, t);
+  }
   return { ...brief(t), mechanical, gates_version: gates.version, gates: results };
 }
 const failingProof = (results: { gate: string; passed: boolean }[]) =>

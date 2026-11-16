@@ -98,6 +98,20 @@ export function SimulationDetail({ id, tab, isAdmin }: { id: string; tab: string
           <h2>{s.name}</h2>
           <div className="idea-meta">
             <StatusPill status={s.status} />
+            {c.label && (
+              <span
+                title={
+                  c.label === 'promising'
+                    ? 'A promising idea: it beat the S&P 500 but did not pass every gate. Simulated anyway, not proven.'
+                    : 'A successful idea: it passed every gate, the holdout included.'
+                }
+              >
+                <StatusPill
+                  status={c.label === 'successful' ? 'succeeded' : 'warn'}
+                  label={c.auto ? `${c.label} · automatic` : c.label}
+                />
+              </span>
+            )}
             <span>
               {c.period.start} → {c.period.end}
             </span>

@@ -416,6 +416,16 @@ test('strict gates: the Judge cannot upgrade a failing theory; forward_only theo
   const pIdea = await ok(`/ideas?status=promising&limit=1000`);
   assert.ok(pIdea.items.some((i: any) => i.ref === p.theory_id));
   assert.ok(pIdea.kpis.promising >= 1);
+  // A promising idea is simulated by itself, labelled promising, to the latest price (owner request 2026-11-17).
+  let auto: any;
+  for (let i = 0; i < 30 && !auto; i++) {
+    auto = (await ok('/simulations')).find((s: any) => s.auto && s.ideas.includes(p.theory_id));
+    if (!auto) await new Promise((r) => setTimeout(r, 1000));
+  }
+  assert.ok(auto, 'an automatic simulation started');
+  assert.equal(auto.label, 'promising');
+  const backfill = await ok('/simulations/auto-backfill', {});
+  assert.ok(!backfill.queued.includes(p.theory_id), 'not simulated twice');
 
   const fwd = await theorist.call('submit_theory', {
     title: 'Estimate revisions lead returns',

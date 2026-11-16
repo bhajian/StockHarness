@@ -141,7 +141,13 @@ function SimulationList({ isAdmin }: { isAdmin: boolean }) {
                 {(r) => (
                   <tr key={r.id} className="clickable" onClick={() => go(`/simulations/${r.id}`)}>
                     <td>
-                      <strong>{r.name}</strong>
+                      <strong>{r.name}</strong>{' '}
+                      {r.label && (
+                        <StatusPill
+                          status={r.label === 'successful' ? 'succeeded' : 'warn'}
+                          label={r.auto ? `${r.label} · automatic` : r.label}
+                        />
+                      )}
                       {r.usesHoldout && <small className="muted-line">uses the holdout</small>}
                     </td>
                     <td>
