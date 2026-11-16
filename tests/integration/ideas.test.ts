@@ -217,8 +217,14 @@ test('ideas: list, detail, debate, code, actions, reproduce, compare, export', a
 
   const all = await ok('/ideas');
   assert.deepEqual([all.kpis.successful, all.kpis.failed, all.kpis.total], [1, 1, 2]);
-  assert.equal(all.items[0].ref, 'T-1', 'sorted by deflated Sharpe');
-  assert.ok(all.items[0].spark.length > 5 && all.items[0].holdout?.status === 'succeeded');
+  // Sorted by deflated Sharpe, then Sharpe (which idea comes first depends on the evaluator's numbers).
+  const key = (i: any) => [i.deflatedSharpe ?? -Infinity, i.sharpe ?? -Infinity];
+  for (let k = 1; k < all.items.length; k++) {
+    const [a, b] = [key(all.items[k - 1]), key(all.items[k])];
+    assert.ok(a[0] > b[0] || (a[0] === b[0] && a[1] >= b[1]), 'sorted by deflated Sharpe, then Sharpe');
+  }
+  const t1 = all.items.find((i: any) => i.ref === 'T-1');
+  assert.ok(t1.spark.length > 5 && t1.holdout?.status === 'succeeded');
   assert.deepEqual(
     (await ok('/ideas?status=successful,approved')).items.map((i: any) => i.ref),
     ['T-1'],
