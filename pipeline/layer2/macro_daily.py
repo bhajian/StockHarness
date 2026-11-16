@@ -15,8 +15,9 @@ from bisect import bisect_right
 
 from ..core import pit
 from ._resolve import as_date
+from .macro_regime_logic import add_regimes, econ_series
 
-TV = "4"  # 4: spx_tr_1d (SPY close + dividends) and rf_1d (3-month T-bill per trading day), #445
+TV = "5"  # 5: macro regime columns (#456); 4: 4: spx_tr_1d (SPY close + dividends) and rf_1d (3-month T-bill per trading day), #445
 TREASURY_CARRY_DAYS = 5
 SECTOR_EXCHANGE = "NASDAQ"
 
@@ -78,7 +79,11 @@ def compute(read):
             prev_spx = s
         if spy.get(d):
             prev_spy = spy[d]
-    return rows
+    try:
+        econ = econ_series(read("economic_indicators", None, ["name", "date", "value"]))
+    except Exception:  # noqa: BLE001 - not synced yet: the economy columns stay empty
+        econ = {}
+    return add_regimes(rows, econ)
 
 
 def _g(row, key):
