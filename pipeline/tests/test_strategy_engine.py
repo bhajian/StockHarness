@@ -33,7 +33,7 @@ class Engine(unittest.TestCase):
         b = run(MOMENTUM, src, days[70], days[-1])
         self.assertEqual(a, b)
         self.assertTrue(a["record_hash"].startswith("sha256:"))
-        self.assertEqual(a["evaluator_version"], "1.3.0")
+        self.assertEqual(a["evaluator_version"], "1.4.0")
         self.assertGreater(a["summary"]["rebalances"], 30)
         self.assertEqual(len(a["series"]["dates"]), len(a["series"]["series"]["equity"]))
         c = run(MOMENTUM, src, days[70], days[-1], params={"top_n": 3})
@@ -262,3 +262,20 @@ class PointInTime(unittest.TestCase):
         self.assertEqual(len(book), 10)
         self.assertNotEqual(sorted(book), ids[:10])
         self.assertEqual(book, engine.build_book({s: 1.0 for s in ids}, None, "long", 10, 1.0))
+
+
+class HeldDataQuality(unittest.TestCase):
+    """#451: the record warns when a held name's price that day was flagged."""
+
+    def test_flags_on_held_names_are_reported(self):
+        days = synthetic.weekdays("2020-01-01", 30)
+        src, _ = synthetic.market(n_sec=4, n_days=30)
+        for row in src.collections["prices_daily"]:
+            if row["security_id"] == "SEC_000000" and row["date"] == days[5]:
+                row["dq_flags"] = ["large_move"]
+            if row["security_id"] == "SEC_000003" and row["date"] == days[5]:
+                row["dq_flags"] = ["bad_print"]  # not held by a long book of one
+        r = run(constant(), src, days[0], days[12])
+        w = [x for x in r["warnings"] if x["code"] == "data_quality_on_held_names"]
+        self.assertEqual(len(w), 1)
+        self.assertEqual(w[0]["by_flag"], {"large_move": 1})

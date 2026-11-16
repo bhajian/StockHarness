@@ -241,12 +241,16 @@ def evaluate(code: str, *, source, policies: dict, params: dict, config: dict | 
     load = universe_all if benchmarks else held
     first_exec = min(targets)
     rets: dict[str, dict[str, float]] = {}
+    dq: dict[str, dict[str, list[str]]] = {}  # #451: date -> security -> prices_daily dq_flags
+    held_flags: list[tuple[str, str, list[str]]] = []
     last_price: dict[str, str] = {}
     history: dict[str, list[tuple[str, float | None, float | None]]] = {}  # (date, close_raw, ret_1d), for #448
     for r in source.find("prices_daily", {"security_id": {"$in": load}, "date": {"$gte": first_exec, "$lte": end}},
-                         ["security_id", "date", "tr_1d", "ret_1d", "close", "close_raw"]) if load else []:
+                         ["security_id", "date", "tr_1d", "ret_1d", "close", "close_raw", "dq_flags"]) if load else []:
         v = r.get("tr_1d") if r.get("tr_1d") is not None else r.get("ret_1d")
         s, d = r["security_id"], r["date"]
+        if r.get("dq_flags"):
+            dq.setdefault(d, {})[s] = list(r["dq_flags"])
         last_price[s] = max(last_price.get(s, d), d)
         history.setdefault(s, []).append((d, r.get("close_raw") if r.get("close_raw") is not None else r.get("close"),
                                           r.get("ret_1d")))
@@ -302,6 +306,7 @@ def evaluate(code: str, *, source, policies: dict, params: dict, config: dict | 
     for d in days[days.index(first_exec):]:
         day = rets.get(d, {})
         extreme += [(d, s, day[s]) for s in w if s in day and abs(day[s]) > 0.5]
+        held_flags += [(d, s, dq[d][s]) for s in w if s in dq.get(d, {})]  # #451: data issues on names held
         if d in eligible_at:  # #454: the sector benchmark averages that date's eligible names, by that date's sector
             eligible_now = eligible_at[d][1]
         sec_today = {s: sector_on(sector_hist.get(s), d) for s in (set(eligible_now) | set(w))} if benchmarks else {
@@ -412,7 +417,7 @@ def evaluate(code: str, *, source, policies: dict, params: dict, config: dict | 
             "spx_returns": [_round(x) if isinstance(x, (int, float)) else None for x in out_spx],
             "gross": [_round(x, 6) for x in out_gross], "turnover": [_round(x, 6) for x in out_turn]}},
         "folds": [_rounded(f) for f in metrics.folds(out_dates, out_ret, int(cfg["walk_forward"].get("min_days", 20)), periods, out_rf)],
-        "warnings": _warnings(rebalances, extreme),
+        "warnings": _warnings(rebalances, extreme, held_flags),
         "rebalances": rebalances,
         "holdings": {"date": max(targets), "weights": {s: _round(v, 8) for s, v in sorted(targets[max(targets)].items())}},
         "reader": dict(reader.stats),
@@ -591,7 +596,12 @@ def _factor_returns(source, policies, cfg, targets, eligible_at, rets, out_dates
     return out or None
 
 
-def _warnings(rebalances: list[dict], extreme: list[tuple]) -> list[dict]:
+# #451: flags that mean the day's price or return is not trustworthy (bad_print: no return that day; large_move: kept).
+DQ_SERIOUS = ("bad_print", "large_move", "implausible_price", "zero_or_negative_price", "high_lt_low",
+              "implausible_dividend", "dividend_basis_uncertain", "jump_no_action", "stale_price")
+
+
+def _warnings(rebalances: list[dict], extreme: list[tuple], held_flags: list[tuple] | None = None) -> list[dict]:
     """Structured warnings (codes and counts, no prose the record depends on)."""
     out = []
     empty = [r["date"] for r in rebalances if not r["long"] and not r["short"]]
@@ -602,6 +612,16 @@ def _warnings(rebalances: list[dict], extreme: list[tuple]) -> list[dict]:
         out.append({"code": "extreme_returns", "count": len(extreme),
                     "examples": [{"date": d, "security_id": s, "return": _round(r, 6)} for d, s, r in extreme[:5]],
                     "hint": "held names moved more than 50% in a day; check prices_daily dq_flags"})
+    serious = [(d, s, [f for f in fl if f in DQ_SERIOUS]) for d, s, fl in held_flags or []]
+    serious = [x for x in serious if x[2]]
+    if serious:
+        by: dict[str, int] = {}
+        for _, _, fl in serious:
+            for f in fl:
+                by[f] = by.get(f, 0) + 1
+        out.append({"code": "data_quality_on_held_names", "count": len(serious), "by_flag": dict(sorted(by.items())),
+                    "examples": [{"date": d, "security_id": s, "flags": fl} for d, s, fl in serious[:10]],
+                    "hint": "held names had flagged prices those days (bad prints carry no return; large moves are kept)"})
     return out
 
 

@@ -182,11 +182,24 @@ class TestJunkAndMergedTickers(unittest.TestCase):
         self.assertTrue(all(t is None or abs(t) < 1 for t in tr), tr)
         spike = p.compute_symbol_rows([self.bar("2023-01-02", 0.2), self.bar("2023-01-03", 300.0)], {}, {})
         self.assertIsNone(spike[1]["tr_1d"])
-        self.assertIn("return_suppressed", spike[1]["dq_flags"])
+        self.assertIn("bad_print", spike[1]["dq_flags"])
         split = p.compute_symbol_rows(
             [self.bar(date(2020, 8, 28), 400.0), self.bar(date(2020, 8, 31), 10.0)], {}, {date(2020, 8, 31): 40.0}
         )
         self.assertAlmostEqual(split[1]["tr_1d"], 0.0, places=12, msg="a split explains the ÷40")
+
+    def test_a_real_crash_is_booked_and_a_reverting_print_is_not(self):
+        """#451: a -95% bankruptcy day stays in the returns; a ÷10 print that comes straight back is bad data."""
+        days = ["2023-05-01", "2023-05-02", "2023-05-03", "2023-05-04", "2023-05-05", "2023-05-08"]
+        crash = p.compute_symbol_rows([self.bar(d, c) for d, c in zip(days, [20.0, 19.0, 0.95, 0.9, 0.7, 0.8])], {}, {})
+        self.assertAlmostEqual(crash[2]["tr_1d"], 0.95 / 19.0 - 1)
+        self.assertIn("large_move", crash[2]["dq_flags"])
+        glitch = p.compute_symbol_rows([self.bar(d, c) for d, c in zip(days, [20.0, 19.0, 1.9, 19.2, 19.4, 19.5])], {}, {})
+        self.assertIsNone(glitch[2]["tr_1d"])
+        self.assertIn("bad_print", glitch[2]["dq_flags"])
+        self.assertAlmostEqual(glitch[3]["tr_1d"], 19.2 / 19.0 - 1, msg="measured from the last good close")
+        rally = p.compute_symbol_rows([self.bar(d, c) for d, c in zip(days, [1.0, 1.0, 12.0, 12.5, 11.8, 12.1])], {}, {})
+        self.assertAlmostEqual(rally[2]["tr_1d"], 11.0, msg="a jump the next sessions confirm is real")
 
     def test_one_ticker_per_date_for_a_security_with_several(self):
         tickers = [
