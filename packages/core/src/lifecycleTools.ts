@@ -399,9 +399,9 @@ async function assertBacklogRoom(ownerId: string) {
 }
 
 /**
- * A theory is evaluated on the research scope (Research → Setup), whatever names the agent passed (#319); the
- * research window fills in a missing start or end (the evaluator still stops before the holdout). The agent
- * may choose the window, side, top_n, rebalance and plugin_params, not the names.
+ * A theory is evaluated on the research scope and window (Research → Setup), whatever names or dates the agent
+ * passed (#319, #450: an agent that picks its own start and end can pick the years that worked). The agent may choose
+ * side, top_n, rebalance and plugin_params.
  */
 export async function scopedParams(ownerId: string, given: unknown) {
   const { evaluationParams } = await import('./researchLoop.js');
@@ -411,7 +411,7 @@ export async function scopedParams(ownerId: string, given: unknown) {
   const { start, end, ...names } = research;
   delete p.symbols;
   delete p.universe;
-  return { ...p, start: p.start ?? start, end: p.end ?? end, ...names };
+  return { ...p, start, end, ...names };
 }
 
 export async function evaluateForTheory(
@@ -531,6 +531,8 @@ async function mechanicalVerdict(
         ...(explore.params.side ? { side: explore.params.side } : {}),
         ...(explore.params.top_n ? { top_n: explore.params.top_n } : {}),
         ...(explore.params.rebalance ? { rebalance: explore.params.rebalance } : {}),
+        // #450: the holdout tests the configuration that was explored.
+        ...(explore.params.plugin_params ? { plugin_params: explore.params.plugin_params } : {}),
       },
     });
     t = await linkTheory(ownerId, t._id, { holdoutEvaluationId: evaluation._id }, actorOf('evaluator', meta));

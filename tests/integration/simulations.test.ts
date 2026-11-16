@@ -189,13 +189,17 @@ async function finished(id: string) {
 let momentum: { ref: string };
 let reversal: { ref: string };
 let simId = '';
+let parityPeriod: { start: string; end: string } = { start: '', end: '' };
 
 test('a one-idea simulation with the defaults reproduces its evaluation', async () => {
   momentum = await idea('Forty-day trend followers', 'momentum', GOOD);
+  // #450: the idea was evaluated on the research window; the simulation runs over the same one.
+  const window = (await ok(`/evaluations/${(momentum as any).evaluationId}`)).record.params;
+  parityPeriod = { start: window.start, end: window.end };
   const config = {
     name: 'Momentum alone',
     ideas: [{ idea: momentum.ref }],
-    period: { start: params.start, end: params.end },
+    period: { start: window.start, end: window.end },
     capital: 100000,
   };
   const est = await ok('/simulations/estimate', { config });
@@ -272,7 +276,12 @@ test('the holdout guard, determinism and an idea without code', async () => {
   const again = await finished(
     (
       await ok('/simulations', {
-        config: { name: 'Momentum alone', ideas: [{ idea: momentum.ref }], period: params, capital: 100000 },
+        config: {
+          name: 'Momentum alone',
+          ideas: [{ idea: momentum.ref }],
+          period: parityPeriod,
+          capital: 100000,
+        },
       })
     ).id,
   );
@@ -354,7 +363,8 @@ test('the S&P 500 proxy scope: the N largest by market cap, for evaluations and 
     'the research scope, not the whole universe',
   );
   assert.equal(se.record.params.symbols, undefined);
-  assert.equal(se.record.params.start, params.start, "the Coder's window is kept");
+  assert.notEqual(se.record.params.start, params.start, "#450: the research window, not the Coder's");
+  assert.ok(se.record.params.start < params.start);
   await ok('/research/settings', { scope: { kind: 'symbols', top: 500 } }, 'PUT');
 });
 

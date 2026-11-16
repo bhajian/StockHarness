@@ -67,6 +67,7 @@ export const strategyPlugins = () => collection<StrategyPlugin>('strategy_plugin
 export const strategyPluginVersions = () => collection<StrategyPluginVersion>('strategy_plugin_versions');
 
 export const codeHash = (code: string) => `sha256:${createHash('sha256').update(code, 'utf8').digest('hex')}`;
+export { normalizedCode, normalizedCodeHash } from './codeNormalize.js';
 
 /** Quick save-time checks (the Python contract check is authoritative). */
 export function pluginProblems(p: StrategyPluginInput): string[] {

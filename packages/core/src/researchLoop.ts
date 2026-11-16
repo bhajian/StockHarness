@@ -5,7 +5,7 @@
 import { z } from 'zod';
 import { collection } from './db.js';
 import { agentSchema, workflowSchema, type Agent, type Workflow, type WorkflowNode } from './schema.js';
-import { evaluations, evaluatorSettings, latestPriceDate } from './evaluations.js';
+import { earliestPriceDate, evaluations, evaluatorSettings, latestPriceDate } from './evaluations.js';
 import { strategyPluginVersions, strategyPlugins } from './strategyPlugins.js';
 import { activeGates } from './gates.js';
 import { theories, type Theory } from './theories.js';
@@ -44,7 +44,7 @@ export const researchSettingsSchema = z.object({
       top: z.number().int().min(1).max(5000).default(500),
     })
     .default({}),
-  /** Years before the holdout to evaluate on (#453: all of it by default, from EVALUATION_FLOOR). */
+  /** Years before the holdout to evaluate on (#453: all of it by default, from a year after the first price). */
   evaluationYears: z.number().int().min(1).max(15).default(15),
   /** Effort and turns per research agent (#266): the defaults suit real runs; a dev smoke test uses medium / ~12. */
   agentEffort: z.enum(['light', 'medium', 'high', 'extra-high', 'max']).default('high'),
@@ -158,17 +158,23 @@ export async function addSteeringNote(ownerId: string, note: string, by?: string
 
 const addYears = (iso: string, n: number) => `${Number(iso.slice(0, 4)) + n}${iso.slice(4)}`;
 /**
- * The earliest exploration start (#453): prices begin 2016-01-04, so a year later every 12-month lookback has data
- * (an earlier start leaves the first year's books empty, which is a blocking warning).
+ * The earliest exploration start (#453, #450): a year after the first priced date, so every 12-month lookback has
+ * data (prices start 2016-01-04 on live: 2017-01-04). With less than a year of data, the first priced date.
  */
-export const EVALUATION_FLOOR = '2017-01-03';
+async function evaluationFloor(ownerId: string, end: string) {
+  const first = await earliestPriceDate(ownerId);
+  if (!first) return undefined;
+  const year = addYears(first, 1);
+  return year < end ? year : first;
+}
 /** The evaluation window the Coder should use: the years before the holdout, on the configured symbols. */
 export async function evaluationParams(ownerId: string, s?: ResearchSettings) {
   const st = s ?? (await researchSettings(ownerId));
   const end = (await evaluatorSettings(ownerId)).readableEnd ?? (await latestPriceDate(ownerId));
   if (!end) return undefined;
   const wanted = addYears(end, -st.evaluationYears);
-  const start = wanted < EVALUATION_FLOOR ? EVALUATION_FLOOR : wanted;
+  const floor = await evaluationFloor(ownerId, end);
+  const start = floor && wanted < floor ? floor : wanted;
   return st.scope?.kind === 'top_market_cap'
     ? { start, end, universe: { top_by_market_cap: st.scope.top } }
     : { start, end, symbols: st.evaluationSymbols };
