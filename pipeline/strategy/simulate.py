@@ -23,7 +23,7 @@ import json
 import math
 import statistics
 
-from . import EVALUATOR_VERSION, contract, metrics
+from . import EVALUATOR_VERSION, contract, delisting, metrics
 from .broker import PaperBroker
 from .config import load_config
 from .context import StrategyContext
@@ -31,7 +31,7 @@ from .engine import (EvaluationError, _current, _universe_on, ensure_indexes, pl
                      trading_days, universe_top)
 from .reader import PitReader
 
-SIMULATOR_VERSION = "1.1.0"  # 1.1: total-return benchmark, rf_return per session, Sharpe over cash (#445)
+SIMULATOR_VERSION = "1.2.0"  # 1.2: delisting returns by class and side (#448); 1.1: total-return benchmark, rf_return per session, Sharpe over cash (#445)
 COLLECTIONS = ("sim_orders", "sim_trades", "sim_portfolio_daily", "sim_positions")
 DEFAULTS = {
     "capital": 1_000_000.0,
@@ -128,7 +128,7 @@ def simulate(ideas: list[dict], *, source, policies: dict, params: dict, config:
     bars: dict[str, dict[str, dict]] = {}
     final_bar: dict[str, str] = {}
     for r in source.find("prices_daily", {"security_id": {"$in": names}, "date": {"$gte": first, "$lte": end}},
-                         ["security_id", "date", "close", "ret_1d", "tr_1d"]) if names else []:
+                         ["security_id", "date", "close", "close_raw", "ret_1d", "tr_1d"]) if names else []:
         bars.setdefault(r["date"], {})[r["security_id"]] = r
         final_bar[r["security_id"]] = max(final_bar.get(r["security_id"], r["date"]), r["date"])
     sec_rows = source.find("securities", {"security_id": {"$in": names}},
@@ -144,11 +144,13 @@ def simulate(ideas: list[dict], *, source, policies: dict, params: dict, config:
     spx = {d: (m["spx_tr_1d"] if isinstance(m.get("spx_tr_1d"), (int, float)) else m.get("spx_ret_1d"))
            for d, m in macro.items()}
     rf = {d: m.get("rf_1d") for d, m in macro.items()}
+    inactive_ids = {r["security_id"] for r in sec_rows if r.get("is_active") is False}
     broker = PaperBroker(
         float(sim["capital"]), commission_bps=float(costs["commission_bps"]), slippage_bps=float(costs["slippage_bps"]),
         borrow_bps=float(costs["borrow_cost_bps_default"]), delisting_return=float(costs["delisting_return"]),
+        delisting=delisting.settings(cfg), delist_class={s: _delist_class(bars, s) for s in inactive_ids},
         periods=int(cfg["trading_days_per_year"]),
-        inactive={r["security_id"] for r in sec_rows if r.get("is_active") is False},
+        inactive=inactive_ids,
         final_bar=final_bar, tickers=ticker, dividends=str(sim.get("dividends") or "reinvest"))
 
     ids = [i["id"] for i in ideas]
@@ -232,6 +234,13 @@ def _plan_idea(idea, plans, plugins, metas, *, source, reader, days, scope, lag,
     reviewer = contract.load(idea["code"])
     reviewer.params = params
     plugins[idea["id"]], metas[idea["id"]] = reviewer, meta
+
+
+def _delist_class(bars: dict[str, dict[str, dict]], s: str) -> str:
+    """#448: the class of a delisting from the name's own last prices (the evaluator's rule)."""
+    rows = [bars[d][s] for d in sorted(bars) if s in bars[d]]
+    return delisting.classify([r.get("close_raw") if r.get("close_raw") is not None else r.get("close") for r in rows],
+                              [r.get("ret_1d") for r in rows])
 
 
 def _tr(bar) -> float:

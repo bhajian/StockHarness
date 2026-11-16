@@ -8,7 +8,8 @@ DEFAULTS = {
     "commission_bps": 1.0,
     "slippage_bps": 5.0,
     "borrow_cost_bps_default": 50.0,
-    "delisting_return": -0.30,
+    "delisting_return": -0.30,  # the old flat value; `delisting` replaces it (#448)
+    "delisting": {"merger": 0.0, "distress": -0.55, "unknown": -0.30, "short": 0.0},
     "holdout_months": 18,
     "trading_days_per_year": 252,
     "sizing": {"gross_limit": 1.0},
@@ -22,7 +23,8 @@ _PATH = Path(__file__).resolve().parent.parent / "config" / "backtest.yaml"
 
 def load_config(overrides: dict | None = None) -> dict:
     """backtest.yaml merged over the defaults (PyYAML is in the executor; tests may pass a dict instead)."""
-    cfg = {**DEFAULTS, "sizing": dict(DEFAULTS["sizing"]), "walk_forward": dict(DEFAULTS["walk_forward"])}
+    cfg = {**DEFAULTS, "sizing": dict(DEFAULTS["sizing"]), "walk_forward": dict(DEFAULTS["walk_forward"]),
+           "delisting": dict(DEFAULTS["delisting"])}
     try:
         import yaml
 
@@ -31,7 +33,7 @@ def load_config(overrides: dict | None = None) -> dict:
         loaded = {}
     for src in (loaded, overrides or {}):
         for k, v in src.items():
-            if k in ("sizing", "walk_forward", "factors") and isinstance(v, dict):
+            if k in ("sizing", "walk_forward", "factors", "delisting") and isinstance(v, dict):
                 cfg[k] = {**cfg[k], **v}
             elif k in DEFAULTS or k == "benchmark_max_names":
                 cfg[k] = v

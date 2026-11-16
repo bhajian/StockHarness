@@ -63,7 +63,8 @@ match its code.
 3. Trades execute at the close `execution_lag_days` sessions later (the next day's close), paying
    `commission_bps + slippage_bps` on the traded weight. Only names with a price that day are traded.
 4. Weights drift on daily total returns (`prices_daily.tr_1d`); shorts pay `borrow_cost_bps_default` a year; a
-   held name whose prices stop and that is no longer active takes `delisting_return` once.
+   held name whose prices stop and that is no longer active takes its delisting return once: 0% for a pinned price
+   (cash-out), −55% for distress, −30% otherwise, and 0% for a short (#448, `backtest.yaml` `delisting`).
 
 Costs come from `pipeline/config/backtest.yaml`. The result is an `evaluations` record: the plugin hash and
 version, params, costs, data snapshot, evaluator version, summary numbers, series in the standard

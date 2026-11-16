@@ -3804,8 +3804,10 @@ only this workspace's database. Each evaluation has up to an hour and 4 GiB of m
    - Shorts pay **borrow of 50 bps a year** on their weight, charged daily.
 7. **Hold and drift.** Between rebalances, weights drift with each name's daily **total return**
    (`prices_daily.tr_1d`, else `ret_1d`).
-8. **Handle delistings.** A held name whose prices stop, and which is no longer active, takes a **−30%** delisting
-   return once and is dropped.
+8. **Handle delistings.** A held name whose prices stop, and which is no longer active, takes a delisting return once
+   and is dropped (#448). The return depends on how its price behaved into the end: pinned (a cash-out) **0%**;
+   under $1 or down by more than half in 60 sessions (distress) **−55%**; otherwise **−30%**. A short never gains
+   from a delisting. Each one is listed in the record's `delistings` with its class.
 9. **Record.** The evaluator writes the summary, excess, by regime, factors, by sector, trade stats, series, folds,
    warnings, rebalances, final holdings and provenance. A `record_hash` covers all of it, so identical inputs give
    an identical record. The deflated Sharpe and the by-name results sit outside the hash.
@@ -4106,7 +4108,8 @@ Open **Costs and seed** to override the evaluator's costs. An empty field uses t
 | **Fill lag (sessions)** | Sessions between an exit decision and its fill (1 to 5).                                  | 1       |
 | **Seed**                | Part of the config and of the ledger hash. The same config and seed give the same ledger. | 0       |
 
-The delisting return (−30% by default) is not on the form; it comes from `backtest.yaml`. Costs follow the
+The delisting returns (by class, #448: 0% cash-out, −55% distress, −30% unknown, 0% for shorts) are not on the
+form; they come from `backtest.yaml`. Costs follow the
 evaluator's rule: commission plus slippage on the traded value, with targets sized on the NAV after costs.
 
 #### Scope

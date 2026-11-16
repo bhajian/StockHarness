@@ -33,7 +33,7 @@ class Engine(unittest.TestCase):
         b = run(MOMENTUM, src, days[70], days[-1])
         self.assertEqual(a, b)
         self.assertTrue(a["record_hash"].startswith("sha256:"))
-        self.assertEqual(a["evaluator_version"], "1.1.0")
+        self.assertEqual(a["evaluator_version"], "1.2.0")
         self.assertGreater(a["summary"]["rebalances"], 30)
         self.assertEqual(len(a["series"]["dates"]), len(a["series"]["series"]["equity"]))
         c = run(MOMENTUM, src, days[70], days[-1], params={"top_n": 3})
@@ -200,3 +200,42 @@ class Benchmark(unittest.TestCase):
         self.assertLess(tr["summary"]["sortino"], price_only["summary"]["sortino"])
         self.assertLess(tr["factors"]["alpha_annual"], price_only["factors"]["alpha_annual"] + 1e-9)
         self.assertLess(tr["folds"][0]["sharpe"], tr["folds"][0]["sharpe_raw"])
+
+
+class Delisting(unittest.TestCase):
+    """#448: a delisting's return depends on its class (read from its own last prices) and the side held."""
+
+    def test_classify(self):
+        from pipeline.strategy import delisting as dl
+        self.assertEqual(dl.classify([5.0] * 30, [0.0] * 30), "merger", "pinned at a deal price")
+        self.assertEqual(dl.classify([2.0] * 29 + [0.8], [0.01, -0.01] * 15), "distress", "last price under $1")
+        falling = [20 * 0.98 ** k for k in range(61)]
+        self.assertEqual(dl.classify(falling, [-0.02] * 61), "distress", "down more than half in 60 sessions")
+        self.assertEqual(dl.classify([10.0, 10.5, 9.8], [0.0, 0.05, -0.07]), "unknown")
+        self.assertEqual(dl.price_return("distress", -1, dl.DEFAULTS), 0.0, "a short never gains")
+
+    def _run(self, side, history_days, overrides_extra=None):
+        gone = "SEC_000000" if side == "long" else "SEC_000003"  # the name the constant book holds on that side
+        days = synthetic.weekdays("2020-01-01", history_days + 20)
+        flat = {(f"SEC_00000{k}", d): 0.0 for k in range(4) for d in days}
+        flat.update(overrides_extra or {})
+        last = days[history_days]
+        src, _ = synthetic.market(n_sec=4, n_days=len(days), overrides=flat, delist={gone: last})
+        r = run(constant(side=side), src, days[0], days[history_days + 6])
+        i = r["series"]["dates"].index(days[history_days + 1])
+        return r, r["series"]["series"]["returns"][i]
+
+    def test_a_short_gets_no_windfall(self):
+        r, ret = self._run("short", 3)
+        self.assertAlmostEqual(ret, 0.0, places=4)  # was +30% with the flat delisting return (borrow is ~2e-5)
+        self.assertEqual(r["delistings"][0]["side"], "short")
+
+    def test_a_pinned_price_is_a_cash_out_at_zero(self):
+        r, ret = self._run("long", 25)
+        self.assertEqual(r["delistings"][0]["class"], "merger")
+        self.assertAlmostEqual(ret, 0.0, places=6)
+
+    def test_a_long_with_little_history_takes_the_unknown_return(self):
+        r, ret = self._run("long", 3)
+        self.assertEqual(r["delistings"][0]["class"], "unknown")
+        self.assertAlmostEqual(ret, -0.3, places=6)

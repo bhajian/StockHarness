@@ -18,7 +18,7 @@ import json
 import math
 from datetime import date, datetime, timedelta
 
-from . import EVALUATOR_MAJOR, EVALUATOR_VERSION, contract, metrics
+from . import EVALUATOR_MAJOR, EVALUATOR_VERSION, contract, delisting, metrics
 from .config import load_config
 from .context import StrategyContext
 from .reader import PitReader
@@ -236,11 +236,14 @@ def evaluate(code: str, *, source, policies: dict, params: dict, config: dict | 
     first_exec = min(targets)
     rets: dict[str, dict[str, float]] = {}
     last_price: dict[str, str] = {}
+    history: dict[str, list[tuple[str, float | None, float | None]]] = {}  # (date, close_raw, ret_1d), for #448
     for r in source.find("prices_daily", {"security_id": {"$in": load}, "date": {"$gte": first_exec, "$lte": end}},
-                         ["security_id", "date", "tr_1d", "ret_1d"]) if load else []:
+                         ["security_id", "date", "tr_1d", "ret_1d", "close", "close_raw"]) if load else []:
         v = r.get("tr_1d") if r.get("tr_1d") is not None else r.get("ret_1d")
         s, d = r["security_id"], r["date"]
         last_price[s] = max(last_price.get(s, d), d)
+        history.setdefault(s, []).append((d, r.get("close_raw") if r.get("close_raw") is not None else r.get("close"),
+                                          r.get("ret_1d")))
         if isinstance(v, (int, float)) and math.isfinite(v):
             rets.setdefault(d, {})[s] = float(v)
     sec_rows = source.find("securities", {"security_id": {"$in": load}},
@@ -255,7 +258,17 @@ def evaluate(code: str, *, source, policies: dict, params: dict, config: dict | 
     comm = (float(cfg["commission_bps"]) + float(cfg["slippage_bps"])) / 1e4
     periods = int(cfg["trading_days_per_year"])
     borrow_daily = float(cfg["borrow_cost_bps_default"]) / 1e4 / periods
-    delist_ret = float(cfg["delisting_return"])
+    delist_cfg = delisting.settings(cfg)
+    delistings: list[dict] = []
+
+    def delist_move(s: str, wt: float, d: str) -> float:
+        """The one-off price move of a held name that delisted (#448), recorded with its class."""
+        rows = sorted(history.get(s, []))
+        cls = delisting.classify([c for _, c, _ in rows], [x for _, _, x in rows])
+        move = delisting.price_return(cls, 1 if wt > 0 else -1, delist_cfg)
+        delistings.append({"security_id": s, "ticker": ticker.get(s), "date": d, "last_price_date": last_price.get(s),
+                           "class": cls, "side": "long" if wt > 0 else "short", "price_return": move})
+        return move
     w: dict[str, float] = {}
     delisted: set[str] = set()
     out_dates, out_ret, out_spx, out_gross, out_turn, out_sector_bench = [], [], [], [], [], []
@@ -287,7 +300,7 @@ def evaluate(code: str, *, source, policies: dict, params: dict, config: dict | 
         for s, wt in w.items():
             r = day.get(s)
             if r is None and s in inactive and s not in delisted and last_price.get(s, d) < d:
-                r = delist_ret  # prices stopped and the company is gone: take the delisting return once
+                r = delist_move(s, wt, d)  # prices stopped and the company is gone: its delisting return, once
                 delisted.add(s)
             r = r or 0.0
             moved[s] = wt * (1 + r)
@@ -356,8 +369,8 @@ def evaluate(code: str, *, source, policies: dict, params: dict, config: dict | 
         "evaluator_version": EVALUATOR_VERSION,
         "plugin": {**(plugin_ref or {}), "hash": plugin.hash, "evaluator_major": EVALUATOR_MAJOR, "meta": meta},
         "params": {k: params[k] for k in sorted(params) if k not in ("code", "trials")},
-        "costs": {k: cfg[k] for k in ("execution_lag_days", "commission_bps", "slippage_bps", "borrow_cost_bps_default", "delisting_return")}
-        | {"gross_limit": gross},
+        "costs": {k: cfg[k] for k in ("execution_lag_days", "commission_bps", "slippage_bps", "borrow_cost_bps_default")}
+        | {"gross_limit": gross, "delisting": delist_cfg},
         "period": {"start": start, "end": end, "first_trade": first_exec, "days": len(out_dates),
                    "readable_end": readable_end or end},
         "data_snapshot": _snapshot(source, end),
@@ -369,6 +382,7 @@ def evaluate(code: str, *, source, policies: dict, params: dict, config: dict | 
            "avg_turnover": _round(sum(out_turn) / max(1, len(rebalances))),
            "annual_turnover": _round(sum(out_turn) / n_days * periods), "costs_paid": _round(costs_paid),
            "borrow_paid": _round(borrow_paid), "delisted": sorted(delisted), "rebalances": len(rebalances)},
+        "delistings": delistings,
         "excess": {
             "spx": _rounded(metrics.excess(out_ret, spx_clean, periods)),
             "sector": _rounded(metrics.excess(out_ret, out_sector_bench, periods)) if benchmarks else None,
