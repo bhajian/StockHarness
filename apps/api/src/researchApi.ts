@@ -239,7 +239,7 @@ async function setPaused(req: any, paused: boolean) {
         `The spend cap is still reached (${b.exceeded}). Raise the cap in Setup, then Resume.`,
       );
     const s = await researchSettings(ownerId);
-    const { stoppedAt: _a, stopReason: _r, ...budget } = s.budget ?? {};
+    const { stoppedAt: _a, stopReason: _r, stopKind: _k, ...budget } = s.budget ?? {};
     await updateResearchSettings(ownerId, { paused: false, budget });
   } else await updateResearchSettings(ownerId, { paused: true });
   await syncResearchSchedule(ownerId);

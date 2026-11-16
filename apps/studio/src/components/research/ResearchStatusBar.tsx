@@ -15,6 +15,7 @@ export type ResearchStateView = {
   nextCycleAt?: string;
   run?: { id: string; status: string; startedAt: string; cancelRequested: boolean };
   holds: string[];
+  notes?: string[];
   actions: ('start' | 'pause' | 'resume' | 'stop' | 'run_now')[];
 };
 
@@ -103,6 +104,11 @@ export function ResearchStatusBar({
       {st.holds.map((h) => (
         <span key={h} className="research-status-hold">
           <StatusPill status="warn" label="new ideas held" /> {h}
+        </span>
+      ))}
+      {(st.notes ?? []).map((n) => (
+        <span key={n} className="research-status-hold muted-line">
+          {n}
         </span>
       ))}
       {isAdmin && (

@@ -25,6 +25,10 @@ export type ResearchStateInput = {
   /** The spend cap stop the guard recorded. */
   stoppedAt?: Date | string;
   stopReason?: string;
+  /** #365: a daily cap's stop lifts by itself at the next UTC day. */
+  stopKind?: 'daily' | 'total';
+  /** #365: when a daily-cap pause last lifted by itself. */
+  autoResumedAt?: Date | string;
   /** An overall cap reached now (the guard pauses the loop at the next model call). */
   capExceeded?: string;
   backlog?: { size: number; limit: number };
@@ -43,6 +47,8 @@ export type ResearchState = {
   run?: { id: string; status: string; startedAt: string; cancelRequested: boolean };
   /** Running, but new ideas wait (the Coder's backlog is full). */
   holds: string[];
+  /** #365: things the loop did by itself lately (a daily-cap pause that lifted). */
+  notes: string[];
   /** The controls that make sense now. */
   actions: ('start' | 'pause' | 'resume' | 'stop' | 'run_now')[];
 };
@@ -69,7 +75,11 @@ export function researchState(i: ResearchStateInput): ResearchState {
   const ended = !!i.schedule?.until && Date.parse(i.schedule.until) <= now.getTime();
   const scheduled = !!i.schedule?.enabled && !ended;
   const next = scheduled && !i.paused ? iso(i.nextRunAt) : undefined;
-  const base = { holds, ...(run ? { run } : {}), ...(next ? { nextCycleAt: next } : {}) };
+  const notes =
+    i.autoResumedAt && now.getTime() - new Date(i.autoResumedAt).getTime() < 24 * 3600_000
+      ? [`Resumed by itself on ${when(iso(i.autoResumedAt)!)}: a new UTC day began under the daily cap.`]
+      : [];
+  const base = { holds, notes, ...(run ? { run } : {}), ...(next ? { nextCycleAt: next } : {}) };
   if (!i.installed)
     return {
       ...base,
@@ -113,7 +123,12 @@ export function researchState(i: ResearchStateInput): ResearchState {
       ...base,
       state: 'paused_spend_cap',
       label: 'paused: spend cap',
-      detail: `The loop paused itself${i.stoppedAt ? ` on ${when(iso(i.stoppedAt)!)}` : ''}: ${i.stopReason ?? i.capExceeded}. Raise the cap in Setup, then Resume.`,
+      detail:
+        `The loop paused itself${i.stoppedAt ? ` on ${when(iso(i.stoppedAt)!)}` : ''}: ${i.stopReason ?? i.capExceeded}. ` +
+        ((i.stopKind ?? (i.stopReason && /daily cap/.test(i.stopReason) ? 'daily' : 'total')) === 'daily' &&
+        i.stoppedAt
+          ? 'It resumes by itself after 00:00 UTC if no cap is reached then; or raise the cap in Setup and Resume now.'
+          : 'Raise the cap in Setup, then Resume.'),
       tone: 'blocked',
       actions: ['resume'],
     };

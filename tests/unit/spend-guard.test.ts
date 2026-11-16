@@ -35,3 +35,25 @@ test('DeepSeek on Baseten is priced from the table, case-insensitively', async (
   assert.deepEqual(priceOf('deepseek-ai/DeepSeek-V4-Pro-0813'), { input: 1.32, output: 3.96 });
   assert.deepEqual(priceOf('moonshotai/Kimi-K3.1-Pro'), { input: 2, output: 10 });
 });
+
+test('#365: a daily-cap pause lifts after 00:00 UTC unless a cap is still reached; a total cap waits for the owner', async () => {
+  const { dailyPauseLifts, stopKindOf } = await import('../../packages/core/src/spendGuard.js');
+  const daily = "today's spend $5.10 reached the daily cap of $5.00";
+  const model = "gemini: today's $2.00 reached its daily cap of $2.00";
+  const total = '$51.00 since the cap started reached the cap of $50.00';
+  assert.equal(stopKindOf(daily), 'daily');
+  assert.equal(stopKindOf(model), 'daily');
+  assert.equal(stopKindOf(total), 'total');
+  const stoppedAt = '2026-11-15T21:00:00Z';
+  const sameDay = new Date('2026-11-15T23:59:00Z');
+  const nextDay = new Date('2026-11-16T00:01:00Z');
+  const stop = { paused: true, stoppedAt, stopKind: 'daily' as const };
+  assert.equal(dailyPauseLifts(stop, false, sameDay), false, 'not the same UTC day');
+  assert.equal(dailyPauseLifts(stop, false, nextDay), true);
+  assert.equal(dailyPauseLifts(stop, true, nextDay), false, 'a cap still reached keeps it paused');
+  assert.equal(dailyPauseLifts({ ...stop, stopKind: 'total' }, false, nextDay), false);
+  assert.equal(dailyPauseLifts({ ...stop, paused: false }, false, nextDay), false);
+  // Stops recorded before #365 have no kind: read it from the reason.
+  assert.equal(dailyPauseLifts({ paused: true, stoppedAt, stopReason: model }, false, nextDay), true);
+  assert.equal(dailyPauseLifts({ paused: true, stoppedAt, stopReason: total }, false, nextDay), false);
+});

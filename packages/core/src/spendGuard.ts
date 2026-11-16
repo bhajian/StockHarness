@@ -134,7 +134,8 @@ export async function budgetState(ownerId: string, now = new Date()) {
     byModelToday: today.byModel,
     models,
     ...(exceeded ? { exceeded } : {}),
-    ...(b.stoppedAt ? { stoppedAt: b.stoppedAt, stopReason: b.stopReason } : {}),
+    ...(b.stoppedAt ? { stoppedAt: b.stoppedAt, stopReason: b.stopReason, stopKind: b.stopKind } : {}),
+    ...(b.autoResumedAt ? { autoResumedAt: b.autoResumedAt } : {}),
   };
 }
 
@@ -183,13 +184,57 @@ export async function assertWithinBudget(ownerId: string, model?: string) {
 /** Forget the cached decision. */
 export const resetBudgetCache = (ownerId?: string) => (ownerId ? cache.delete(ownerId) : cache.clear());
 
+/** #365: which kind of cap a stop reason names (every daily-cap message says "daily cap"). */
+export const stopKindOf = (reason: string): 'daily' | 'total' =>
+  /daily cap/.test(reason) ? 'daily' : 'total';
+
 async function stopResearch(ownerId: string, reason: string) {
   const s = await researchSettings(ownerId);
   await updateResearchSettings(ownerId, {
     paused: true,
-    budget: { ...(s.budget ?? {}), stoppedAt: new Date(), stopReason: reason },
+    budget: { ...(s.budget ?? {}), stoppedAt: new Date(), stopReason: reason, stopKind: stopKindOf(reason) },
   });
   // The research harness's schedule goes off, like Pause in the Research Lab.
   await syncResearchSchedule(ownerId);
   console.warn(`research loop paused for ${ownerId}: ${reason}`);
+}
+
+/**
+ * #365: a daily-cap pause lifts at the next UTC day when no cap is reached any more. Pure: the guard's stop record,
+ * whether a cap (overall or a model's) is reached now, and the time.
+ */
+export function dailyPauseLifts(
+  i: { paused: boolean; stoppedAt?: Date | string; stopKind?: 'daily' | 'total'; stopReason?: string },
+  capReachedNow: boolean,
+  now = new Date(),
+) {
+  if (!i.paused || !i.stoppedAt || capReachedNow) return false;
+  const kind = i.stopKind ?? (i.stopReason ? stopKindOf(i.stopReason) : 'total');
+  return kind === 'daily' && new Date(i.stoppedAt).getTime() < startOfUtcDay(now).getTime();
+}
+
+/** #365: resume every research loop a daily cap paused yesterday or earlier, now under its caps. */
+export async function liftDailyCapPauses(now = new Date()) {
+  const paused = await collection<{ _id: string }>('research_settings')
+    .find({ paused: true, 'budget.stoppedAt': { $exists: true } } as any, { projection: { _id: 1 } })
+    .toArray();
+  const lifted: string[] = [];
+  for (const { _id: ownerId } of paused) {
+    const s = await researchSettings(ownerId);
+    const b = s.budget ?? {};
+    const quick = dailyPauseLifts({ paused: !!s.paused, ...b }, false, now);
+    if (!quick) continue;
+    const st = await budgetState(ownerId, now);
+    if (
+      !dailyPauseLifts({ paused: !!s.paused, ...b }, !!st.exceeded || st.models.some((m) => m.exceeded), now)
+    )
+      continue;
+    const { stoppedAt: _s, stopReason: _r, stopKind: _k, ...rest } = b;
+    await updateResearchSettings(ownerId, { paused: false, budget: { ...rest, autoResumedAt: now } });
+    resetBudgetCache(ownerId);
+    await syncResearchSchedule(ownerId);
+    console.warn(`research loop resumed for ${ownerId}: a new UTC day under the daily cap`);
+    lifted.push(ownerId);
+  }
+  return lifted;
 }
