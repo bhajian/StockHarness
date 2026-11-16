@@ -5036,3 +5036,11 @@ th.num .th-sort {
     white-space: normal;
   }
 }
+
+/* #283: a label with a glossary tooltip. */
+.term {
+  text-decoration: underline dotted;
+  text-decoration-color: var(--faint);
+  text-underline-offset: 3px;
+  cursor: help;
+}

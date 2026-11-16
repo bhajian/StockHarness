@@ -1,6 +1,7 @@
 // Shared table behaviour (#384, #385): infinite-scroll paging (20 rows per page, more as you scroll) and
 // click-to-sort column headers that sort by the underlying value, not the displayed text.
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { termOf } from './glossary';
 
 // ---------------------------------------------------------------------------------------------------------
 // Sorting
@@ -100,7 +101,7 @@ export function SortTh({
     <th
       className={className}
       aria-sort={active ? (sort!.desc ? 'descending' : 'ascending') : 'none'}
-      title={title}
+      title={title ?? termOf(children)}
     >
       <button type="button" className="th-sort" onClick={() => onSort(id)}>
         {children}
