@@ -156,3 +156,31 @@ class MacroDaily(unittest.TestCase):
         self.assertEqual(rows["2016-01-11"]["curve_10y_2y"], 2.1 - 0.9)
         self.assertEqual(rows["2016-01-04"]["sector_returns"], {"Technology": 0.5}, "the NASDAQ series when present")
         self.assertEqual(rows["2016-01-08"]["sector_returns"], {"Energy": -1.0}, "else the one exchange there is")
+
+
+class SameDayDividends(unittest.TestCase):
+    """#518: FMP lists a regular and a special dividend on one ex-date as two rows; both are paid (BEN 2018-03-28
+    $0.23 + $3.00, in Franklin's 10-Q). corporate_actions keeps one row of each kind, prices_daily adds them up."""
+
+    def test_two_rows_of_one_day_become_a_cash_and_a_special_row(self):
+        hist = [
+            {"_id": "q", "symbol": "AAA", "date": DAYS[10], "dividend": 0.23, "adjDividend": 0.23, "frequency": "Quarterly"},
+            {"_id": "s", "symbol": "AAA", "date": DAYS[10], "dividend": 3.0, "adjDividend": 3.0, "frequency": "Special"},
+            {"_id": "q2", "symbol": "AAA", "date": DAYS[30], "dividend": 0.23, "adjDividend": 0.23, "frequency": "Quarterly"},
+        ]
+        cal = [{"_id": "c", "symbol": "AAA", "date": DAYS[10], "dividend": 0.23, "adjDividend": 0.23, "frequency": "Quarterly"}]
+        acts = corporate_actions.compute(reader({"securities": SECURITIES, "dividends_history": hist,
+                                                 "dividends_calendar": cal}))
+        day = sorted((a["action_type"], a["dividend_amount"]) for a in acts if a["ex_date"] == DAYS[10])
+        self.assertEqual(day, [("cash_dividend", 0.23), ("special_dividend", 3.0)], "the calendar copy counts once")
+        self.assertEqual([a["action_type"] for a in acts if a["ex_date"] == DAYS[30]], ["cash_dividend"])
+        rows = {r["date"]: r for rows, _ in prices_daily.compute(
+            reader({"securities": SECURITIES, "eod_prices": BARS, "corporate_actions": acts}), None) for r in rows}
+        self.assertAlmostEqual(rows[DAYS[10]]["dividend"], 3.23)
+
+    def test_unlabelled_rows_keep_the_size_rule(self):
+        hist = [{"_id": "a", "symbol": "AAA", "date": DAYS[5], "dividend": 0.5},
+                {"_id": "b", "symbol": "AAA", "date": DAYS[25], "dividend": 5.0}]
+        acts = corporate_actions.compute(reader({"securities": SECURITIES, "dividends_history": hist}))
+        self.assertEqual(sorted((a["ex_date"], a["action_type"]) for a in acts),
+                         [(DAYS[5], "cash_dividend"), (DAYS[25], "special_dividend")])
