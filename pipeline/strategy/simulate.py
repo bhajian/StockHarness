@@ -23,7 +23,7 @@ import json
 import math
 import statistics
 
-from . import EVALUATOR_VERSION, contract, delisting, metrics
+from . import EVALUATOR_VERSION, contract, costs as costmodel, delisting, metrics
 from .broker import PaperBroker
 from .config import load_config
 from .context import StrategyContext
@@ -31,12 +31,13 @@ from .engine import (EvaluationError, _current, _universe_on, sector_on, ensure_
                      trading_days, universe_top)
 from .reader import PitReader
 
-SIMULATOR_VERSION = "1.3.0"  # 1.3: sector caps as of each date (#454); 1.2: delisting returns by class and side (#448); 1.1: total-return benchmark, rf_return per session, Sharpe over cash (#445)
+SIMULATOR_VERSION = "1.5.0"  # 1.5: rank buffer, re-entry cool-down (#466); 1.4: market impact at the capital, borrow by size (#452); 1.3: sector caps as of each date (#454); 1.2: delisting returns by class and side (#448); 1.1: total-return benchmark, rf_return per session, Sharpe over cash (#445)
 COLLECTIONS = ("sim_orders", "sim_trades", "sim_portfolio_daily", "sim_positions")
 DEFAULTS = {
     "capital": 1_000_000.0,
     "allocation": {"mode": "equal"},  # equal | risk_parity | custom (weights by idea id)
     "sizing": {"mode": "equal", "kelly_fraction": 0.25, "prior_days": 252, "min_history": 63, "fallback": 1.0},
+    # #465: unset caps take the evaluator's (evaluation_caps: 10% per name across ideas, 30% per sector).
     "constraints": {"position_cap": None, "sector_cap": None, "gross": 1.0, "net": None},
     "exits": {"stop": None, "take_profit": None, "horizon": False, "review": True},
     "hard_to_borrow": [],
@@ -88,6 +89,11 @@ def simulate(ideas: list[dict], *, source, policies: dict, params: dict, config:
         raise EvaluationError("a simulation needs at least one idea")
     cfg = load_config(config)
     sim = _merge(DEFAULTS, {k: params.get(k) for k in DEFAULTS if k in params})
+    given = params.get("constraints") or {}
+    caps = cfg.get("evaluation_caps") or {}
+    for k, ck in (("position_cap", "max_weight"), ("sector_cap", "sector_cap")):
+        if given.get(k) is None and caps.get(ck):
+            sim["constraints"][k] = caps[ck]
     costs = {**{k: cfg[k] for k in ("commission_bps", "slippage_bps", "borrow_cost_bps_default", "delisting_return",
                                      "execution_lag_days")}, **(params.get("costs") or {})}
     start, end = params.get("start"), params.get("end")
@@ -103,6 +109,7 @@ def simulate(ideas: list[dict], *, source, policies: dict, params: dict, config:
     if params.get("symbols") and not scope:
         raise EvaluationError("none of params.symbols is a known security")
     lag = int(costs["execution_lag_days"])
+    turnover_cfg = costmodel.turnover_settings(cfg)  # #466
     gross = float(sim["constraints"].get("gross") or 1.0)
     top = universe_top(params)
     # Read only the names that are ever in scope; weekly dates cover monthly rebalancers, and a daily one's top N
@@ -117,7 +124,8 @@ def simulate(ideas: list[dict], *, source, policies: dict, params: dict, config:
     for idea in ideas:
         try:
             _plan_idea(idea, plans, plugins, metas, source=source, reader=reader, days=days, scope=scope, lag=lag,
-                       gross=gross, top=top)
+                       gross=gross, top=top, rank_buffer=turnover_cfg["rank_buffer"],
+                       caps=cfg.get("evaluation_caps"))
         except Exception as exc:  # noqa: BLE001 - re-raised with the idea it came from (for the error frames)
             exc.idea_id = idea["id"]
             raise
@@ -146,10 +154,37 @@ def simulate(ideas: list[dict], *, source, policies: dict, params: dict, config:
            for d, m in macro.items()}
     rf = {d: m.get("rf_1d") for d, m in macro.items()}
     inactive_ids = {r["security_id"] for r in sec_rows if r.get("is_active") is False}
+    # #452: impact at the simulation's own capital and borrow by size, from each name's ADV and market cap.
+    impact_cfg = costmodel.settings(cfg)
+    liq: dict[str, dict[str, tuple]] = {}
+    for u in source.find("universe_daily", {"security_id": {"$in": names}, "date": {"$gte": first, "$lte": end}},
+                         ["security_id", "date", "adv_20d", "market_cap"]) if names else []:
+        liq.setdefault(u["security_id"], {})[u["date"]] = (u.get("adv_20d"), u.get("market_cap"))
+    bar_days = sorted(bars)
+    bar_index = {x: k for k, x in enumerate(bar_days)}
+
+    def _liq(s: str, day: str):
+        rows = liq.get(s) or {}
+        if day in rows:
+            return rows[day]
+        prior = [x for x in rows if x <= day]
+        return rows[max(prior)] if prior else (None, None)
+
+    def impact_of(s: str, day: str, traded: float, nav: float) -> float:
+        k = bar_index.get(day, 0)
+        vol = costmodel.vol_of([(bars[x].get(s) or {}).get("ret_1d") for x in bar_days[max(0, k - 21):k]], 21)
+        return costmodel.impact(traded / nav if nav > 0 else 0.0, nav, _liq(s, day)[0], vol, impact_cfg)[0]
+
+    last_day = [first]
+
+    def borrow_of(s: str) -> float:
+        return costmodel.borrow_bps(_liq(s, last_day[0])[1], float(costs["borrow_cost_bps_default"]))
+
     broker = PaperBroker(
         float(sim["capital"]), commission_bps=float(costs["commission_bps"]), slippage_bps=float(costs["slippage_bps"]),
         borrow_bps=float(costs["borrow_cost_bps_default"]), delisting_return=float(costs["delisting_return"]),
         delisting=delisting.settings(cfg), delist_class={s: _delist_class(bars, s) for s in inactive_ids},
+        impact_of=impact_of, borrow_of=borrow_of,
         periods=int(cfg["trading_days_per_year"]),
         inactive=inactive_ids,
         final_bar=final_bar, tickers=ticker, dividends=str(sim.get("dividends") or "reinvest"))
@@ -165,6 +200,7 @@ def simulate(ideas: list[dict], *, source, policies: dict, params: dict, config:
     trades_seen = 0
     for di, d in enumerate(run_days):
         day_bars = bars.get(d, {})
+        last_day[0] = d
         broker.open_day(d, day_bars)
         for idea in ids:  # the shadow book's return today (for risk parity and Kelly)
             b = current_book[idea]
@@ -203,7 +239,9 @@ def simulate(ideas: list[dict], *, source, policies: dict, params: dict, config:
                                                plans, ideas, source, scope, days, top):
                 if not any(k == key for k, _ in pending.get(fill, [])):
                     pending.setdefault(fill, []).append((key, reason))
-                    blocked[key] = (d, reason)
+                    # #466: after a risk exit the name isn't bought back for reentry_cooldown_days sessions.
+                    cool = int(turnover_cfg["reentry_cooldown_days"]) if reason in ("stop", "invalidation") else 0
+                    blocked[key] = (run_days[min(len(run_days) - 1, di + cool)], reason)
         row, positions = broker.close_day(d, sector)
         row["spx_return"] = spx.get(d)
         row["rf_return"] = rf.get(d)
@@ -224,13 +262,15 @@ def simulate(ideas: list[dict], *, source, policies: dict, params: dict, config:
                    int(cfg["trading_days_per_year"]), readable_end or end, sector, raw_returns)
 
 
-def _plan_idea(idea, plans, plugins, metas, *, source, reader, days, scope, lag, gross, top=None):
+def _plan_idea(idea, plans, plugins, metas, *, source, reader, days, scope, lag, gross, top=None, rank_buffer=1.0,
+               caps=None):
     plugin = contract.load(idea["code"])
     over = idea.get("overrides") or {}
     meta = {**plugin.META, **{k: over[k] for k in ("side", "top_n", "rebalance") if over.get(k) is not None}}
     params = {**plugin.params, **(idea.get("plugin_params") or {})}
     plans[idea["id"]] = plan_books(plugin, meta, source=source, reader=reader, days=days, scope=scope, lag=lag,
-                                   gross=gross, plugin_params=params, top=top)
+                                   gross=gross, plugin_params=params, top=top,
+                                   rank_buffer=rank_buffer, caps=caps)
     # #447: review() runs on a fresh instance of the plugin. Pass 1 has already called signal() on every date, so
     # module state that signal() kept (a cache of the last scores) would show review() the future on every exit date.
     # The review instance only ever sees dates in order, so its own state is causal. It gets the idea's parameters.
@@ -294,6 +334,19 @@ def _constrain(books: dict[str, dict[str, float]], broker: PaperBroker, cfg: dic
 
     def all_weights():
         return list(others.items()) + [((i, s), w) for i, b in out.items() for s, w in b.items()]
+
+    if cap:  # #465: the cap is on a name's total across ideas, not on each idea's lot
+        per: dict[str, float] = {}
+        for (i, s), w in all_weights():
+            per[s] = per.get(s, 0.0) + abs(w)
+        for s, total in per.items():
+            if total > cap + 1e-9:
+                fixed = sum(abs(w) for (i, x), w in others.items() if x == s)
+                mine = total - fixed
+                k = max(0.0, (cap - fixed) / mine) if mine else 1.0
+                for b in out.values():
+                    if s in b:
+                        b[s] *= k
 
     sector_cap = cfg.get("sector_cap")
     if sector_cap:
