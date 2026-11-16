@@ -28,6 +28,8 @@ export const researchSettingsSchema = z.object({
    * one submission. Ideas are tagged with the mode, so the scorecards compare them before anyone switches.
    */
   theoristMode: z.enum(['single', 'steps']).default('single'),
+  /** #528: the share of Theorists that refine a near miss each cycle (when the brief has one); the rest propose. */
+  refineShare: z.number().min(0).max(1).default(0.3),
   /**
    * #413: the model of each Theorist (provider id, by position: Theorist i uses the i-th). Missing or empty entries
    * use the Theorist role's model (`agents.theorist`), so settings from before #413 keep working unchanged.
@@ -291,6 +293,33 @@ async function coderQueue(queue: Theory[], role: ResearchRole | undefined) {
     .sort((a, b) => STEP_ORDER[a.next_step] - STEP_ORDER[b.next_step]);
 }
 /** get_research_brief: what this role should do now. */
+/** #528: the learning part of a Theorist's brief. Theorist i refines when i ≤ round(refineShare × Theorists). */
+async function learningBrief(
+  ownerId: string,
+  s: ResearchSettings,
+  meta: { agentId?: string; nodeId?: string },
+) {
+  const { nearMisses, ownFailures } = await import('./learning.js');
+  const [near, mine] = await Promise.all([
+    nearMisses(ownerId).catch(() => []),
+    ownFailures(ownerId, meta).catch(() => []),
+  ]);
+  const slot = Number(/^theorist_(\d+)$/.exec(meta.nodeId ?? '')?.[1] ?? 0);
+  const refiners = Math.round((s.refineShare ?? 0.3) * (s.theoristsPerCycle ?? 1));
+  const refine = near.length > 0 && slot > 0 && slot <= refiners;
+  return {
+    near_misses: near,
+    your_last_failures: mine,
+    refine_this_cycle: refine,
+    ...(refine
+      ? {
+          refine_instruction:
+            'This cycle, refine one near miss instead of proposing a new idea: pick one from near_misses, read its post-mortem (vault_read ideas/T-n) and call refine_theory with exactly one change aimed at its failing gate, and why that change should fix it.',
+        }
+      : {}),
+  };
+}
+
 export async function researchBrief(
   ownerId: string,
   role: ResearchRole | undefined,
@@ -356,6 +385,8 @@ export async function researchBrief(
     })),
     // #460: a Theorist sees its own record (what it proposed and how it ended), to learn from it.
     ...(role === 'theorist' ? { your_track_record: await ownRecordSafe(ownerId, meta) } : {}),
+    // #528: near misses to refine, this Theorist's last failures with their cause, and whether it refines now.
+    ...(role === 'theorist' && !backlogFull ? await learningBrief(ownerId, s, meta) : {}),
     // The Coder's real queue size, whatever the role asking (#273).
     coder_queue: coderQueueSize,
     coder_backlog_limit: s.maxCoderBacklog,
@@ -407,6 +438,7 @@ export const ROLE_TOOLS: Record<'theorist' | 'judge_pre' | 'coder' | 'judge_post
     'search_theories',
     'get_theory',
     'submit_theory',
+    'refine_theory',
     ...VAULT_TOOLS,
     ...DATA_TOOLS,
   ],
@@ -454,7 +486,7 @@ export const LOOP_DONE = 'NOTHING_TO_CODE';
 const PROMPTS = {
   theoristSteps: (i: number, n: number) =>
     `You are Theorist ${i} of ${n} in the StockHarness research loop. Propose ONE new, testable theory, working in steps; each step reads only what it needs.\n` +
-    'Step 1 (orient): call get_research_brief (follow its instruction and steering notes first) and vault_index. If your queue has a theory sent back for revision, fix exactly what the Judge asked and re-submit it with submit_theory(theory_id=...), then stop.\n' +
+    'Step 1 (orient): call get_research_brief (follow its instruction and steering notes first) and vault_index. If your queue has a theory sent back for revision, fix exactly what the Judge asked and re-submit it with submit_theory(theory_id=...), then stop. If the brief says refine_this_cycle, do steps 2-4 for one of its near_misses and in step 5 call refine_theory instead of submit_theory.\n' +
     `Step 2 (learn): pick a family (Theorist ${i} prefers position ${i} of the strategy-library order) and vault_read its family note (Lessons, Worst); vault_search your idea and read 3 to 5 related notes. Note which gates past ideas failed.\n` +
     `Step 3 (data): describe_collection and sample_collection for every field you would use (exact names, coverage, known-at rule). Your profile is position ${i} of the brief's profiles.\n` +
     'Step 4 (plan): call vault_scratch with a short plan: 2 or 3 candidate hypotheses, for each why it could work, why it might fail, and which past ideas it differs from ([[ideas/T-n]] links).\n' +
@@ -462,7 +494,7 @@ const PROMPTS = {
   theorist: (i: number, n: number) =>
     `You are Theorist ${i} of ${n} in the StockHarness research loop. Propose ONE new, testable theory.\n` +
     '1. Call get_research_brief: read the focus, the human steering notes (follow them), recent theories and your queue. If it has an instruction, follow it first.\n' +
-    '2. If your queue has a theory sent back for revision, fix exactly what the Judge asked and re-submit it with submit_theory(theory_id=...). Otherwise propose a new one.\n' +
+    '2. If your queue has a theory sent back for revision, fix exactly what the Judge asked and re-submit it with submit_theory(theory_id=...). Otherwise, if the brief says refine_this_cycle, follow its refine_instruction (refine_theory on one near miss) and stop; else propose a new one.\n' +
     `3. Pick an idea from the strategy-library skill; Theorist ${i} prefers the family at position ${i} of the library order, so parallel Theorists differ. Combine, condition or refine it; never resubmit a card unchanged.\n` +
     `   Its profile: Theorist ${i} takes the profile at position ${i} of the brief's profiles (counting again from the first when there are fewer); set direction, instrument and structure to match it.\n` +
     '4. Learn from the past: vault_index, then vault_read the family note of your idea (its Lessons and worst ideas) and vault_search your idea; say in the rationale what you change from the ideas that failed. Check search_theories for near-duplicates, and describe_collection for every field you rely on (exact names, known-at rule).\n' +
@@ -470,6 +502,7 @@ const PROMPTS = {
   judge_pre:
     'You are the Judge (pre-code review) in the StockHarness research loop. Follow the judge-checklist skill.\n' +
     'Call get_research_brief, then for every theory in your queue with status pre_review: get_theory, check testability, lookahead, novelty, plausibility and data, and call review_theory (approve, revise with exactly what to change, or reject). Leave post_review theories for the post-result review.\n' +
+    "A refinement (get_theory shows refines: its parent, the parent's failing gates, the change and why): approve it only when the change is real and has an economic reason aimed at those gates; revise a nudged threshold, a parameter search or a change unrelated to the failing gates.\n" +
     'End with a one-line summary of your decisions.',
   coder:
     'You are the Coder in the StockHarness research loop. Follow the write-a-strategy-plugin skill.\n' +

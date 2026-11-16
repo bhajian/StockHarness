@@ -144,7 +144,12 @@ const params = { start: DAYS[45], end: DAYS[120] };
 test('each role is offered only its tools', async () => {
   const has = async (role: keyof typeof clients) =>
     (await clients[role].tools()).filter((n) => /theor|code|verdict/.test(n)).sort();
-  assert.deepEqual(await has('theorist'), ['get_theory', 'search_theories', 'submit_theory']);
+  assert.deepEqual(await has('theorist'), [
+    'get_theory',
+    'refine_theory',
+    'search_theories',
+    'submit_theory',
+  ]);
   assert.deepEqual(await has('judge'), ['get_theory', 'review_theory', 'search_theories', 'set_verdict']);
   assert.deepEqual(await has('coder'), ['get_theory', 'search_theories', 'submit_code']);
 });
@@ -655,4 +660,66 @@ test('#462: step mode: a scratch note is kept and read back, and new ideas carry
     JSON.stringify(kpis.all.byMode),
   );
   await ok('/research/settings', { maxCoderBacklog: 8, theoristMode: 'single' }, 'PUT');
+});
+
+test('#528: a failed idea is refined with its lineage; the verdict carried a cause; the lineage is capped', async () => {
+  const { theorist, judge } = clients;
+  await ok('/research/settings', { maxCoderBacklog: 200 }, 'PUT');
+  const found = await theorist.call('search_theories', { text: 'Twenty-day losers bounce back' });
+  const parentRef = found.matches.find((r: any) => /^Twenty-day losers bounce back$/.test(r.title))?.ref;
+  assert.ok(parentRef, JSON.stringify(found).slice(0, 300));
+  const debate = await ok(`/ideas/${parentRef}/debate`);
+  const verdict = [...debate].reverse().find((h: any) => h.to === 'failed');
+  assert.ok(verdict?.data?.cause?.cause, 'the failed verdict records its cause');
+  const fields = {
+    hypothesis:
+      'The worst 20-day performers among low-volatility large caps mean-revert over the next two weeks.',
+    signal_logic:
+      'Rank by 20-day compounded tr_1d ascending among the lower half by 60-day volatility; long the bottom 3, weekly.',
+    falsification: 'No excess over the S&P 500.',
+    reasoning: 'Refine the reversal idea',
+  };
+  const child = await theorist.call('refine_theory', {
+    parent_id: parentRef,
+    title: 'Low-volatility twenty-day losers bounce back',
+    change: 'Only the lower half of names by 60-day volatility are eligible.',
+    why: 'The parent failed on Sharpe; high-volatility losers keep falling, so excluding them should raise the risk-adjusted return.',
+    ...fields,
+  });
+  assert.equal(child.parent, parentRef);
+  assert.equal(child.generation, 2);
+  const view = await judge.call('get_theory', { theory_id: child.theory_id });
+  assert.equal(view.refines.parent, parentRef);
+  assert.ok(view.refines.parent_failing_gates.length > 0, 'the Judge sees what the parent failed');
+  assert.match(view.refines.why, /high-volatility losers/);
+  assert.ok(view.tags.includes(`lineage:${view.refines.lineage}`));
+  // A second open refinement fills the lineage's two holdout runs; a third is refused.
+  await theorist.call('refine_theory', {
+    parent_id: parentRef,
+    title: 'Twenty-day losers bounce back after an earnings beat',
+    change: 'Only names whose last earnings surprise was positive are eligible.',
+    why: 'Losers with a fundamental reason to recover should revert; the parent mixed them with deteriorating names.',
+    ...fields,
+  });
+  const third = await theorist.call('refine_theory', {
+    parent_id: parentRef,
+    title: 'Twenty-day losers in rising sectors bounce back',
+    change: 'Only names whose sector beat the S&P 500 over 60 days are eligible.',
+    why: 'A loser in a strong sector is more likely an overreaction than a sector-wide decline.',
+    ...fields,
+  });
+  assert.match(third.error, /at most 2 holdouts per lineage/);
+  // Refining an idea still in review is refused.
+  const notYet = await theorist.call('refine_theory', {
+    parent_id: child.theory_id,
+    title: 'x',
+    change: 'a change here',
+    why: 'a reason here',
+    ...fields,
+  });
+  assert.match(notYet.error, /only a promising or failed idea can be refined/);
+  // The brief has the learning part for a Theorist.
+  const b = await theorist.call('get_research_brief', {});
+  assert.ok(Array.isArray(b.near_misses) && Array.isArray(b.your_last_failures));
+  await ok('/research/settings', { maxCoderBacklog: 8 }, 'PUT');
 });
