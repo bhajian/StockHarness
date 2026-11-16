@@ -1,9 +1,9 @@
 """corporate_actions (spec §3.4): normalized splits + dividends keyed to security_id.
 
 Run by the `corporate_actions` Transform (#99): `compute(read)` returns the rows; the Transform writes them
-through `oh.output("corporate_actions").upsert(..., prune=True)` on (security_id, action_type, ex_date). Every run
-computes the whole output, so a row it no longer produces (a dividend reclassified cash <-> special) is stale and is
-moved to `corporate_actions_retired` (#518).
+through `oh.output("corporate_actions").upsert(...)` on (security_id, action_type, ex_date). Rows an earlier run
+produced and this one no longer does stay (#518): some hold a dividend amount FMP has since revised (DVN 2022-06-10
+$1.27 then, $1.11 now), so `prune=True` waits until those are understood.
 """
 from __future__ import annotations
 
