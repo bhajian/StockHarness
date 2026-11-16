@@ -11,7 +11,9 @@ spec:
     import oh
     from pipeline.layer2.corporate_actions import compute
 
-    oh.output("corporate_actions").upsert(compute(lambda c, f=None, cols=None: oh.read(c, f, columns=cols)))
+    # Every run writes the whole output: rows it no longer produces (a dividend that changed class) are moved to
+    # corporate_actions_retired (#518).
+    oh.output("corporate_actions").upsert(compute(lambda c, f=None, cols=None: oh.read(c, f, columns=cols)), prune=True)
   inputs:
     - securities
     - dividends_calendar

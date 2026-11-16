@@ -345,10 +345,19 @@ def _ensure_key_index(collection: str, key: list[str]) -> None:
     _indexed.add(ident)
 
 
-def upsert(collection: str, records: Iterable[dict], *, key: list[str], known_at_field: str | None = None) -> dict:
+PRUNE_MAX_SHARE = 0.05  # #518: a prune that would retire more than this share of the rows stops the run instead
+
+
+def upsert(collection: str, records: Iterable[dict], *, key: list[str], known_at_field: str | None = None,
+           prune: bool = False) -> dict:
     """Idempotent write on ``key``. Rows whose content did not change are skipped (content hash).
 
     Returns ``{"written": n, "unchanged": m}``. ``known_at_field``, when given, must be set on every row.
+
+    ``prune=True`` is for a transform whose every run writes its whole output (#518): rows whose key this run did
+    not produce are *moved* to ``<collection>_retired`` (with ``retired_at``), never deleted outright. It refuses,
+    and the run fails, when that would retire more than ``PRUNE_MAX_SHARE`` of the collection (an input that failed
+    to load would otherwise retire everything).
     """
     from pymongo import UpdateOne
 
@@ -388,7 +397,32 @@ def upsert(collection: str, records: Iterable[dict], *, key: list[str], known_at
             written += (res.upserted_count or 0) + (res.modified_count or 0)
     _count(collection, "written", written)
     _count(collection, "unchanged", unchanged)
-    return {"written": written, "unchanged": unchanged}
+    out = {"written": written, "unchanged": unchanged}
+    if prune:
+        out["retired"] = _retire_missing(target, key, {tuple(r[k] for k in key) for r in rows})
+        _count(collection, "retired", out["retired"])
+    return out
+
+
+def _retire_missing(target, key: list[str], kept: set) -> int:
+    """Move the rows whose key is not in ``kept`` to ``<collection>_retired``; see ``upsert(prune=True)``."""
+    stale = [d["_id"] for d in target.find({}, {**{k: 1 for k in key}, "_id": 1}) if tuple(d.get(k) for k in key) not in kept]
+    total = target.estimated_document_count()
+    if not stale:
+        return 0
+    if total and len(stale) > PRUNE_MAX_SHARE * total:
+        raise RuntimeError(f"{target.name}: pruning would retire {len(stale)} of {total} rows (over "
+                           f"{PRUNE_MAX_SHARE:.0%}); nothing was retired. Check the transform's inputs.")
+    archive = target.database[f"{target.name}_retired"]
+    now = _datetime.now(_timezone.utc)
+    for start in range(0, len(stale), 1000):
+        ids = stale[start : start + 1000]
+        docs = list(target.find({"_id": {"$in": ids}}))
+        if docs:
+            archive.insert_many([{**d, "_id": f"{d['_id']}:{now.isoformat()}", "retired_id": d["_id"], "retired_at": now}
+                                 for d in docs])
+            target.delete_many({"_id": {"$in": [d["_id"] for d in docs]}})
+    return len(stale)
 
 
 def upsert_df(collection: str, frame, *, key: list[str], known_at_field: str | None = None) -> dict:
@@ -404,13 +438,13 @@ class _Output:
         self.collection = cfg["collection"]
         self._known = None if cfg.get("static") else cfg.get("known_at_field")
 
-    def upsert(self, records: Iterable[dict]) -> dict:
+    def upsert(self, records: Iterable[dict], *, prune: bool = False) -> dict:
         # Point-in-time readers filter on the as_of field: index it with the key (#102).
         if self.cfg.get("as_of_field") and not _PREVIEW:
             _ensure_key_index(self.collection, [self.cfg["as_of_field"]])
         mode = self.cfg.get("write_mode", "upsert")
         if mode == "upsert":
-            return upsert(self.collection, records, key=self.cfg["key"], known_at_field=self._known)
+            return upsert(self.collection, records, key=self.cfg["key"], known_at_field=self._known, prune=prune)
         rows = list(records)
         if self._known and not _PREVIEW:
             for r in rows:
@@ -461,7 +495,7 @@ def _flush_dq() -> None:
 
     if not _dq_buffer:
         return
-    now = datetime.now(timezone.utc)
+    now = _datetime.now(_timezone.utc)
     for d in _dq_buffer:
         _count(d["collection"], "dq", 1)
     if _PREVIEW:  # counted, with the first issues kept for the preview; nothing is stored
@@ -533,7 +567,7 @@ def _reconcile_dq() -> dict[str, int]:
     if _PREVIEW or _run_failed or _RUN_STARTED is None:
         return {}
     resolved: dict[str, int] = {}
-    now = datetime.now(timezone.utc)
+    now = _datetime.now(_timezone.utc)
     for collection in _recomputed_outputs():
         flt: dict[str, Any] = {
             "collection": collection,
