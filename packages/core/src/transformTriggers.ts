@@ -10,7 +10,7 @@ import { safeError } from './security.js';
 import { addDays, today } from './datasetSync.js';
 import { transforms, type Transform } from './transforms.js';
 export { triggerCycle } from './transforms.js';
-import { requestTransformRun } from './transformRunner.js';
+import { requestTransformRun, transformRuns } from './transformRunner.js';
 
 export const TRIGGER_CONSUMER = 'transform-triggers';
 export const UPSTREAM_EVENTS = [
@@ -122,6 +122,9 @@ export async function fireReadyTriggers(
     const oldest = Math.min(...marks.map((m) => new Date(m.at).getTime()));
     const overdue = marks.length > 0 && now.getTime() - oldest >= maxWaitMs();
     if (!t.trigger.after.every((a) => pending[a]) && !overdue) continue;
+    // #525: not while an upstream transform still has runs queued or running (a full rebuild runs in chunks; a
+    // downstream started between them reads half-rebuilt data and keeps it). The marks stay; it fires after.
+    if (await upstreamBusy(t)) continue;
     // Claim: clear exactly the marks we saw; a concurrent dispatcher (or a newer event) makes this a no-op.
     const claimed = await transforms().updateOne(
       { _id: t._id, 'triggerState.lastEventAt': t.triggerState!.lastEventAt } as Record<string, unknown>,
@@ -148,6 +151,18 @@ export async function fireReadyTriggers(
     fired.push(t.name);
   }
   return fired;
+}
+
+/** Whether a transform this one is triggered by has a run queued or running (#525). */
+async function upstreamBusy(t: Pick<Triggered, 'ownerId' | 'trigger'>) {
+  const names = t.trigger.after
+    .filter((a) => a.startsWith('transform:'))
+    .map((a) => a.slice('transform:'.length));
+  if (!names.length) return false;
+  return !!(await transformRuns().findOne(
+    { ownerId: t.ownerId, transformName: { $in: names }, status: { $in: ['queued', 'running'] } },
+    { projection: { _id: 1 } },
+  ));
 }
 
 /** Fired every tick: consume upstream completions, then start the transforms that are ready. */
