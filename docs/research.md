@@ -158,7 +158,8 @@ cycle one call, not a fresh start.
   records which model made each decision.
 - **Steering:** `POST /api/research/steering { note }` reaches the Theorists on the next cycle (the latest five
   notes are kept). `GET/PUT /api/research/settings` sets the focus, the Theorists per cycle, and the evaluation scope.
-  The default scope is small: 50 large caps over the 3 years before the holdout.
+  The default window is all history before the holdout, from 2017-01-03 (#453; prices start in 2016, which gives a
+  year of lookback). The default scope is 50 large caps.
 - **Running it:** run it like any harness, on its schedule (`scheduleMinutes`) or continuously. Per-theory
   caps are enforced by the tools, so the budget can stay unlimited.
 

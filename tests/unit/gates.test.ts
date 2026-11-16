@@ -120,3 +120,13 @@ test('outcome: successful, promising (beat the S&P 500, failed only the proof ga
   assert.equal(G.outcomeOf(holdoutFailed, 0.05), 'failed', 'a failed holdout stays failed');
   assert.equal(G.verdictProblem('successful', 'promising', ''), undefined, 'promising is the gates’ label');
 });
+
+test('#453: the trades gate counts round trips, not re-weights', () => {
+  const reweighted = { ...good, summary: { ...good.summary, trades: 400 }, trade_stats: { count: 40 } };
+  const r = G.evaluateGates(G.DEFAULT_GATES, reweighted, holdout).find((x) => x.gate === 'trades')!;
+  assert.equal(r.value, 40);
+  assert.equal(r.passed, false);
+  assert.equal(r.detail, 'round-trip trades');
+  const old = G.evaluateGates(G.DEFAULT_GATES, good, holdout).find((x) => x.gate === 'trades')!;
+  assert.equal(old.value, 240, 'records without trade_stats keep the old count');
+});
