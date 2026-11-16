@@ -5,14 +5,8 @@ services:
     environment:
       NEMO_SAFETY_MODEL_URL: http://fixtures:9090/v1
       NEMO_SAFETY_MODEL: test-safety-classifier
-  installer:
-    build: { context: ., dockerfile: tests/fixtures/linux-installer.Dockerfile }
-    image: openharness-installer-test:local
-    profiles: ['installer']
-    restart: 'no'
   api:
-    environment:
-      &test-stores # No gateway here, like installs created before machines existed: the configured gateway is trusted on its own.
+    environment: &test-stores
       ALLOWED_PRIVATE_HOSTS: fixtures,host.docker.internal
       SMTP_TRANSPORT: json
       # Every test file signs in; the suites together exceed the production limit of 20 per ten minutes.
@@ -25,48 +19,6 @@ services:
       FMP_BASE_URL: http://fixtures:9090/fmp/stable
   runner:
     environment: *test-stores
-  gateway:
-    environment:
-      GATEWAY_HEARTBEAT_SECONDS: 5
-      GATEWAY_PUBLIC_URL: ws://gateway:8090
-      # Short enough for the machines test to exercise a call the gateway gives up on before the connector answers.
-      GATEWAY_TOOL_TIMEOUT_SECONDS: 30
-  # A Linux machine (the Go connector) with no inbound ports; the integration test starts it after enrolling it.
-  device:
-    build: { context: ., dockerfile: connector-go/Dockerfile }
-    image: openharness-connector:local
-    profiles: ['device']
-    environment:
-      GATEWAY_URL: ws://gateway:8090/connect
-      GATEWAY_ALLOW_INSECURE: 'true'
-      DEVICE_ID: ${TEST_DEVICE_ID:-test-box}
-      DEVICE_TOKEN: ${TEST_DEVICE_TOKEN:-unset}
-      ALLOW_COMMANDS: uname,echo,ls,cat,sh,sleep
-      # A command that outlives this limit comes back as a timed-out result with its partial output.
-      COMMAND_TIMEOUT_SECONDS: ${TEST_COMMAND_TIMEOUT_SECONDS:-5}
-      LOG_LEVEL: debug
-    restart: 'no'
-    security_opt: ['no-new-privileges:true']
-    cap_drop: [ALL]
-  # An OpenShell managed machine: the edge against its in-memory OpenShell stand-in, no inbound ports; started by
-  # the test. A real deployment runs the edge beside the OpenShell gateway (deploy/openshell).
-  openshell-device:
-    build: { context: ., dockerfile: connector-go/Dockerfile, target: edge }
-    image: openharness-edge:local
-    profiles: ['device']
-    environment:
-      GATEWAY_URL: ws://gateway:8090/connect
-      GATEWAY_ALLOW_INSECURE: 'true'
-      DEVICE_ID: ${TEST_DEVICE_ID:-test-openshell}
-      DEVICE_TOKEN: ${TEST_DEVICE_TOKEN:-unset}
-      OPENSHELL_FAKE: 'true'
-      OPENSHELL_ALLOWED_IMAGES: registry.example.com/agents/
-      OPENSHELL_MAX_SANDBOXES: '5'
-      EXECUTOR_IMAGE: registry.example.com/agents/executor:1.0
-      LOG_LEVEL: debug
-    restart: 'no'
-    security_opt: ['no-new-privileges:true']
-    cap_drop: [ALL]
   fixtures:
     image: openharness:local
     pull_policy: never

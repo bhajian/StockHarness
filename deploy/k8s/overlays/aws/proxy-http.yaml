@@ -1,7 +1,7 @@
 # HTTP router behind the externally managed AWS ALB. The ALB terminates TLS on its
 # HTTPS:443 listener and forwards openharness.faberiq.ai to the `openharness` target
-# group (instance, NodePort 32020). This Caddy serves one origin: device paths go to
-# the gateway, everything else to the Studio/API. TLS lives at the ALB, so there is
+# group (instance, NodePort 32020). This Caddy serves one origin, the Studio/API.
+# TLS lives at the ALB, so there is
 # no certificate here; X-Forwarded-Proto is pinned to https because the only public
 # listener for this host is HTTPS (port 80 redirects to 443).
 apiVersion: v1
@@ -19,16 +19,6 @@ data:
     }
     :8080 {
       encode zstd gzip
-      @gateway path /connect /mcp/*
-      handle @gateway {
-        reverse_proxy gateway:8090 {
-          header_up X-Forwarded-Proto https
-          transport http {
-            read_timeout 0
-            write_timeout 0
-          }
-        }
-      }
       handle {
         reverse_proxy api:8088 {
           header_up X-Forwarded-Proto https

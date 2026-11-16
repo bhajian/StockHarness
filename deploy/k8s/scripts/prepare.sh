@@ -15,11 +15,9 @@ kubectl --context "$KUBE_CONTEXT" apply -f deploy/k8s/base/namespace.yaml
 if ! kube get secret openharness-secrets >/dev/null 2>&1; then
   python3 - <<'PY' > deploy/k8s/.local/secrets.json
 import json, secrets
-v={key:secrets.token_hex(32) for key in ['MONGO_PASSWORD','RABBITMQ_PASSWORD','RABBITMQ_ERLANG_COOKIE','WEAVIATE_API_KEY','ENCRYPTION_KEY','SETUP_TOKEN','GATEWAY_API_TOKEN','GATEWAY_ADMIN_TOKEN']}
+v={key:secrets.token_hex(32) for key in ['MONGO_PASSWORD','RABBITMQ_PASSWORD','RABBITMQ_ERLANG_COOKIE','WEAVIATE_API_KEY','ENCRYPTION_KEY','SETUP_TOKEN']}
 v['MONGODB_URI']=f"mongodb://agentic:{v['MONGO_PASSWORD']}@mongo:27017/agentic?authSource=admin"
 v['RABBITMQ_URL']=f"amqp://agentic:{v['RABBITMQ_PASSWORD']}@rabbitmq:5672"
-v['GATEWAY_MONGODB_URI']=f"mongodb://agentic:{v['MONGO_PASSWORD']}@mongo:27017/?authSource=admin"
-v['GATEWAY_API_TOKENS']='orchestrator:'+v['GATEWAY_API_TOKEN']
 v['MONGODB_MCP_TOKEN']=secrets.token_hex(32)
 v['MONGODB_MCP_PASSWORD']=secrets.token_hex(24)
 v['MDB_MCP_CONNECTION_STRING']=f"mongodb://openharness_mcp:{v['MONGODB_MCP_PASSWORD']}@mongo:27017/?authSource=admin"
@@ -63,7 +61,7 @@ kube get secret openharness-tls -o jsonpath='{.data.tls\.crt}' | python3 -c 'imp
 python3 - <<'PY' > deploy/k8s/.local/kustomization.yaml
 import os, json, base64
 url=os.environ['PUBLIC_URL'].rstrip('/')
-patch={'apiVersion':'v1','kind':'ConfigMap','metadata':{'name':'openharness-config'},'data':{'PUBLIC_URL':url,'GATEWAY_PUBLIC_URL':'wss://'+url.removeprefix('https://')}}
+patch={'apiVersion':'v1','kind':'ConfigMap','metadata':{'name':'openharness-config'},'data':{'PUBLIC_URL':url}}
 if os.environ.get('SELF_SIGNED_TLS')=='1': patch['data']['PUBLIC_CA_PEM_BASE64']=base64.b64encode(open('deploy/k8s/.local/tls.crt','rb').read()).decode()
 print(json.dumps({'apiVersion':'kustomize.config.k8s.io/v1beta1','kind':'Kustomization','resources':[os.environ['KUSTOMIZE_BASE']],'patches':[{'patch':json.dumps(patch)}]},indent=2))
 PY

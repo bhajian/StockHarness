@@ -5,10 +5,6 @@ x-app-environment: &app-environment
   NODE_ENV: production
   PORT: 8088
   PUBLIC_URL: ${PUBLIC_URL:-http://localhost:8088}
-  # The CA connectors must trust when the public endpoints use a private certificate (scripts/enable-tls.sh writes
-  # PUBLIC_CA_PEM_BASE64); install commands in the studio embed it.
-  PUBLIC_CA_PEM_BASE64: ${PUBLIC_CA_PEM_BASE64:-}
-  PUBLIC_CA_FILE: ${PUBLIC_CA_FILE:-}
   MONGODB_URI: mongodb://agentic:${MONGO_PASSWORD:?Run ./start.sh first}@mongo:27017/agentic?authSource=admin
   MONGODB_DATABASE: agentic
   RABBITMQ_URL: amqp://agentic:${RABBITMQ_PASSWORD:?Run ./start.sh first}@rabbitmq:5672
@@ -23,15 +19,10 @@ x-app-environment: &app-environment
   MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-20}
   LOGIN_RATE_LIMIT: ${LOGIN_RATE_LIMIT:-20}
   ALLOW_PRIVATE_URLS: ${ALLOW_PRIVATE_URLS:-false}
-  ALLOWED_PRIVATE_HOSTS: ${ALLOWED_PRIVATE_HOSTS:-host.docker.internal,ollama,gateway}
+  ALLOWED_PRIVATE_HOSTS: ${ALLOWED_PRIVATE_HOSTS:-host.docker.internal,ollama}
   TRUST_PROXY: ${TRUST_PROXY:-0}
-  # Device gateway: the api and runner reach it on the internal network; devices dial GATEWAY_PUBLIC_URL.
   GARAK_PROBES_URL: http://guardrail-evaluation:8001
   NEMO_GUARDRAILS_URL: ${NEMO_GUARDRAILS_URL:-http://guardrails:8000}
-  GATEWAY_URL: http://gateway:8090
-  GATEWAY_PUBLIC_URL: ${GATEWAY_PUBLIC_URL:-ws://localhost:8090}
-  GATEWAY_API_TOKEN: ${GATEWAY_API_TOKEN:?Run ./start.sh --configure-only to add gateway credentials to .env}
-  GATEWAY_ADMIN_TOKEN: ${GATEWAY_ADMIN_TOKEN:?Run ./start.sh --configure-only to add gateway credentials to .env}
   # MongoDB collections: the internal MongoDB MCP server. The API provisions its least-privilege database user.
   MONGODB_MCP_URL: http://mongodb-mcp:3000/mcp
   MONGODB_MCP_TOKEN: ${MONGODB_MCP_TOKEN:?Run ./start.sh --configure-only to add MongoDB MCP credentials to .env}
@@ -111,77 +102,6 @@ services:
       timeout: 5s
       retries: 3
       start_period: 30s
-
-  gateway:
-    build: { context: ., dockerfile: gateway/Dockerfile }
-    image: openharness-gateway:local
-    init: true
-    environment:
-      PORT: 8090
-      GATEWAY_HELLO_RATE_LIMIT: ${GATEWAY_HELLO_RATE_LIMIT:-600}
-      GATEWAY_PUBLIC_URL: ${GATEWAY_PUBLIC_URL:-ws://localhost:8090}
-      GATEWAY_API_TOKENS: orchestrator:${GATEWAY_API_TOKEN:?Run ./start.sh --configure-only to add gateway credentials to .env}
-      GATEWAY_ADMIN_TOKEN: ${GATEWAY_ADMIN_TOKEN:?Run ./start.sh --configure-only to add gateway credentials to .env}
-      # Registry and audit trail live in the stack's MongoDB, in their own database.
-      GATEWAY_MONGODB_URI: mongodb://agentic:${MONGO_PASSWORD:?Run ./start.sh first}@mongo:27017/?authSource=admin
-      GATEWAY_MONGODB_DATABASE: agentic_gateway
-      GATEWAY_AUDIT_RETENTION_DAYS: ${GATEWAY_AUDIT_RETENTION_DAYS:-90}
-      # TLS terminates at your reverse proxy (see gateway/Caddyfile); set to false once it forwards X-Forwarded-Proto.
-      GATEWAY_ALLOW_INSECURE_WS: ${GATEWAY_ALLOW_INSECURE_WS:-true}
-      GATEWAY_TOOL_TIMEOUT_SECONDS: ${GATEWAY_TOOL_TIMEOUT_SECONDS:-120}
-      GATEWAY_APPROVAL_TOOLS: ${GATEWAY_APPROVAL_TOOLS:-}
-      GATEWAY_APPROVAL_PROVIDER: ${GATEWAY_APPROVAL_PROVIDER:-studio}
-      GATEWAY_APPROVAL_URL: ${GATEWAY_APPROVAL_URL:-}
-      TRUST_PROXY: ${TRUST_PROXY:-0}
-    ports: ['${GATEWAY_BIND:-0.0.0.0}:${GATEWAY_PORT:-8090}:8090']
-    depends_on:
-      mongo: { condition: service_healthy }
-    restart: unless-stopped
-    security_opt: ['no-new-privileges:true']
-    cap_drop: [ALL]
-    healthcheck:
-      test:
-        [
-          'CMD',
-          'node',
-          '-e',
-          "fetch('http://127.0.0.1:8090/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
-        ]
-      interval: 15s
-      timeout: 5s
-      retries: 10
-      start_period: 20s
-
-  # TLS front (profile `tls`): HTTPS for the studio and WSS for the device gateway with your own certificate.
-  # scripts/enable-tls.sh creates a self-signed one and points .env at it; the plain ports then stay on loopback.
-  caddy:
-    image: caddy:2.10-alpine
-    profiles: ['tls']
-    ports: ['${TLS_BIND:-0.0.0.0}:${TLS_PORT:-8443}:8443']
-    volumes:
-      - ./deploy/tls/Caddyfile:/etc/caddy/Caddyfile:ro
-      - ${TLS_DIR:-./data/tls}:/certs:ro
-      - caddy-data:/data
-      - caddy-config:/config
-    depends_on:
-      api: { condition: service_healthy }
-      gateway: { condition: service_healthy }
-    restart: unless-stopped
-    healthcheck:
-      test:
-        [
-          'CMD',
-          'wget',
-          '-q',
-          '--no-check-certificate',
-          '-O',
-          '/dev/null',
-          'https://127.0.0.1:8443/api/health',
-        ]
-      interval: 15s
-      timeout: 5s
-      retries: 10
-      start_period: 10s
 
   guardrail-evaluation:
     profiles: [safety-evaluation]
@@ -329,5 +249,3 @@ volumes:
   rabbitmq:
   weaviate:
   files:
-  caddy-data:
-  caddy-config:

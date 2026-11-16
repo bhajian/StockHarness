@@ -55,8 +55,6 @@ import {
 import { resources } from './resources.js';
 import { embedApi, integrations, publicRun, type Embed } from './integrations.js';
 import { conversationApi, webhookApi, webhookSettings } from './triggers.js';
-import { clusters } from './clusters.js';
-import { devices } from './devices.js';
 import { mongodb } from './mongodb.js';
 import { codeJobsApi, executorJobs } from './executor.js';
 import { datasetSyncRouter } from './datasetSyncs.js';
@@ -71,7 +69,6 @@ import { researchRouter } from './researchApi.js';
 import { ideasRouter } from './ideasApi.js';
 import { simulationsRouter } from './simulationsApi.js';
 import { researchMcpRouter } from './researchMcp.js';
-import { openshell } from './openshell.js';
 import { tenantView, type Tenant } from './tenant.js';
 import { openHarnessApi, openHarnessErrors } from './openharness/index.js';
 
@@ -684,11 +681,8 @@ app.post('/api/settings/email/test', requireAdmin, async (req, res) => {
 });
 app.use('/api/integrations', requireSession, integrations);
 app.use('/api/integrations/webhooks', requireSession, webhookSettings);
-app.use('/api/clusters', requireSession, clusters);
-app.use('/api/devices', requireSession, devices);
 app.use('/api/mongodb', requireSession, mongodb);
 app.use('/api', requireSession, codeJobsApi);
-app.use('/api/openshell', requireSession, openshell);
 app.use('/api', requireSession, guardrailApi);
 app.use('/api', requireSession, datasetSyncRouter);
 app.use('/api', requireSession, objectsRouter);

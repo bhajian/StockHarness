@@ -9,7 +9,6 @@ export PUBLIC_URL="http://localhost:$STUDIO_PORT"
 export TEST_BASE_URL="$PUBLIC_URL"
 export TEST_FAULT_INJECTION=true
 export TEST_DIRECT_MONGODB_URI="mongodb://127.0.0.1:${TEST_DIRECT_MONGO_PORT:-27119}"
-export TEST_LINUX_INSTALLER=true
 compose() { docker compose -p "$TEST_COMPOSE_PROJECT" -f compose.yaml -f tests/compose.test.yaml "$@"; }
 cleanup() {
   result=$?
@@ -19,14 +18,6 @@ cleanup() {
 }
 trap cleanup EXIT
 compose up --build -d --wait --wait-timeout 480
-compose build installer
-# These suites start disposable containers directly; a fresh runner has no cached test images.
-docker build -f connector-linux/Dockerfile \
-  -t openharness-connector-cluster-test:local -t openharness-connector-host-access-test:local .
-docker build -f tests/fixtures/host-target.Dockerfile -t openharness-host-target-test:local .
-# The Go connector (Linux machines and executors) and the OpenShell edge.
-docker build -f connector-go/Dockerfile -t openharness-connector:local .
-docker build -f connector-go/Dockerfile --target edge -t openharness-edge:local .
 npm test
 npm run test:integration
 if [ "${BROWSER_TESTS:-0}" = '1' ]; then

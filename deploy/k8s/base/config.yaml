@@ -9,7 +9,6 @@ data:
   NODE_ENV: production
   PORT: '8088'
   PUBLIC_URL: https://openharness.example.com
-  GATEWAY_PUBLIC_URL: wss://openharness.example.com
   MONGODB_DATABASE: agentic
   WEAVIATE_URL: http://weaviate:8080
   VECTOR_STORE: weaviate
@@ -17,9 +16,8 @@ data:
   WORKER_CONCURRENCY: '2'
   MAX_ACTIVE_RUNS: '20'
   ALLOW_PRIVATE_URLS: 'false'
-  ALLOWED_PRIVATE_HOSTS: gateway
+  ALLOWED_PRIVATE_HOSTS: ''
   TRUST_PROXY: '1'
-  GATEWAY_URL: http://gateway:8090
   MONGODB_MCP_URL: http://mongodb-mcp:3000/mcp
   EXECUTOR_BACKEND: kubernetes
   EXECUTOR_CALLBACK_URL: http://api:8088

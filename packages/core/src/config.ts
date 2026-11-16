@@ -69,13 +69,8 @@ const s = z.object({
   // 'json' swaps the network transport for nodemailer's JSON transport; only the test stack uses it.
   SMTP_TRANSPORT: z.enum(['smtp', 'json']).default('smtp'),
   MAX_RESUMES: z.coerce.number().int().min(0).max(1000).default(3),
-  // Device gateway (optional). When set, the studio can enroll machines and agents can operate them.
   GARAK_PROBES_URL: z.string().url().default('http://guardrail-evaluation:8001'),
   NEMO_GUARDRAILS_URL: z.string().url().default('http://guardrails:8000'),
-  GATEWAY_URL: z.string().default(''),
-  GATEWAY_PUBLIC_URL: z.string().default(''),
-  GATEWAY_API_TOKEN: z.string().default(''),
-  GATEWAY_ADMIN_TOKEN: z.string().default(''),
   // Config backup to git (#149). Without a token the backup only detects changes (Settings -> Configuration).
   CONFIG_BACKUP_GITHUB_TOKEN: z.string().default(''),
   CONFIG_BACKUP_REPO: z

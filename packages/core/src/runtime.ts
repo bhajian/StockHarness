@@ -13,14 +13,6 @@ import { pitPolicies } from './pitPolicy.js';
 import { listCatalog } from './schemaCatalog.js';
 import { durableToolCall } from './executionRecovery.js';
 import { callSignature, classifyToolFailure, toolCallTimeoutMs, uncertainToolResult } from './toolOutcome.js';
-import { gatewayAdmin, type DeviceView } from './devices.js';
-import {
-  machineTag,
-  machinesNote,
-  requestedMachines,
-  wrongMachineNotice,
-  type MachineRef,
-} from './machineContext.js';
 import { isGreeting } from './requestScope.js';
 import { startAgentActivity, completeAgentActivity } from './agentActivity.js';
 import { getHarnessFile, readHarnessFile, writeHarnessFile, harnessFiles, fileInfo } from './harnessFiles.js';
@@ -28,8 +20,7 @@ import { initializePlan, nextPlanTask, completePlanTask, plans } from './executi
 import { memoryPrompt, blocks as coreBlocks, blockView, writeBlock } from './agentMemory.js';
 import { checkRail, GuardrailBlocked } from './guardrails.js';
 import type { GuardrailSnapshot } from './guardrailPolicy.js';
-import { signApprovalCall } from '../../../connector-core/src/approvalProof.js';
-import { recordToolArtifacts, recordMachineFile } from './artifacts.js';
+import { recordToolArtifacts } from './artifacts.js';
 // Durable execution harness: agent patterns, attached MCP tools, context, and resumable workflows.
 import {
   humanSettingsSchema,
@@ -154,8 +145,6 @@ export type AgentContext = {
   event: EventWriter;
   signal: AbortSignal;
   onDelta?: DeltaWriter;
-  /** The machine this run operates, when one was chosen. */
-  device?: Run['device'];
   /** The workspace's enabled lifecycle hooks, loaded once per run. */
   hooks?: HookRecord[];
   agentId?: string;
@@ -185,14 +174,11 @@ type Handler = {
   connectionId: string;
   name: string;
   label: string;
-  /** The connection's display name: the machine's name for device tools. */
+  /** The connection's display name. */
   connectionName: string;
   inputSchema: Record<string, unknown>;
   annotations?: Record<string, unknown>;
-  machine?: boolean;
   requiresApproval?: boolean;
-  deviceId?: string;
-  trustedGateway?: boolean;
   /** Collection bindings on a MongoDB connection (#148): enforced on every call. */
   collections?: CollectionBinding[];
   /** The built-in research connection: it receives who is calling (agent, run, model) for the debate (#112). */
@@ -462,40 +448,11 @@ async function runAgentUnchecked(stored: Agent, input: string, history: Run['his
           annotations: tool.annotations,
           ...(scoped ? { collections: scoped } : {}),
           requiresApproval: tool._meta?.['openharness/approvalRequired'] === true,
-          machine: connection.kind === 'device',
           research: connection.kind === 'research',
-          deviceId: connection.deviceId,
-          trustedGateway:
-            connection.kind === 'device' &&
-            connection.url === `${config.GATEWAY_URL.replace(/\/$/, '')}/mcp/${connection.deviceId}`,
         });
       }
     }
     if (tools.length > 120) throw new Error('An agent can expose at most 120 tools per run');
-    // The machines behind the attached tools, so results can be tagged with their origin and a request that names
-    // one machine is not carried out on another. Hostnames come from the gateway when it answers.
-    const machineRoster = new Map<string, MachineRef>();
-    for (const handler of handlers.values())
-      if (handler.machine && !machineRoster.has(handler.connectionId))
-        machineRoster.set(handler.connectionId, {
-          connectionId: handler.connectionId,
-          name: handler.connectionName,
-          deviceId: handler.deviceId,
-        });
-    if (machineRoster.size) {
-      const devices = await gatewayAdmin<{ devices: DeviceView[] }>(
-        `/devices?owner=${encodeURIComponent(ctx.ownerId)}`,
-      ).catch(() => ({ devices: [] as DeviceView[] }));
-      for (const machine of machineRoster.values()) {
-        const device = devices.devices.find((d) => d.device_id === machine.deviceId);
-        if (device) {
-          machine.hostname = device.hostname ?? undefined;
-          machine.platform = device.platform;
-        }
-      }
-    }
-    const machineTools = (connectionId: string) =>
-      [...handlers.entries()].filter(([, h]) => h.connectionId === connectionId).map(([alias]) => alias);
     const hasImages = Boolean(ctx.attachments?.length || history.some((m) => m.attachments?.length));
     let provider = await ownedProvider(
       ctx.ownerId,
@@ -508,11 +465,6 @@ async function runAgentUnchecked(stored: Agent, input: string, history: Run['his
       agent.pattern === 'reflection' && agent.patternConfig.judgeProviderId
         ? await ownedProvider(ctx.ownerId, agent.patternConfig.judgeProviderId)
         : provider;
-    const deviceNote = ctx.device
-      ? ctx.device.platform === 'openshell'
-        ? `\n\nYou are working with the OpenShell managed machine "${ctx.device.name}"${ctx.device.hostname ? ` (${ctx.device.hostname})` : ''}. Its tools manage sandboxes on that host's OpenShell gateway: list and inspect sandboxes, run programs inside a sandbox with exec_in_sandbox (argv, no shell), read sandbox logs, and inspect or change sandbox policies where allowed. Work inside sandboxes, never on the host. Denials come from the sandbox policy: report them as they are, never try to work around them, and report the exact commands you ran and their results. The current state of sandboxes, policies and the host comes only from tool results you get for this request. Past experience, notebook notes and your own earlier answers describe the past: use them to decide what to check, re-check with tools before stating anything as current, and when tool results disagree with them, the tool results are correct. If the request names a machine other than "${ctx.device.name}", say so before doing anything else: this run is bound to "${ctx.device.name}" and cannot reach another machine, so do not carry out the request here as if it were that machine.`
-        : `\n\nYou are operating the machine "${ctx.device.name}" (${ctx.device.platform}${ctx.device.hostname ? `, ${ctx.device.hostname}` : ''}). Its tools are attached to you. Inspect before you act, prefer read-only commands when they answer the question, and report the exact commands you ran and their results. Never claim a command succeeded unless its result says so. The machine's current state (what is running, resource and GPU usage, health, configuration) comes only from tool results you get for this request. Past experience, notebook notes and your own earlier answers describe the past: use them to decide what to check, re-check with tools before stating anything as current, and when tool results disagree with them, the tool results are correct. If the request names a machine other than "${ctx.device.name}", say so before doing anything else: this run is bound to "${ctx.device.name}" and cannot reach another machine, so do not carry out the request here as if it were that machine.`
-      : '';
     const skills = (agent.skills ?? []).filter((s) => s.enabled !== false);
     const loadedSkillIds = new Set(progress?.loadedSkillIds ?? []);
     const usedWorkspacePaths = new Set(progress?.usedWorkspacePaths ?? []);
@@ -592,7 +544,7 @@ async function runAgentUnchecked(stored: Agent, input: string, history: Run['his
       ? [
           {
             name: 'workspace_list',
-            description: 'List files in this harness workspace, separate from machine files.',
+            description: 'List files in this harness workspace.',
             inputSchema: { type: 'object', properties: {}, additionalProperties: false },
           },
           {
@@ -650,10 +602,6 @@ async function runAgentUnchecked(stored: Agent, input: string, history: Run['his
       '\nAct on the latest request only. History and notes are reference, not permission to restart old work. For substantive tasks, plan within the budget, checkpoint completed work and remaining steps with memory_write, and finish with findings and limitations. Reuse completed evidence when the user asks to continue or expand.' +
       clockNote +
       skillNote +
-      deviceNote +
-      (machineRoster.size > 1 || (machineRoster.size === 1 && !ctx.device)
-        ? machinesNote([...machineRoster.values()], machineTools)
-        : '') +
       taskMemoryPrompt +
       '\nCall only exact function names from the current tool definitions. Match MCP names mentioned in skills or notes to the attached tool descriptions; never guess aliases.' +
       (workspace
@@ -735,8 +683,6 @@ async function runAgentUnchecked(stored: Agent, input: string, history: Run['his
     let rejectedToolBatches = progress?.rejectedToolBatches ?? 0;
     // Calls whose effect could not be confirmed in this run; an identical call is refused, never repeated blindly.
     const uncertainCalls = new Set<string>();
-    // Machines the model was already told it is not the one the request named; a second call there is honored.
-    const warnedMachines = new Set<string>();
     let estimateScale = Math.max(1, provider.contextTokenScale ?? 1, progress?.estimateScale ?? 1);
     let learnedPromptBudget = progress?.learnedPromptBudget ?? Infinity;
     const usage = (spent: number) => {
@@ -1214,12 +1160,6 @@ async function runAgentUnchecked(stored: Agent, input: string, history: Run['his
       let finalizing = active?.finalizing ?? false;
       let stopPatterns = active?.stopPatterns ?? false;
       let emptyReplies = 0;
-      // When the request names exactly one reachable machine, the machine a tool of another connection belongs to.
-      const namedMachines = requestedMachines(input, [...machineRoster.values()]);
-      const wrongMachine = (connectionId: string) =>
-        namedMachines.length === 1 && namedMachines[0].connectionId !== connectionId
-          ? namedMachines[0]
-          : undefined;
       let pending = active?.response;
       ctx.onDelta?.('', true);
       for (let turn = active?.turn ?? 0; turn <= agent.maxTurns; turn++) {
@@ -1999,7 +1939,6 @@ async function runAgentUnchecked(stored: Agent, input: string, history: Run['his
               gate.allowed &&
               !validationError &&
               (gate.approvalRequired ||
-                (handler.machine && handler.requiresApproval) ||
                 (handler.collections &&
                   needsBindingApproval(
                     handler.name,
@@ -2097,22 +2036,6 @@ async function runAgentUnchecked(stored: Agent, input: string, history: Run['his
             } else if (!readOnlyCall && uncertainCalls.has(signature)) {
               text = `Not executed: an identical ${handler.name} call earlier in this run has an unknown outcome. Verify its effect with a read-only tool before repeating it, or change the call.`;
               isError = true;
-            } else if (
-              handler.machine &&
-              machineRoster.size > 1 &&
-              !warnedMachines.has(handler.connectionId) &&
-              wrongMachine(handler.connectionId)
-            ) {
-              // The request names one machine and this tool belongs to another: refuse once and point at the right
-              // tools. A repeated call runs, so a task that really spans machines is not blocked.
-              warnedMachines.add(handler.connectionId);
-              const wanted = wrongMachine(handler.connectionId)!;
-              text = wrongMachineNotice(
-                machineRoster.get(handler.connectionId)!,
-                wanted,
-                machineTools(wanted.connectionId),
-              );
-              isError = true;
             } else {
               try {
                 // A stable key per call lets idempotency-aware MCP servers deduplicate a replayed request.
@@ -2152,19 +2075,6 @@ async function runAgentUnchecked(stored: Agent, input: string, history: Run['his
                                     nodeId: ctx.nodeId,
                                     model: `${provider.name}:${provider.model}`,
                                   },
-                                }
-                              : {}),
-                            ...(approval?.decision === 'approve' &&
-                            handler.trustedGateway &&
-                            handler.deviceId &&
-                            handler.requiresApproval
-                              ? {
-                                  humanApproval: signApprovalCall(config.GATEWAY_ADMIN_TOKEN, {
-                                    deviceId: handler.deviceId,
-                                    tool: handler.name,
-                                    arguments: call.arguments,
-                                    callId: idempotencyKey,
-                                  }),
                                 }
                               : {}),
                           },
@@ -2210,19 +2120,6 @@ async function runAgentUnchecked(stored: Agent, input: string, history: Run['his
                       message: 'Could not save tool artifacts; the tool result is still available',
                     }),
                   );
-                  if (handler.machine)
-                    await recordMachineFile(
-                      ctx.ownerId,
-                      ctx.runId,
-                      handler.name,
-                      call.arguments as Record<string, unknown>,
-                      result,
-                    ).catch(() =>
-                      ctx.event({
-                        type: 'artifact_error',
-                        message: 'Could not save the machine file artifact',
-                      }),
-                    );
                 }
                 if (workspace?.offloadToolResults !== false) {
                   const saved = await writeTaskNote(memoryScope, {
@@ -2259,8 +2156,6 @@ async function runAgentUnchecked(stored: Agent, input: string, history: Run['his
                 } else text = `Tool call failed: ${failure.message}`.slice(0, 2000);
               }
             }
-            const origin = handler.machine ? machineRoster.get(handler.connectionId) : undefined;
-            if (origin) text = `${machineTag(origin)}\n${text}`;
             await ctx.event({
               type: isError ? 'tool_error' : 'tool_completed',
               message: handler.label,
@@ -2553,7 +2448,6 @@ export async function executeRun(run: Run, signal: AbortSignal, onDelta?: DeltaW
     responseLanguageRequest: run.input.trim() ? run.input : undefined,
     signal,
     onDelta,
-    device: run.device,
     hooks,
     agentId: run.workflowId ?? run.agentId,
     harnessId: run.workflowId ?? run.apiHarnessId,
@@ -2573,7 +2467,6 @@ export async function executeRun(run: Run, signal: AbortSignal, onDelta?: DeltaW
     last: checkpoint.last,
     payload: run.payload ?? {},
     steps: resuming ? { ...run.outputs } : {},
-    ...(run.device ? { device: { ...run.device } } : {}),
   };
   let current: string | undefined = resuming ? checkpoint.cursor : workflow.startAt;
   while (current) {
@@ -2702,7 +2595,6 @@ export async function executeRun(run: Run, signal: AbortSignal, onDelta?: DeltaW
           if (
             !run.evaluation &&
             (restored?.approvalRequired ||
-              (connection.kind === 'device' && tool._meta?.['openharness/approvalRequired'] === true) ||
               needsApproval(node.approvals ?? workflow.approvals, toolRef.id, tool.annotations, riskScore))
           ) {
             await saveContinuation(run.ownerId, run._id, preparedKey, {
@@ -2784,20 +2676,6 @@ export async function executeRun(run: Run, signal: AbortSignal, onDelta?: DeltaW
                     arguments: args,
                     _meta: {
                       idempotencyKey: `${run._id}:${node.id}:${attempt}`,
-                      ...(connection.kind === 'device' &&
-                      connection.url ===
-                        `${config.GATEWAY_URL.replace(/\/$/, '')}/mcp/${connection.deviceId}` &&
-                      connection.deviceId &&
-                      tool._meta?.['openharness/approvalRequired'] === true
-                        ? {
-                            humanApproval: signApprovalCall(config.GATEWAY_ADMIN_TOKEN, {
-                              deviceId: connection.deviceId,
-                              tool: node.tool,
-                              arguments: args,
-                              callId: `${run._id}:${node.id}:${attempt}`,
-                            }),
-                          }
-                        : {}),
                     },
                   },
                   undefined,
@@ -2853,10 +2731,6 @@ export async function executeRun(run: Run, signal: AbortSignal, onDelta?: DeltaW
                 message: 'Could not save tool artifacts; the tool result is still available',
               }),
             );
-            if (connection.kind === 'device')
-              await recordMachineFile(run.ownerId, run._id, node.tool, args, output).catch(() =>
-                event({ type: 'artifact_error', message: 'Could not save the machine file artifact' }),
-              );
           }
         } finally {
           await session.close();

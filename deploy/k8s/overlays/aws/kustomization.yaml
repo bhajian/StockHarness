@@ -12,9 +12,6 @@ images:
   - name: openharness
     newName: 491085405405.dkr.ecr.us-east-1.amazonaws.com/openharness/app
     newTag: 0ce7d47f9eff
-  - name: openharness-gateway
-    newName: 491085405405.dkr.ecr.us-east-1.amazonaws.com/openharness/gateway
-    newTag: c6f90af9dacf
   - name: openharness-mongodb-mcp
     newName: 491085405405.dkr.ecr.us-east-1.amazonaws.com/openharness/mongodb-mcp
     newTag: c6f90af9dacf

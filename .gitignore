@@ -25,9 +25,6 @@ design
 __pycache__/
 
 # OpenShell deployment secrets and copied certificates
-deploy/openshell/.env
-deploy/openshell/certs/*
-!deploy/openshell/certs/.gitkeep
 
 # Kubernetes credentials, TLS keys and rendered local overlays
 deploy/k8s/.local/
