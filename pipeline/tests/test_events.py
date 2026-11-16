@@ -40,3 +40,19 @@ class Events(unittest.TestCase):
     def test_shares_change(self):
         self.assertAlmostEqual(ev.event_features(self.e, "2024-05-15", shares_now=95, shares_year_ago=100)["shares_change_yoy"], -0.05)
         self.assertIsNone(ev.event_features(ev.build(), "2024-05-15")["eps_surprise"])
+
+
+class TiedReports(unittest.TestCase):
+    """#509: two reports on one date, one without estimates, sort without comparing None; the full one is used."""
+
+    def test_tied_dates_with_missing_surprises(self):
+        e = ev.build(earnings=[
+            {"date": "2024-05-02", "epsActual": 1.5, "epsEstimated": 1.2, "revenueActual": 90, "revenueEstimated": 100},
+            {"date": "2024-05-02", "epsActual": 1.5, "epsEstimated": None, "revenueActual": 90},
+            {"date": "2024-05-02", "epsActual": 1.5, "epsEstimated": 1.2},
+            {"date": "2024-02-01", "epsActual": 1.0, "epsEstimated": 0},
+        ])
+        f = ev.event_features(e, "2024-05-03")
+        self.assertAlmostEqual(f["eps_surprise"], 0.25)
+        self.assertAlmostEqual(f["revenue_surprise"], -0.1)
+        self.assertIsNone(ev.event_features(e, "2024-03-01")["eps_surprise"], "a zero estimate has no surprise")
