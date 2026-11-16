@@ -417,7 +417,10 @@ def evaluate(code: str, *, source, policies: dict, params: dict, config: dict | 
             "spx_returns": [_round(x) if isinstance(x, (int, float)) else None for x in out_spx],
             "gross": [_round(x, 6) for x in out_gross], "turnover": [_round(x, 6) for x in out_turn]}},
         "folds": [_rounded(f) for f in metrics.folds(out_dates, out_ret, int(cfg["walk_forward"].get("min_days", 20)), periods, out_rf)],
-        "warnings": _warnings(rebalances, extreme, held_flags),
+        "warnings": _warnings(rebalances, extreme, held_flags) + ([{
+            "code": "survivorship_pre_2021", "since": start,
+            "hint": "FMP lists delistings only from late 2020: names that died in 2016-2020 are partly missing (#463)"}]
+            if start < SURVIVORSHIP_COMPLETE_FROM else []),
         "rebalances": rebalances,
         "holdings": {"date": max(targets), "weights": {s: _round(v, 8) for s, v in sorted(targets[max(targets)].items())}},
         "reader": dict(reader.stats),
@@ -595,6 +598,9 @@ def _factor_returns(source, policies, cfg, targets, eligible_at, rets, out_dates
         out[name] = series
     return out or None
 
+
+# #463: FMP's delisted list starts in late 2020, so earlier deaths are partly missing from the universe.
+SURVIVORSHIP_COMPLETE_FROM = "2021-01-01"
 
 # #451: flags that mean the day's price or return is not trustworthy (bad_print: no return that day; large_move: kept).
 DQ_SERIOUS = ("bad_print", "large_move", "implausible_price", "zero_or_negative_price", "high_lt_low",

@@ -62,6 +62,14 @@ def run(params: dict, source, db=None) -> dict:
                                  readable_end=params.get("readable_end"), plugin_ref=params.get("plugin_ref"),
                                  parent=params.get("parent"))
             return {"ok": True, "record": record}
+        if action == "placebo":  # #468: known-answer checks of the evaluator itself
+            from .placebo import run_suite
+
+            p = params.get("params") or {}
+            return {"ok": True, "placebo": run_suite(
+                source, params["policies"], start=p["start"], end=p["end"], readable_end=params.get("readable_end"),
+                config=params.get("config"), universe=p.get("universe"), seeds=int(p.get("seeds", 10)),
+                names=p.get("names"), lag_code=p.get("lag_code"))}
         if action == "test":
             from .testing import test_plugin
 
