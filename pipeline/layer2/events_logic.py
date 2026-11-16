@@ -38,9 +38,12 @@ def _surprise(actual, estimate):
 
 def build(earnings=(), grades=(), targets=(), insiders=(), index_changes=(), tickers=()) -> dict:
     """Sorted, per-source event lists for one security (each entry starts with the date it became known)."""
-    e = sorted((_next_weekday(_iso(r["date"])), _surprise(r.get("epsActual"), r.get("epsEstimated")),
-                _surprise(r.get("revenueActual"), r.get("revenueEstimated")), _iso(r["date"]))
-               for r in earnings if r.get("date") and r.get("epsActual") is not None)
+    # Sorted by the dates only (#509): surprises may be None. On a tie, a row with surprises sorts last, so the
+    # latest-report lookup uses it.
+    e = sorted(((_next_weekday(_iso(r["date"])), _surprise(r.get("epsActual"), r.get("epsEstimated")),
+                 _surprise(r.get("revenueActual"), r.get("revenueEstimated")), _iso(r["date"]))
+                for r in earnings if r.get("date") and r.get("epsActual") is not None),
+               key=lambda x: (x[0], x[3], x[1] is not None, x[2] is not None))
     g = sorted((_iso(r["date"]), 1 if str(r.get("action")).lower() == "upgrade" else -1)
                for r in grades if r.get("date") and str(r.get("action")).lower() in ("upgrade", "downgrade"))
     t = sorted((_iso(r["publishedDate"]), r["priceTarget"] / r["priceWhenPosted"] - 1)
