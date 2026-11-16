@@ -39,6 +39,20 @@ export const theoryContent = z.object({
   tags: z.array(z.string().trim().min(1).max(60)).max(30).default([]),
   /** For a near-duplicate of an earlier theory (#111): what is different. */
   differsFrom: z.string().trim().max(2000).optional(),
+  /** #528: a refinement names the idea it refines (T-n), the lineage's first idea and its generation (root = 1). */
+  parent: z
+    .string()
+    .regex(/^T-\d+$/)
+    .optional(),
+  lineage: z
+    .string()
+    .regex(/^T-\d+$/)
+    .optional(),
+  generation: z.number().int().min(1).max(10).optional(),
+  /** #528: what a refinement changes from its parent, and why that fixes the parent's failing gate. */
+  refinement: z
+    .object({ change: z.string().trim().min(10).max(2000), why: z.string().trim().min(10).max(2000) })
+    .optional(),
 });
 export type TheoryContent = z.infer<typeof theoryContent>;
 
@@ -337,6 +351,10 @@ const SPEC_KEYS = [
   'family',
   'tags',
   'differsFrom',
+  'parent',
+  'lineage',
+  'generation',
+  'refinement',
   'number',
   'status',
   'revisions',

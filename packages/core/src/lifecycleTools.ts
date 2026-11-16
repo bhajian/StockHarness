@@ -168,6 +168,27 @@ export const LIFECYCLE_TOOLS: {
     },
   },
   {
+    name: 'refine_theory',
+    roles: ['theorist'],
+    description:
+      'Refine a near miss from the brief (#528): a new theory that keeps what worked in its parent and changes one thing aimed at the gate it failed. Give the full theory fields, plus change (exactly what differs from the parent) and why (why that fixes its failing gate, an economic reason, not a nudged threshold). It is a new trial; a lineage stops at 3 generations and 2 holdout runs.',
+    inputSchema: {
+      type: 'object',
+      properties: { parent_id: str, change: str, why: str, reasoning: str, ...THEORY_FIELDS },
+      required: [
+        'parent_id',
+        'change',
+        'why',
+        'reasoning',
+        'title',
+        'hypothesis',
+        'signal_logic',
+        'falsification',
+      ],
+      additionalProperties: false,
+    },
+  },
+  {
     name: 'review_theory',
     roles: ['judge'],
     description:
@@ -273,8 +294,34 @@ async function theoryView(ownerId: string, t: Theory) {
         .catch(() => ({ evaluation_id: id, status: 'missing' })),
     ),
   );
+  // #528: a refinement shows its parent's signal and the gates it failed, for the Judge to compare.
+  let refines: Record<string, unknown> | undefined;
+  if (t.parent) {
+    const p = await getTheory(ownerId, t.parent).catch(() => undefined);
+    const { lastVerdict } = await import('./learning.js');
+    const v = p ? lastVerdict(p) : undefined;
+    refines = {
+      parent: t.parent,
+      lineage: t.lineage,
+      generation: t.generation,
+      change: t.refinement?.change,
+      why: t.refinement?.why,
+      ...(p
+        ? {
+            parent_title: p.title,
+            parent_signal_logic: p.signalLogic,
+            parent_status: p.status,
+            parent_failing_gates: (v?.gates ?? [])
+              .filter((r) => !r.passed && !r.gate.startsWith('holdout'))
+              .map((r) => ({ gate: r.gate, value: r.value, threshold: r.threshold })),
+            parent_cause: (v?.data?.cause as any)?.text,
+          }
+        : {}),
+    };
+  }
   return {
     ...brief(t),
+    ...(refines ? { refines } : {}),
     title: t.title,
     hypothesis: t.hypothesis,
     rationale: t.rationale,
@@ -344,6 +391,40 @@ export async function callLifecycleTool(
       const c = content(args) as Record<string, any>;
       c.tags = [...new Set([...(Array.isArray(c.tags) ? c.tags : []), `mode:${mode}`])];
       return brief(await createTheory(ownerId, c as any, actor, { submit: true, reasoning: args.reasoning }));
+    }
+    case 'refine_theory': {
+      need(role, ['theorist'], name);
+      const actor = actorOf('theorist', meta);
+      const parent = await getTheory(ownerId, String(args.parent_id ?? ''));
+      const { lineageCheck } = await import('./learning.js');
+      const { root, generation } = await lineageCheck(ownerId, parent);
+      await assertBacklogRoom(ownerId);
+      const { researchSettings } = await import('./researchLoop.js');
+      const mode = (await researchSettings(ownerId)).theoristMode ?? 'single';
+      const c = content(args) as Record<string, any>;
+      const pref = `T-${parent.number}`;
+      Object.assign(c, {
+        family: c.family ?? parent.family,
+        parent: pref,
+        lineage: root,
+        generation,
+        refinement: { change: String(args.change ?? ''), why: String(args.why ?? '') },
+        differsFrom: c.differsFrom ?? `Refines ${pref}: ${String(args.change ?? '').slice(0, 1500)}`,
+        tags: [
+          ...new Set([
+            ...(Array.isArray(c.tags) ? c.tags : []),
+            `mode:${mode}`,
+            `lineage:${root}`,
+            `refines:${pref}`,
+          ]),
+        ],
+      });
+      return {
+        ...brief(await createTheory(ownerId, c as any, actor, { submit: true, reasoning: args.reasoning })),
+        parent: pref,
+        lineage: root,
+        generation,
+      };
     }
     case 'review_theory': {
       need(role, ['judge'], name);
@@ -633,10 +714,16 @@ async function mechanicalVerdict(
     mechanical === 'promising' && requested !== 'successful'
       ? `${reasoning}\n\nPromising by the gates: it beat the S&P 500; it failed only ${failingProof(results)}.`
       : reasoning;
+  // #528: why it failed, from the gates and the record, for the vault, the brief and the near-miss list.
+  const { causeOf } = await import('./learning.js');
   t = await transitionTheory(ownerId, t._id, to, actorOf('judge', meta), why, {
     gatesVersion: gates.version,
     mechanical,
     gates: results,
+    ...(to !== 'successful' ? { cause: causeOf(results, explore?.record) } : {}),
+    ...(typeof explore?.record?.excess?.spx?.excess_cagr === 'number'
+      ? { excess: explore.record.excess.spx.excess_cagr }
+      : {}),
     ...(explore ? { evaluationId: explore._id } : {}),
     ...(holdout ? { holdoutEvaluationId: holdout._id } : {}),
   });

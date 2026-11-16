@@ -210,6 +210,20 @@ export function ResearchSetup({
               <option value="steps">Steps</option>
             </select>
           </Field>
+          <Field
+            label="Refine near misses"
+            hint="Share of Theorists that refine a near miss each cycle (0 = never)"
+          >
+            <input
+              aria-label="Refine near misses share"
+              type="number"
+              min={0}
+              max={1}
+              step={0.1}
+              value={s.refineShare ?? 0.3}
+              onChange={(e) => set({ refineShare: Math.max(0, Math.min(1, Number(e.target.value) || 0)) })}
+            />
+          </Field>
         </div>
         <table className="compact-table setup-theorists" aria-label="Theorist models">
           <thead>

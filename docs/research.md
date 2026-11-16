@@ -237,3 +237,24 @@ Setup → Theorists → **Theorist mode** chooses how a Theorist works (`theoris
 `vault_scratch` (Theorist only) keeps a plan note under `scratch/<id>` in the vault; `vault_read` reads it back.
 Every new idea is tagged `mode:single` or `mode:steps`, and the Scorecards group **By Theorist mode**, so the two
 modes can be compared on yield and Sharpe before anyone switches. Ideas from before #462 count as single.
+
+## Learning from near misses (#528, part 1)
+
+Ideas now have a **lineage**. `refine_theory(parent_id, change, why, …)` (Theorist) creates a child of a promising or
+failed idea that changes one thing aimed at the gate the parent failed, and says why. The child records `parent`,
+`lineage` (the first idea), `generation` and the `refinement`, and is tagged `lineage:T-n` and `refines:T-n`. It is a
+new trial (it counts towards the deflated Sharpe), and keeps the research window and scope.
+
+- **Guards:** a lineage stops at **3 generations**, and spends at most **2 holdout runs** (holdouts used plus children
+  still in progress); only a promising or failed idea can be refined.
+- **The Judge** sees the parent's signal, its failing gates, the change and the reason in `get_theory` (`refines`),
+  and approves only a real change with an economic reason aimed at those gates.
+- **Near misses:** promising ideas, and failed ones with at most two exploration gates short, each within 80% of its
+  threshold and no blocking warning. The Theorist brief lists the best five (`near_misses`, by excess then Sharpe).
+- **Who refines:** Setup → Theorists → **Refine near misses** (`refineShare`, default 0.3): Theorist _i_ refines when
+  _i_ ≤ round(share × Theorists) and the list is not empty (`refine_this_cycle`, `refine_instruction`).
+- **Causes:** every failed or promising verdict records a cause (`costs`, `no_excess`, `concentration`, `regime`,
+  `data`, `few_trades`, `proof`, `other`) with its explanation; a Theorist's brief shows its own last three failures
+  with their cause (`your_last_failures`).
+
+Theories export the lineage fields in YAML (`parent`, `lineage`, `generation`, `refinement`).
