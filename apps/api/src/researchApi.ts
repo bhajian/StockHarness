@@ -25,6 +25,7 @@ import {
   researchStatus,
 } from '../../../packages/core/src/researchLab.js';
 import { discoverTools } from '../../../packages/core/src/mcp.js';
+import { researchScorecards } from '../../../packages/core/src/researchKpis.js';
 
 export const researchRouter = Router();
 const adminOnly = (role: string) => {
@@ -186,6 +187,10 @@ researchRouter.post('/research/loop', async (req, res) => {
 // Research Lab (#116): status and KPIs, charts, the activity feed, pause / resume.
 researchRouter.get('/research/status', async (req, res) => {
   res.json(await researchStatus(req.principal!.tenantId));
+});
+// #460: scorecards by Theorist model and by strategy family (all time, 90 and 30 days).
+researchRouter.get('/research/kpis', async (req, res) => {
+  res.json(await researchScorecards(req.principal!.tenantId));
 });
 researchRouter.get('/research/charts', async (req, res) => {
   res.json(
