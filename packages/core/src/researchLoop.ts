@@ -386,8 +386,17 @@ export const ROLE_CONNECTION_NAMES: Record<ResearchRole, string> = {
   coder: 'Research — Coder',
 };
 const DATA_TOOLS = ['list_collections', 'describe_collection', 'sample_collection', 'query_collection'];
+/** #459: the research vault. */
+const VAULT_TOOLS = ['vault_index', 'vault_search', 'vault_read', 'vault_backlinks'];
 export const ROLE_TOOLS: Record<'theorist' | 'judge_pre' | 'coder' | 'judge_post', string[]> = {
-  theorist: ['get_research_brief', 'search_theories', 'get_theory', 'submit_theory', ...DATA_TOOLS],
+  theorist: [
+    'get_research_brief',
+    'search_theories',
+    'get_theory',
+    'submit_theory',
+    ...VAULT_TOOLS,
+    ...DATA_TOOLS,
+  ],
   judge_pre: [
     'get_research_brief',
     'search_theories',
@@ -395,6 +404,8 @@ export const ROLE_TOOLS: Record<'theorist' | 'judge_pre' | 'coder' | 'judge_post
     'review_theory',
     'describe_collection',
     'sample_collection',
+    'vault_search',
+    'vault_read',
   ],
   coder: [
     'get_research_brief',
@@ -434,7 +445,7 @@ const PROMPTS = {
     '2. If your queue has a theory sent back for revision, fix exactly what the Judge asked and re-submit it with submit_theory(theory_id=...). Otherwise propose a new one.\n' +
     `3. Pick an idea from the strategy-library skill; Theorist ${i} prefers the family at position ${i} of the library order, so parallel Theorists differ. Combine, condition or refine it; never resubmit a card unchanged.\n` +
     `   Its profile: Theorist ${i} takes the profile at position ${i} of the brief's profiles (counting again from the first when there are fewer); set direction, instrument and structure to match it.\n` +
-    '4. Check search_theories for near-duplicates, and describe_collection for every field you rely on (exact names, known-at rule).\n' +
+    '4. Learn from the past: vault_index, then vault_read the family note of your idea (its Lessons and worst ideas) and vault_search your idea; say in the rationale what you change from the ideas that failed. Check search_theories for near-duplicates, and describe_collection for every field you rely on (exact names, known-at rule).\n' +
     '5. Call submit_theory with a precise hypothesis, the signal logic in words, data_needed (collection.field), horizon_days, direction and a measurable falsification. Reply with the theory id.',
   judge_pre:
     'You are the Judge (pre-code review) in the StockHarness research loop. Follow the judge-checklist skill.\n' +

@@ -75,6 +75,50 @@ export const LIFECYCLE_TOOLS: {
       "Start here every cycle: your role's queue of theories, the research focus, the latest human steering notes, recent theories, the evaluation window to use and the active gates.",
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
   },
+  // #459: the research vault, navigated a step at a time.
+  {
+    name: 'vault_index',
+    roles: 'all',
+    description:
+      'The research vault: linked notes on every past idea, each strategy family (its yield, lessons, best and worst ideas) and the gates ideas fail. Start here, then vault_read a family note before proposing in it.',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+  },
+  {
+    name: 'vault_search',
+    roles: 'all',
+    description:
+      'Vault notes that mention every word of a text (ideas, families, lessons), best first, with a snippet.',
+    inputSchema: {
+      type: 'object',
+      properties: { text: str, limit: { type: 'integer', minimum: 1, maximum: 30 } },
+      required: ['text'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'vault_read',
+    roles: 'all',
+    description:
+      'One vault note by path (index, families/<family>, ideas/T-<n>, lessons/gates), or one of its ## sections (e.g. Lessons, Post-mortem). Follow its [[links]].',
+    inputSchema: {
+      type: 'object',
+      properties: { path: str, section: str },
+      required: ['path'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'vault_backlinks',
+    roles: 'all',
+    description:
+      'The vault notes that link to a note (e.g. every idea in a family links to its family note).',
+    inputSchema: {
+      type: 'object',
+      properties: { path: str },
+      required: ['path'],
+      additionalProperties: false,
+    },
+  },
   {
     name: 'search_theories',
     roles: 'all',
@@ -255,6 +299,13 @@ export async function callLifecycleTool(
     case 'get_research_brief': {
       const { researchBrief } = await import('./researchLoop.js');
       return researchBrief(ownerId, role, meta);
+    }
+    case 'vault_index':
+    case 'vault_search':
+    case 'vault_read':
+    case 'vault_backlinks': {
+      const { vaultTool } = await import('./vault.js');
+      return vaultTool(ownerId, name, args);
     }
     case 'search_theories':
       return searchTheories(ownerId, String(args.text ?? ''), Math.min(50, Number(args.limit) || 10));
