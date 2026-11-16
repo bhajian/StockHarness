@@ -100,6 +100,10 @@ before(async () => {
     'economic_indicators',
     'sector_performance',
     'index_constituents',
+    'earnings_history',
+    'analyst_grades_history',
+    'price_target_history',
+    'insider_trades_history',
     'index_changes',
   ])
     await ok('/dataset-syncs', {

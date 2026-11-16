@@ -15,6 +15,8 @@ from ..core import pit
 from ._resolve import as_date
 
 # name, group, unit, description, direction (+1 higher is better for composites, -1 lower is better, 0 n/a)
+from . import events_logic
+
 REGISTRY = [
     ("ret_1d", "price", "ratio", "1-day total split-adjusted price return", 0),
     ("mom_21d", "price", "ratio", "21-trading-day return of the adjusted close", 0),
@@ -38,6 +40,16 @@ REGISTRY = [
     ("revenue_growth_yoy", "growth", "ratio", "TTM revenue / TTM revenue a year earlier − 1, as known then", 1),
     ("earnings_growth_yoy", "growth", "ratio", "TTM net income growth versus a year earlier (on |prior|), as known then", 1),
     ("days_since_filing", "events", "days", "Days since the latest statement became usable (as_of_date)", 0),
+    # #457: events, each as known that day (pipeline/layer2/events_logic.py).
+    ("eps_surprise", "events", "ratio", "Latest EPS surprise (actual − estimate) / |estimate|, clipped ±5; known the session after the report", 1),
+    ("revenue_surprise", "events", "ratio", "Latest revenue surprise, same rule as eps_surprise", 1),
+    ("days_since_earnings", "events", "days", "Days since the latest earnings report date (known the next session)", 0),
+    ("grade_net_90d", "events", "count", "Analyst upgrades minus downgrades in the last 90 days", 1),
+    ("target_upside_90d", "events", "ratio", "Mean price target / price when posted − 1 over targets published in the last 90 days", 1),
+    ("insider_net_buy_90d", "events", "ratio", "Open-market insider purchases minus sales filed in the last 90 days, / market cap", 1),
+    ("days_since_sp500_add", "events", "days", "Days since the latest addition to the S&P 500 (index_changes)", 0),
+    ("days_since_sp500_removal", "events", "days", "Days since the latest removal from the S&P 500", 0),
+    ("shares_change_yoy", "growth", "ratio", "Shares outstanding against a year earlier, as filed (buybacks below 0)", -1),
 ]
 FEATURES = [r[0] for r in REGISTRY]
 COMPOSITES = {
@@ -71,6 +83,14 @@ def registry_docs(ranked=False):
     out["composite_pct"] = {"description": "Percentile of the mean of the composite scores (averages 0.5 per date)"}
     out["composite_sector_pct"] = {"description": "composite_pct within the sector"}
     return out
+
+
+def _safe(read, collection, flt, cols):
+    """Rows of an optional input (#457): none when it isn't synced in this workspace."""
+    try:
+        return read(collection, flt, cols) or []
+    except Exception:  # noqa: BLE001 - a missing collection means no events
+        return []
 
 
 def _ratio(a, b):
@@ -158,7 +178,8 @@ def fundamental_features(cur, prior, cap, day):
 
 def compute_daily(read, window=None):
     """Yield features_daily rows per security. Every input is filtered to what was known on each day."""
-    securities = read("securities", None, ["security_id", "sector_history"])
+    securities = read("securities", None, ["security_id", "sector_history", "identifiers"])
+    index_changes = _safe(read, "index_changes", None, ["index", "date", "symbol", "addedTicker", "removedTicker"])
     start = window.start if window else None
     end = window.end if window else None
     lookback = window.lookback_start if window else None
@@ -175,6 +196,17 @@ def compute_daily(read, window=None):
             uq["date"] = {"$gte": start, "$lte": end}
         uni = {r["date"]: r for r in read("universe_daily", uq, ["date", "in_universe", "market_cap", "adv_20d"])}
         fund = read("fundamentals_pit", {"security_id": sid}, None)
+        tickers = sorted({i["value"] for i in s.get("identifiers") or [] if i.get("type") == "ticker" and i.get("value")})
+        by_symbol = {"symbol": {"$in": tickers}} if tickers else None
+        ev = events_logic.build(
+            earnings=_safe(read, "earnings_surprises", by_symbol, ["date", "epsActual", "epsEstimated", "revenueActual",
+                                                                   "revenueEstimated"]) if tickers else [],
+            grades=_safe(read, "analyst_grades_history", by_symbol, ["date", "action"]) if tickers else [],
+            targets=_safe(read, "price_target_changes", by_symbol, ["publishedDate", "priceTarget", "priceWhenPosted"])
+            if tickers else [],
+            insiders=_safe(read, "insider_trades", by_symbol, ["filingDate", "transactionType", "securitiesTransacted",
+                                                              "price"]) if tickers else [],
+            index_changes=index_changes, tickers=tickers)
         closes = [p.get("adj_close") for p in prices]
         rets = [p.get("ret_1d") for p in prices]
         rows = []
@@ -194,6 +226,8 @@ def compute_daily(read, window=None):
                     "adv_20d": u.get("adv_20d"),
                     **price_features(closes, rets, i),
                     **fundamental_features(cur, prior, u.get("market_cap"), day),
+                    **events_logic.event_features(ev, day, u.get("market_cap"), (cur or {}).get("shares_basic"),
+                                                  (prior or {}).get("shares_basic")),
                     "known_at": pit.eod_known_at(as_date(day)).isoformat(),
                     "as_of_date": day,
                 }
