@@ -322,6 +322,7 @@ spec:
     - eod_index
     - sector_performance
     - benchmark_dividends
+    - economic_indicators
   outputs:
     - collection: macro_daily
       key:
@@ -371,6 +372,44 @@ spec:
         rf_1d:
           description: Risk-free daily rate from the 3-month T-bill as known that day, (1 + ust_3m/100)^(1/252) − 1 (#445)
           unit: ratio
+        spx_above_200d:
+          description: S&P 500 close at or above its 200-session average (#456); the evaluator's by_regime trend rule
+        spx_ret_63d:
+          description: S&P 500 return over the last 63 sessions
+          unit: ratio
+        spx_drawdown_252d:
+          description: S&P 500 close against its 252-session high (0 or below)
+          unit: ratio
+        vix_pct_252d:
+          description: Where today's VIX sits among the last 252 sessions (0 to 1)
+          unit: ratio
+        vix_high:
+          description: VIX at or above 25 (the evaluator's by_regime volatility rule)
+        curve_inverted:
+          description: The 10-year yield below the 2-year
+        ust_10y_chg_63d:
+          description: Change in the 10-year yield over 63 sessions
+          unit: percent points
+        regime:
+          description: bull or bear (S&P 500 vs its 200-day average) and calm or volatile (VIX below or at least 25), e.g. bull_calm
+        cpi_yoy:
+          description: CPI year over year, as known that day (each print known 45 days after its month)
+          unit: ratio
+        cpi_yoy_chg_3m:
+          description: Change in cpi_yoy over the last 3 known months
+          unit: ratio
+        unemployment:
+          description: Unemployment rate, latest known
+          unit: "%"
+        sahm_gap:
+          description: 3-month average unemployment minus its lowest 3-month average of the prior 12 months; 0.5 or more is the Sahm recession signal
+          unit: percent points
+        recession_prob:
+          description: Smoothed US recession probability, latest known
+          unit: "%"
+        fed_funds:
+          description: Effective federal funds rate, latest known
+          unit: "%"
         sector_returns:
           description: Sector average change that day, by sector
           unit: "%"
@@ -388,6 +427,7 @@ spec:
       - dataset:eod_index
       - dataset:sector_performance
       - dataset:benchmark_dividends
+      - dataset:economic_indicators
   incremental:
     mode: full
     lookback_days: 0

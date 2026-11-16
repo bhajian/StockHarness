@@ -97,6 +97,7 @@ before(async () => {
     'treasury_rates',
     'eod_index',
     'benchmark_dividends',
+    'economic_indicators',
     'sector_performance',
     'index_constituents',
     'index_changes',
