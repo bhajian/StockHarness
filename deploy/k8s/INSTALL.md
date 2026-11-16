@@ -492,9 +492,7 @@ Rerun `deploy.sh` after changing configuration. An internal model in another nam
 needs its own ingress/network policy to permit requests from OpenHarness. Model API keys belong
 in Studio's provider configuration or the appropriate secret mechanism, not in committed YAML.
 
-Optional Qdrant, OpenSearch, Elasticsearch and OpenAI vector-store endpoints can be configured
-through the application's existing settings/environment. They are alternative backends; this
-installation deploys Weaviate as the default. OpenShell runs separately with its edge/connector
+Weaviate is the only vector store (#472 removed the alternative backends). OpenShell runs separately with its edge/connector
 on the target infrastructure; see [the OpenShell guide](../../docs/openshell.md).
 
 ## 11. Upgrade, replace certificates and back up

@@ -8,18 +8,8 @@ const s = z.object({
   RABBITMQ_URL: z.string().default('amqp://localhost'),
   WEAVIATE_URL: z.string().url().default('http://localhost:8080'),
   WEAVIATE_API_KEY: z.string().default(''),
-  // Vector store for new knowledge bases. Existing bases keep the store they were created on.
-  VECTOR_STORE: z.enum(['weaviate', 'qdrant', 'opensearch', 'elasticsearch', 'openai']).default('weaviate'),
-  QDRANT_URL: z.string().default(''),
-  QDRANT_API_KEY: z.string().default(''),
-  OPENSEARCH_URL: z.string().default(''),
-  OPENSEARCH_USERNAME: z.string().default(''),
-  OPENSEARCH_PASSWORD: z.string().default(''),
-  ELASTICSEARCH_URL: z.string().default(''),
-  ELASTICSEARCH_API_KEY: z.string().default(''),
-  // Any OpenAI-compatible Vector Stores API: OpenAI, Llama Stack, or a managed service. It embeds text itself.
-  OPENAI_VECTOR_STORES_URL: z.string().default(''),
-  OPENAI_VECTOR_STORES_API_KEY: z.string().default(''),
+  // The vector store (#472: Weaviate only; Qdrant, OpenSearch, Elasticsearch and OpenAI stores were removed).
+  VECTOR_STORE: z.enum(['weaviate']).default('weaviate'),
   // The MongoDB MCP server of this installation (mongodb-mcp service). Workspaces reach their own database in the
   // stack MongoDB through it; OpenHarness holds the bearer token and provisions the server's least-privilege user.
   MONGODB_MCP_URL: z.string().default(''),
