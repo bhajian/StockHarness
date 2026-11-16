@@ -145,7 +145,7 @@ test('an evaluation runs in the executor and is reproducible', async () => {
   const a = await evaluate(body);
   assert.equal(a.status, 'succeeded', JSON.stringify(a.error));
   const r = a.record;
-  assert.equal(r.evaluator_version, '1.4.0');
+  assert.equal(r.evaluator_version, '1.7.0');
   assert.equal(r.plugin.name, 'momentum_40d');
   assert.match(r.plugin.hash, /^sha256:[0-9a-f]{64}$/);
   assert.equal(r.period.first_trade, DAYS[46], 'executed at the next close');
@@ -335,4 +335,29 @@ test('the run-test-fix loop: a scripted Coder fixes three seeded bugs with test_
   assert.equal(versions[0].tested, 'passed');
   const list = await ok('/evaluations');
   assert.ok(!list.items.some((e: any) => e.pluginName === 'coder_fixed'), 'testing is never a trial');
+});
+
+test('#468: the placebo and known-answer suite runs in the executor over the research window', async () => {
+  // The research scope: the fixture's twelve names (the default scope is real large caps).
+  await ok(
+    '/research/settings',
+    {
+      scope: { kind: 'symbols', top: 500 },
+      evaluationSymbols: Array.from({ length: 12 }, (_, k) => `T${k}`),
+    },
+    'PUT',
+  );
+  const started = await ok('/evaluator/placebo', { seeds: 2, names: [] });
+  assert.equal(started.status, 'running');
+  let latest: any;
+  for (let i = 0; i < 120; i++) {
+    latest = (await ok('/evaluator/placebo')).latest;
+    if (latest?.status !== 'running') break;
+    await new Promise((r) => setTimeout(r, 2000));
+  }
+  assert.equal(latest.status, 'succeeded', JSON.stringify(latest.error ?? latest.result));
+  const checks = Object.fromEntries(latest.result.checks.map((c: any) => [c.check, c]));
+  assert.equal(checks.future_peek.passed, true, JSON.stringify(checks.future_peek));
+  assert.equal(checks.costs.passed, true, JSON.stringify(checks.costs));
+  assert.notEqual(latest.passed, false, JSON.stringify(latest.result.checks));
 });

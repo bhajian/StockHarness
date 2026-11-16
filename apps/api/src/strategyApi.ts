@@ -1,6 +1,7 @@
 // Strategy plugins and evaluations API (M3). Mounted under /api with requireSession; writes are admin-only.
 import { Router } from 'express';
 import { HttpError } from '../../../packages/core/src/security.js';
+import { latestPlacebo, placeboRuns, startPlacebo } from '../../../packages/core/src/placebo.js';
 import {
   createStrategyPlugin,
   deleteStrategyPlugin,
@@ -103,6 +104,26 @@ strategyRouter.get('/evaluator/settings', async (req, res) => {
 strategyRouter.put('/evaluator/settings', async (req, res) => {
   adminOnly(req.principal!.user.role);
   res.json(await setHoldoutMonths(req.principal!.tenantId, Number(req.body?.holdoutMonths)));
+});
+// #468: the placebo and known-answer suite over the research window (admin; runs in the background).
+strategyRouter.post('/evaluator/placebo', async (req, res) => {
+  adminOnly(req.principal!.user.role);
+  const seeds = Math.max(2, Math.min(40, Number(req.body?.seeds) || 10));
+  const names = Array.isArray(req.body?.names) ? req.body.names.map(String).slice(0, 10) : [];
+  res
+    .status(202)
+    .json(await startPlacebo(req.principal!.tenantId, { seeds, names, userId: req.principal!.user._id }));
+});
+strategyRouter.get('/evaluator/placebo', async (req, res) => {
+  const ownerId = req.principal!.tenantId;
+  res.json({
+    latest: await latestPlacebo(ownerId),
+    history: await placeboRuns()
+      .find({ ownerId }, { projection: { result: 0 } })
+      .sort({ createdAt: -1 })
+      .limit(20)
+      .toArray(),
+  });
 });
 strategyRouter.get('/evaluations', async (req, res) => {
   const ownerId = req.principal!.tenantId;

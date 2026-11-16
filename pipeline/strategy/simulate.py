@@ -31,7 +31,7 @@ from .engine import (EvaluationError, _current, _universe_on, sector_on, ensure_
                      trading_days, universe_top)
 from .reader import PitReader
 
-SIMULATOR_VERSION = "1.3.0"  # 1.3: sector caps as of each date (#454); 1.2: delisting returns by class and side (#448); 1.1: total-return benchmark, rf_return per session, Sharpe over cash (#445)
+SIMULATOR_VERSION = "1.5.0"  # 1.5: rank buffer, re-entry cool-down (#466), caps across ideas (#465); 1.4: market impact at the capital, borrow by size (#452); 1.3: sector caps as of each date (#454); 1.2: delisting returns by class and side (#448); 1.1: total-return benchmark, rf_return per session, Sharpe over cash (#445)
 COLLECTIONS = ("sim_orders", "sim_trades", "sim_portfolio_daily", "sim_positions")
 DEFAULTS = {
     "capital": 1_000_000.0,
