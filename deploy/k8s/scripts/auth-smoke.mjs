@@ -87,8 +87,6 @@ try {
   assert.equal(run.status, 'succeeded', run.error);
   assert.equal(run.output, 'Kubernetes runner completed: ' + input);
   console.log('API → RabbitMQ → runner → MongoDB workflow execution: OK (' + run.id + ')');
-  assert.ok(Array.isArray((await ok('/devices')).machines));
-  console.log('Authenticated gateway inventory: OK');
 } finally {
   await ok('/workflows/' + flow.id, undefined, 'DELETE');
 }

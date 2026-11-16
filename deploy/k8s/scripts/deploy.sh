@@ -11,8 +11,8 @@ kube apply -k deploy/k8s/.local
 # Disks that only expand while detached are grown now, with their StatefulSet briefly scaled to zero.
 deploy/k8s/scripts/expand-volumes.sh deploy/k8s/.local --finish
 # Environment variables and mounted TLS/config files need a process restart.
-kube rollout restart deployment/app deployment/gateway deployment/proxy
-for workload in statefulset/mongo statefulset/rabbitmq statefulset/weaviate deployment/app deployment/gateway deployment/mongodb-mcp deployment/guardrails deployment/guardrail-evaluation deployment/proxy; do
+kube rollout restart deployment/app deployment/proxy
+for workload in statefulset/mongo statefulset/rabbitmq statefulset/weaviate deployment/app deployment/mongodb-mcp deployment/guardrails deployment/guardrail-evaluation deployment/proxy; do
   kube rollout status "$workload" --timeout=900s
 done
 kube get pods,pvc,service

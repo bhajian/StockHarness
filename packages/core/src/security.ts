@@ -78,14 +78,6 @@ export function privateAddress(address: string): boolean {
     (x === 198 && (y === 18 || y === 19))
   );
 }
-/** Hostname of the configured device gateway; its device endpoints are trusted like any listed private host. */
-function gatewayHost() {
-  try {
-    return config.GATEWAY_URL ? new URL(config.GATEWAY_URL).hostname.toLowerCase() : undefined;
-  } catch {
-    return undefined;
-  }
-}
 /** The API itself (EXECUTOR_CALLBACK_URL): the built-in research MCP server is served there (#108). */
 function apiHost() {
   try {
@@ -96,7 +88,7 @@ function apiHost() {
     return undefined;
   }
 }
-/** The installation's own Python executor service is trusted like the gateway. */
+/** The installation's own Python executor service is trusted. */
 function executorHost() {
   try {
     return config.EXECUTOR_URL ? new URL(config.EXECUTOR_URL).hostname.toLowerCase() : undefined;
@@ -104,7 +96,7 @@ function executorHost() {
     return undefined;
   }
 }
-/** The installation's own MongoDB MCP server is trusted like the gateway. */
+/** The installation's own MongoDB MCP server is trusted. */
 function mongoMcpHost() {
   try {
     return config.MONGODB_MCP_URL ? new URL(config.MONGODB_MCP_URL).hostname.toLowerCase() : undefined;
@@ -125,7 +117,6 @@ export async function validateRemoteUrl(value: string) {
     config.ALLOWED_PRIVATE_HOSTS.split(',')
       .map((s) => s.trim().toLowerCase())
       .includes(host) ||
-    gatewayHost() === host ||
     mongoMcpHost() === host ||
     executorHost() === host ||
     apiHost() === host
@@ -139,9 +130,7 @@ export async function validateRemoteUrl(value: string) {
     );
 }
 /**
- * Whether a connection may resolve to a private address. The configured device gateway is always trusted, as in
- * validateRemoteUrl: installs whose ALLOWED_PRIVATE_HOSTS predates the gateway would otherwise have every machine
- * tool call and tool discovery refused at connect time.
+ * Whether a connection may resolve to a private address: the same hosts validateRemoteUrl trusts.
  */
 export function privateHostAllowed(host: string) {
   return (
@@ -149,7 +138,6 @@ export function privateHostAllowed(host: string) {
     config.ALLOWED_PRIVATE_HOSTS.split(',')
       .map((s) => s.trim().toLowerCase())
       .includes(host.toLowerCase()) ||
-    gatewayHost() === host.toLowerCase() ||
     mongoMcpHost() === host.toLowerCase() ||
     executorHost() === host.toLowerCase() ||
     apiHost() === host.toLowerCase()

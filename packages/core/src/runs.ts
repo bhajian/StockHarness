@@ -20,7 +20,6 @@ import type {
 } from './schema.js';
 import { workflowSchema } from './schema.js';
 import { agentWithResources } from './workflow.js';
-import { discoverTools } from './mcp.js';
 import { resumeDecision } from './runtime.js';
 import { settleConversation } from './conversations.js';
 import { nextScheduledAt } from './schedule.js';
@@ -170,71 +169,8 @@ export async function createRun(
   };
   for (const id of Object.keys(nodeAgents)) nodeAgents[id] = await withSkills(nodeAgents[id]);
   for (const id of Object.keys(agents)) agents[id] = await withSkills(agents[id]);
-  // A machine chosen for the run or chat grants its tools (through its gateway connection) to every agent, and takes
-  // the place of any machine the workflow's agents already have, so the agent operates exactly the machine the user
-  // picked. The agents' other MCP tools stay.
-  let device: Run['device'];
-  if (input.deviceId) {
-    const connection = await collection<{
-      _id: string;
-      name: string;
-      platform?: Run['device'] extends infer D ? (D extends { platform: infer P } ? P : never) : never;
-      tools?: { name: string }[];
-      enabled: boolean;
-    }>('connections').findOne({
-      ownerId,
-      kind: 'device',
-      deviceId: input.deviceId,
-    });
-    if (!connection || !connection.enabled) throw new HttpError(404, 'Machine unavailable');
-    let tools = (connection.tools ?? []).map((t) => t.name);
-    // The tool list is stored when the machine syncs; a machine that connected since then is discovered now.
-    if (!tools.length) {
-      try {
-        tools = (await discoverTools(ownerId, connection._id)).map((t) => t.name);
-      } catch (error) {
-        throw new HttpError(
-          400,
-          `Could not reach the machine "${connection.name}" to load its tools; make sure it is online (${safeError(error)})`,
-        );
-      }
-    }
-    if (!tools.length)
-      throw new HttpError(
-        400,
-        `The machine "${connection.name}" allows no tools; enable some on the Machines page`,
-      );
-    const machines = new Set(
-      (
-        await collection<{ _id: string }>('connections')
-          .find({ ownerId, kind: 'device' }, { projection: { _id: 1 } })
-          .toArray()
-      ).map((c) => c._id),
-    );
-    const attach = (a: Agent): Agent => ({
-      ...a,
-      ...(options.monitoring
-        ? {
-            effort: 'light' as const,
-            maxTurns: Math.min(a.maxTurns, 8),
-            tokenBudget: Math.min(a.tokenBudget ?? 16000, 16000),
-            delegation: { maxAgents: a.delegation?.maxAgents ?? 4, enabled: false },
-          }
-        : {}),
-      connections: [
-        ...a.connections.filter((c) => !options.monitoring && !machines.has(c.connectionId)),
-        { connectionId: connection._id, tools },
-      ],
-    });
-    for (const id of Object.keys(nodeAgents)) nodeAgents[id] = attach(nodeAgents[id]);
-    for (const id of Object.keys(agents)) agents[id] = attach(agents[id]);
-    device = {
-      id: input.deviceId,
-      name: connection.name,
-      platform: connection.platform ?? 'linux',
-      connectionId: connection._id,
-    };
-  }
+  // Machines (devices behind the gateway) were removed (#472).
+  if (input.deviceId) throw new HttpError(400, 'Machines are not available in StockHarness');
   const tenant = await collection<{ _id: string; guardrailIds?: string[] }>('tenants').findOne({
     _id: ownerId,
   });
@@ -263,7 +199,6 @@ export async function createRun(
     : [];
   const run: Run = {
     ...(sourceTaskIds.length ? { sourceTaskIds } : {}),
-    ...(device ? { device } : {}),
     _id: runId ?? randomUUID(),
     ownerId,
     ...input,

@@ -55,15 +55,21 @@ precheck() { # name command...
   [ "$phase" = Succeeded ] || { echo "precheck failed: $phase" >&2; exit 1; }
 }
 
+# Pin an image's tag in the overlay by its name, not by line number (#472: removing an image block shifted the lines).
+pin() {
+  sed -i '' "/^  - name: $1\$/,/newTag:/s/newTag: .*/newTag: $SHA/" "$OVERLAY"
+  grep -A2 "^  - name: $1\$" "$OVERLAY" | grep -q "newTag: $SHA" || { echo "could not pin $1" >&2; exit 1; }
+}
+
 if [ "$want_app" = 1 ]; then
   build app Dockerfile
   precheck app node -e "console.log('app image ok', process.version)"
-  sed -i '' "14s/newTag: .*/newTag: $SHA/" "$OVERLAY"
+  pin openharness
 fi
 if [ "$want_exec" = 1 ]; then
   build python-executor python-executor/Dockerfile
   precheck python-executor python -c "import pipeline.strategy.engine; print('executor image ok')"
-  sed -i '' "23s/newTag: .*/newTag: $SHA/" "$OVERLAY"
+  pin openharness-python-executor
 fi
 
 # Nothing in flight that a restart would interrupt (transform runs, harness runs, evaluations, simulations).

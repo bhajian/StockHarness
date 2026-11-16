@@ -6,14 +6,9 @@ cd "$(dirname "$0")/../../.."
 for tool in docker nebius; do command -v "$tool" >/dev/null; done
 # Uses the logged-in Nebius profile without putting a token on the command line.
 nebius registry configure-helper
-for entry in 'openharness:Dockerfile' 'gateway:gateway/Dockerfile' 'guardrails:guardrails/Dockerfile' 'garak-probes:guardrails/evaluation/Dockerfile' 'mongodb-mcp:mongodb-mcp/Dockerfile' 'python-executor:python-executor/Dockerfile'; do
+for entry in 'openharness:Dockerfile' 'guardrails:guardrails/Dockerfile' 'garak-probes:guardrails/evaluation/Dockerfile' 'mongodb-mcp:mongodb-mcp/Dockerfile' 'python-executor:python-executor/Dockerfile'; do
   image="${entry%%:*}"
   dockerfile="${entry#*:}"
   docker buildx build --platform "${PLATFORMS:-linux/amd64}" --push \
     -f "$dockerfile" -t "$REGISTRY/$image:$IMAGE_TAG" .
 done
-# Optional outbound machine executors; these run where the target machines live.
-if [[ "${BUILD_CONNECTORS:-0}" == 1 ]]; then
-  docker buildx build --platform "${PLATFORMS:-linux/amd64}" --push -f connector-go/Dockerfile -t "$REGISTRY/connector:$IMAGE_TAG" .
-  docker buildx build --platform "${PLATFORMS:-linux/amd64}" --push -f connector-go/Dockerfile --target edge -t "$REGISTRY/edge:$IMAGE_TAG" .
-fi

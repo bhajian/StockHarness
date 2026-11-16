@@ -6,7 +6,6 @@ import type { Request } from 'express';
 import { z } from 'zod';
 import { config } from '../../../../packages/core/src/config.js';
 import { collection, db } from '../../../../packages/core/src/db.js';
-import { gatewayConfigured } from '../../../../packages/core/src/devices.js';
 import { chat, ownedProvider } from '../../../../packages/core/src/llm.js';
 import { queueChannel, JOB_QUEUE } from '../../../../packages/core/src/queue.js';
 import { encrypt, safeError, validateRemoteUrl } from '../../../../packages/core/src/security.js';
@@ -87,11 +86,6 @@ async function check(name: string, run: () => Promise<unknown>) {
     return { name, status: 'fail' as const, message: safeError(error), latency_ms: Date.now() - started };
   }
 }
-async function ready(url: string, init?: RequestInit) {
-  const response = await fetch(url, { ...init, signal: AbortSignal.timeout(3000) });
-  await response.body?.cancel();
-  if (!response.ok) throw new Error(`HTTP ${response.status}`);
-}
 const essential = new Set(['database', 'queue']);
 
 export function harnessOperations(registry: OperationRegistry): Operation[] {
@@ -156,9 +150,6 @@ export function harnessOperations(registry: OperationRegistry): Operation[] {
           ...configuredVectorStores()
             .filter((kind) => kind !== config.VECTOR_STORE)
             .map((kind) => check(`vector_store:${kind}`, () => vectorStore(kind).health())),
-          ...(gatewayConfigured()
-            ? [check('device_gateway', () => ready(`${config.GATEWAY_URL.replace(/\/$/, '')}/healthz`))]
-            : []),
         ]);
         const failed = checks.filter((c) => c.status === 'fail');
         // Anonymous callers learn only pass/fail, not internal error messages.

@@ -264,17 +264,9 @@ function App() {
   }, [user?.id]);
   const [playgroundActions, setPlaygroundActions] = useState<HTMLDivElement | null>(null);
   const refresh = useCallback(async () => {
-    const [values, workspace, devices] = await Promise.all([
+    const [values, workspace] = await Promise.all([
       Promise.all(collections.map((key) => api<Entity[]>(`/${key}`))),
       api('/tenant'),
-      // A gateway outage must not take the rest of the studio down with it.
-      api('/devices').catch((e) => ({
-        configured: true,
-        publicUrl: '',
-        machines: [],
-        catalog: {},
-        error: errorMessage(e),
-      })),
     ]);
     setTenant(workspace);
     setData({
@@ -283,14 +275,9 @@ function App() {
         (typeof collections)[number]
       >),
       defaults: { providerId: workspace.defaultProviderId ?? '' },
-      machines: devices.machines ?? [],
-      gateway: {
-        configured: Boolean(devices.configured),
-        publicUrl: devices.publicUrl ?? '',
-        catalog: devices.catalog ?? {},
-        error: devices.error,
-        ca: devices.ca ?? null,
-      },
+      // Machines and the device gateway were removed (#472).
+      machines: [],
+      gateway: { configured: false, publicUrl: '', catalog: {} },
     });
   }, []);
   const act = useCallback(async (task: () => Promise<unknown>) => {

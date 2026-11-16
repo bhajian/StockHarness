@@ -1,5 +1,4 @@
 import { attachSessionSockets } from './openharness/sessionSocket.js';
-import { dispatchClusterMonitors } from '../../../packages/core/src/clusterMonitor.js';
 import { dispatchGuardrailEvaluations } from './guardrails.js';
 import { dispatchHumanRequests, deliverHumanNotifications } from '../../../packages/core/src/human.js';
 import { app } from './app.js';
@@ -78,7 +77,6 @@ async function tick() {
     await deliverWebhooks();
     await dispatchReflections();
     await dispatchGuardrailEvaluations();
-    await dispatchClusterMonitors();
     await dispatchDailyCoverage();
   } catch (e) {
     console.error('Dispatcher will retry:', safeError(e));
