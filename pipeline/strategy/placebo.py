@@ -98,68 +98,88 @@ def benchmark_check(source, start: str, end: str) -> dict:
             "independent": independent, "gap": gap}
 
 
-def run_suite(source, policies: dict, *, start: str, end: str, readable_end: str | None = None,
-              config: dict | None = None, universe: dict | None = None, seeds: int = 10,
-              names: list[str] | None = None, lag_code: str | None = None) -> dict:
-    """Every check; `universe` is the research scope ({"top_by_market_cap": 500}), `names` the buy-and-hold names."""
-    base = {"start": start, "end": end, **({"universe": universe} if universe else {})}
-    out: list[dict] = []
+def parts(seeds: int = 10, names: list[str] | None = None, lag_code: str | None = None) -> list[str]:
+    """The suite as independent parts (#514): each runs in its own job, so no job holds more than one check."""
+    return ([f"random:{k}" for k in range(seeds)] + [f"hold:{sid}" for sid in names or []]
+            + ["benchmark", "future_peek", "costs"] + (["lag"] if lag_code else []))
 
-    # Random signals: excess over the equal-weight eligible universe (excess.sector) should be ~0 minus costs.
-    xs = []
-    for k in range(seeds):
-        rec = _evaluate(RANDOM.format(seed=k), source, policies, base, config, readable_end)
+
+def run_part(part: str, source, policies: dict, *, start: str, end: str, readable_end: str | None = None,
+             config: dict | None = None, universe: dict | None = None, lag_code: str | None = None,
+             symbols: list[str] | None = None) -> list[dict]:
+    """One part's check entries (a random seed gives its raw excess; `summarize` turns the seeds into one check)."""
+    base = {"start": start, "end": end, **({"universe": universe} if universe else {}),
+            **({"symbols": symbols} if symbols else {})}
+    kind, _, arg = part.partition(":")
+    if kind == "random":  # random signals: excess over the equal-weight eligible universe should be ~0 minus costs
+        rec = _evaluate(RANDOM.format(seed=int(arg)), source, policies, base, config, readable_end)
         sec = (rec.get("excess") or {}).get("sector") or {}
-        if sec.get("excess_cagr") is not None:
-            xs.append(float(sec["excess_cagr"]))
+        return [{"check": "random_seed", "seed": int(arg),
+                 "excess": float(sec["excess_cagr"]) if sec.get("excess_cagr") is not None else None}]
+    if kind == "hold":  # buy and hold: the evaluator's return of one name against an independent rebuild
+        free = {**(config or {}), "commission_bps": 0, "slippage_bps": 0, "impact": {"coef": 0.0},
+                "evaluation_caps": {"max_weight": None, "sector_cap": None}}
+        rec = _evaluate(HOLD.format(sid=arg), source, policies, {"start": start, "end": end}, free, readable_end)
+        ours = (rec.get("summary") or {}).get("total_return")
+        first = (rec.get("period") or {}).get("first_trade") or start
+        indep = independent_total_return(source, arg, first, end)
+        gap = abs(ours - indep) if ours is not None and indep is not None else None
+        return [{"check": f"buy_and_hold:{arg}", "passed": None if gap is None else gap < 0.01 * (1 + abs(indep)),
+                 "ours": ours, "independent": indep, "gap": gap, "from": first}]
+    if kind == "benchmark":
+        return [benchmark_check(source, start, end)]
+    if kind == "future_peek":  # the plugin raises if it ever sees a row after its date
+        try:
+            rec = _evaluate(PEEK, source, policies, base, config, readable_end)
+            attempts = (rec.get("reader") or {}).get("lookahead_attempts", 0)
+            return [{"check": "future_peek", "passed": attempts > 0, "lookahead_attempts": attempts}]
+        except Exception as exc:  # noqa: BLE001 - a visible future row is the failure being tested for
+            return [{"check": "future_peek", "passed": False, "error": str(exc)[:300]}]
+    if kind == "costs":  # zero costs raise the return by the costs paid (to first order)
+        rec = _evaluate(RANDOM.format(seed=0), source, policies, base, config, readable_end)
+        free = _evaluate(RANDOM.format(seed=0), source, policies, base,
+                         {**(config or {}), "commission_bps": 0, "slippage_bps": 0, "impact": {"coef": 0.0}}, readable_end)
+        paid = (rec.get("summary") or {}).get("costs_paid") or 0.0
+        lift = _compound((free.get("series") or {}).get("series", {}).get("returns", [])) - _compound(
+            (rec.get("series") or {}).get("series", {}).get("returns", []))
+        return [{"check": "costs", "passed": paid > 0 and lift > 0 and abs(lift - paid) < 0.5 * paid + 0.002,
+                 "costs_paid": paid, "return_lift": lift}]
+    if kind == "lag" and lag_code:  # diagnostic: the edge at lag 1, 2 and 5
+        lags = {}
+        for lag in (1, 2, 5):
+            r = _evaluate(lag_code, source, policies, base, {**(config or {}), "execution_lag_days": lag}, readable_end)
+            lags[lag] = (r.get("summary") or {}).get("sharpe")
+        return [{"check": "lag", "passed": None, "sharpe_by_lag": lags,
+                 "flag": bool(lags.get(1) and lags.get(2) is not None and lags[2] < 0.5 * lags[1])}]
+    raise ValueError(f"unknown placebo part {part}")
+
+
+def summarize(entries: list[dict], *, start: str, end: str, universe: dict | None = None) -> dict:
+    """The suite's result from its parts' entries: the random seeds become one check, then pass if every decided
+    check passes."""
+    xs = [e["excess"] for e in entries if e.get("check") == "random_seed" and e.get("excess") is not None]
+    seeds = [e for e in entries if e.get("check") == "random_seed"]
+    out: list[dict] = []
     if len(xs) >= 2:
         mean, sd = statistics.fmean(xs), statistics.stdev(xs)
         t = mean / (sd / math.sqrt(len(xs))) if sd > 0 else 0.0
         out.append({"check": "random_signals", "passed": mean < 0.01 and t < 2.5, "seeds": len(xs),
                     "mean_excess": mean, "sd": sd, "t": t, "values": xs})
-    else:
+    elif seeds:
         out.append({"check": "random_signals", "passed": None, "detail": "no sector benchmark (scope over 600 names?)"})
-
-    # Buy and hold: the evaluator's return of one name against an independent rebuild.
-    for sid in names or []:
-        free = {**(config or {}), "commission_bps": 0, "slippage_bps": 0, "impact": {"coef": 0.0},
-                "evaluation_caps": {"max_weight": None, "sector_cap": None}}
-        rec = _evaluate(HOLD.format(sid=sid), source, policies, {"start": start, "end": end}, free, readable_end)
-        ours = (rec.get("summary") or {}).get("total_return")
-        first = (rec.get("period") or {}).get("first_trade") or start
-        indep = independent_total_return(source, sid, first, end)
-        gap = abs(ours - indep) if ours is not None and indep is not None else None
-        out.append({"check": f"buy_and_hold:{sid}", "passed": None if gap is None else gap < 0.01 * (1 + abs(indep)),
-                    "ours": ours, "independent": indep, "gap": gap, "from": first})
-
-    out.append(benchmark_check(source, start, end))
-
-    # Future peek: the plugin raises if it ever sees a row after its date.
-    try:
-        rec = _evaluate(PEEK, source, policies, base, config, readable_end)
-        attempts = (rec.get("reader") or {}).get("lookahead_attempts", 0)
-        out.append({"check": "future_peek", "passed": attempts > 0, "lookahead_attempts": attempts})
-    except Exception as exc:  # noqa: BLE001 - a visible future row is the failure being tested for
-        out.append({"check": "future_peek", "passed": False, "error": str(exc)[:300]})
-
-    # Costs: zero costs raise the return by the costs paid (to first order).
-    rec = _evaluate(RANDOM.format(seed=0), source, policies, base, config, readable_end)
-    free = _evaluate(RANDOM.format(seed=0), source, policies, base,
-                     {**(config or {}), "commission_bps": 0, "slippage_bps": 0, "impact": {"coef": 0.0}}, readable_end)
-    paid = (rec.get("summary") or {}).get("costs_paid") or 0.0
-    lift = _compound((free.get("series") or {}).get("series", {}).get("returns", [])) - _compound(
-        (rec.get("series") or {}).get("series", {}).get("returns", []))
-    out.append({"check": "costs", "passed": paid > 0 and lift > 0 and abs(lift - paid) < 0.5 * paid + 0.002,
-                "costs_paid": paid, "return_lift": lift})
-
-    if lag_code:  # diagnostic: the edge at lag 1, 2 and 5
-        lags = {}
-        for lag in (1, 2, 5):
-            r = _evaluate(lag_code, source, policies, base, {**(config or {}), "execution_lag_days": lag}, readable_end)
-            lags[lag] = (r.get("summary") or {}).get("sharpe")
-        out.append({"check": "lag", "passed": None, "sharpe_by_lag": lags,
-                    "flag": bool(lags.get(1) and lags.get(2) is not None and lags[2] < 0.5 * lags[1])})
-
+    out += [e for e in entries if e.get("check") != "random_seed"]
     decided = [c for c in out if c.get("passed") is not None]
     return {"passed": all(c["passed"] for c in decided) if decided else None, "checks": out,
             "window": {"start": start, "end": end}, "universe": universe}
+
+
+def run_suite(source, policies: dict, *, start: str, end: str, readable_end: str | None = None,
+              config: dict | None = None, universe: dict | None = None, seeds: int = 10,
+              names: list[str] | None = None, lag_code: str | None = None, symbols: list[str] | None = None) -> dict:
+    """Every check in one process; `universe` is the research scope ({"top_by_market_cap": 500}), `names` the
+    buy-and-hold names. The live suite runs the same parts one job each (`parts`, `run_part`, `summarize`)."""
+    entries: list[dict] = []
+    for part in parts(seeds, names, lag_code):
+        entries += run_part(part, source, policies, start=start, end=end, readable_end=readable_end, config=config,
+                            universe=universe, lag_code=lag_code, symbols=symbols)
+    return summarize(entries, start=start, end=end, universe=universe)

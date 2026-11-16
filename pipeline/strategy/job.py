@@ -62,7 +62,21 @@ def run(params: dict, source, db=None) -> dict:
                                  readable_end=params.get("readable_end"), plugin_ref=params.get("plugin_ref"),
                                  parent=params.get("parent"))
             return {"ok": True, "record": record}
-        if action == "placebo":  # #468: known-answer checks of the evaluator itself
+        if action == "placebo_summary":  # #514: the parts' entries -> the suite's result (no data read)
+            from .placebo import summarize
+
+            p = params.get("params") or {}
+            return {"ok": True, "placebo": summarize(params["entries"], start=p["start"], end=p["end"],
+                                                     universe=p.get("universe"))}
+        if action == "placebo_part":  # #514: one part of the suite per job
+            from .placebo import run_part
+
+            p = params.get("params") or {}
+            return {"ok": True, "entries": run_part(
+                params["part"], source, params["policies"], start=p["start"], end=p["end"],
+                readable_end=params.get("readable_end"), config=params.get("config"), universe=p.get("universe"),
+                lag_code=p.get("lag_code"), symbols=p.get("symbols"))}
+        if action == "placebo":  # #468: known-answer checks of the evaluator itself (every part in one job)
             from .placebo import run_suite
 
             p = params.get("params") or {}

@@ -31,3 +31,27 @@ class Suite(unittest.TestCase):
         bh = next(c for c in r["checks"] if c["check"] == "buy_and_hold:SEC_000001")
         self.assertFalse(bh["passed"], bh)
         self.assertFalse(r["passed"])
+
+
+class Parts(unittest.TestCase):
+    """#514: the live suite runs each part in its own job; the parts give the same result as one process."""
+
+    def test_parts_and_summary_equal_the_suite(self):
+        src, days = synthetic.market(n_sec=30, n_days=220, seed=13)
+        kw = {"start": days[30], "end": days[-1], "config": COSTS}
+        whole = placebo.run_suite(src, synthetic.POLICIES, seeds=3, names=["SEC_000000"], **kw)
+        self.assertEqual(placebo.parts(3, ["SEC_000000"]),
+                         ["random:0", "random:1", "random:2", "hold:SEC_000000", "benchmark", "future_peek", "costs"])
+        entries = []
+        for part in placebo.parts(3, ["SEC_000000"]):
+            entries += placebo.run_part(part, src, synthetic.POLICIES, **kw)
+        split = placebo.summarize(entries, start=kw["start"], end=kw["end"])
+        self.assertEqual(split, whole)
+
+    def test_a_failed_part_fails_the_suite_with_its_error(self):
+        r = placebo.summarize([{"check": "random_seed", "seed": 0, "excess": 0.001},
+                               {"check": "random_seed", "seed": 1, "excess": -0.002},
+                               {"check": "hold:SEC_1", "passed": False, "error": "out of memory"},
+                               {"check": "future_peek", "passed": True}], start="2020-01-01", end="2021-01-01")
+        self.assertFalse(r["passed"])
+        self.assertEqual(next(c for c in r["checks"] if c["check"] == "hold:SEC_1")["error"], "out of memory")

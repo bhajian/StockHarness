@@ -287,4 +287,7 @@ costs paid. `GET /api/evaluator/placebo` returns the latest run and the history.
 
 It uses the research window on at most the `top` largest names (default **100**, at most 500), or the research
 symbols for a symbol scope, with **5** seeds by default: the checks test the evaluator, not a strategy, and the full
-top-500 scope ran out of memory at 4 GiB. A run whose job dies (out of memory, timeout) keeps the job's error.
+top-500 scope ran out of memory at 4 GiB. Each part runs in its own job (every random seed, every buy-and-hold
+name, the benchmark, future peek and costs; then a small summary job), so no job holds more than one check; the run
+shows `progress: {done, of, part}`. A part whose job dies (out of memory, timeout) becomes a failed check with the
+job's error, and the suite fails.
