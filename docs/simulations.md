@@ -23,8 +23,9 @@ recovered exactly as the prices transform computed them (`tr_1d = ((close + div)
   `tr_1d` assumes. With `dividends: cash` it stays in cash until the next rebalance;
 - the ledger follows the same total returns as the evaluator.
 
-**Costs** follow the evaluator's rule: commission plus slippage on the traded value at the pre-trade NAV, with the
-targets sized on the NAV after costs.
+**Costs** follow the evaluator's rule: commission plus slippage plus market impact (#452) on the traded value at
+the pre-trade NAV, with the targets sized on the NAV after costs. Impact is computed at the simulation's own capital
+(the evaluator uses `impact.aum`), and shorts pay borrow by market cap.
 
 **Every day reconciles**, and each simulation reports the largest error of each check
 (`reconciliation.max_nav_error`, `reconciliation.max_pnl_error`):
