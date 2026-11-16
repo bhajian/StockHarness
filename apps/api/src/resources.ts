@@ -94,6 +94,14 @@ async function assertOwned(name: string, ownerId: string, id: string) {
   if (!(await collection<Resource>(name).findOne({ _id: id, ownerId })))
     throw new HttpError(400, `Referenced ${name} resource is unavailable`);
 }
+/**
+ * #479: a referenced model provider must be this workspace's. Like every other reference check, an unknown or
+ * another workspace's id is a 400 "unavailable" (not a 404 that would tell ids apart), then the role is checked.
+ */
+async function requireOwnModel(ownerId: string, id: string, role: 'chat' | 'vision' | 'embedding') {
+  await assertOwned('providers', ownerId, id);
+  return requireModel(ownerId, id, role);
+}
 export async function validateReferences(kind: string, ownerId: string, body: any) {
   if (kind === 'providers' && body.modelType && body.embeddingModel)
     throw new HttpError(400, 'Define a separate embedding model entry');
@@ -102,17 +110,17 @@ export async function validateReferences(kind: string, ownerId: string, body: an
   if (kind === 'connections' && body.kind === 'device')
     throw new HttpError(400, 'Machines are managed on the Machines page, not as manual connections');
   if (kind === 'guardrails' && body.safetyModelProviderId)
-    await requireModel(ownerId, body.safetyModelProviderId, 'chat');
+    await requireOwnModel(ownerId, body.safetyModelProviderId, 'chat');
   if (kind === 'agents' || kind === 'workflows')
     for (const id of body.guardrailIds ?? []) await assertOwned('guardrails', ownerId, id);
   if (kind === 'agents') {
     if (body.workspace) await assertOwned('knowledge', ownerId, body.workspace.knowledgeBaseId);
     if (body.experience?.enabled && !resolveNotebook(body).workspace)
       throw new HttpError(400, 'Learning from experience needs a knowledge workspace');
-    await requireModel(ownerId, body.providerId, 'chat');
-    if (body.visionProviderId) await requireModel(ownerId, body.visionProviderId, 'vision');
+    await requireOwnModel(ownerId, body.providerId, 'chat');
+    if (body.visionProviderId) await requireOwnModel(ownerId, body.visionProviderId, 'vision');
     if (body.patternConfig?.judgeProviderId)
-      await requireModel(ownerId, body.patternConfig.judgeProviderId, 'chat');
+      await requireOwnModel(ownerId, body.patternConfig.judgeProviderId, 'chat');
     for (const binding of body.connections) {
       const c = await collection<Resource>('connections').findOne({ _id: binding.connectionId, ownerId });
       if (!c) throw new HttpError(400, 'An MCP connection does not belong to this workspace');
