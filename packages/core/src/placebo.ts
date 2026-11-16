@@ -13,12 +13,17 @@ import { evaluationParams } from './researchLoop.js';
 export const placeboRuns = () => collection<any>('placebo_runs');
 
 /** Run the suite in the background; returns the run record at once. */
+export const PLACEBO_TOP = 100;
+export const PLACEBO_SEEDS = 5;
 export async function startPlacebo(
   ownerId: string,
-  opts: { seeds?: number; names?: string[]; userId?: string } = {},
+  opts: { seeds?: number; names?: string[]; top?: number; userId?: string } = {},
 ) {
   const window = await evaluationParams(ownerId);
   if (!window) throw new Error('No price data yet');
+  // #514: the checks test the evaluator's math, not a strategy: the research window on at most the 100 largest
+  // names (the full live scope ran out of memory at 4 GiB). A symbol scope keeps its symbols.
+  const top = Math.max(10, Math.min(500, opts.top ?? PLACEBO_TOP));
   const { readableEnd } = await evaluatorSettings(ownerId);
   const doc = {
     _id: randomUUID(),
@@ -27,8 +32,10 @@ export async function startPlacebo(
     params: {
       start: window.start,
       end: window.end,
-      ...('universe' in window && window.universe ? { universe: window.universe } : {}),
-      seeds: opts.seeds ?? 10,
+      ...('symbols' in window && window.symbols?.length
+        ? { symbols: window.symbols }
+        : { universe: { top_by_market_cap: top } }),
+      seeds: opts.seeds ?? PLACEBO_SEEDS,
       names: opts.names ?? [],
     },
     createdAt: new Date(),
@@ -60,6 +67,10 @@ export async function startPlacebo(
             status: outcome.status === 'succeeded' && result?.ok ? 'succeeded' : 'failed',
             ...(result?.placebo ? { result: result.placebo, passed: result.placebo.passed } : {}),
             ...(result?.error ? { error: result.error } : {}),
+            // #514: a job that died (out of memory, timeout) has no result: keep its own error.
+            ...(!result?.error && outcome.status !== 'succeeded'
+              ? { error: { message: outcome.error ?? `the job ${outcome.status}` } }
+              : {}),
             finishedAt: new Date(),
           },
         },

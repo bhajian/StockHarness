@@ -273,3 +273,16 @@ read-only (200 rows a read).
 4. **Reproducibility:** re-running gives an identical record.
 
 Hosted CI stays off unless enabled (#33); run it locally.
+
+## Placebo and known-answer checks (#468, #514)
+
+`POST /api/evaluator/placebo` (admin; body `{seeds?, names?, top?}`) runs checks whose right answer is known, on the
+real data, in the executor: random signals earn about the equal-weight universe minus costs; a held name's
+compounded `tr_1d` matches an independent rebuild from as-traded closes, dividends as paid and split share counts;
+the S&P 500 total return matches SPY rebuilt with its dividends; a plugin asking for rows after its date gets none;
+an edge that vanishes with one more session of lag is flagged; with zero costs the return rises by exactly the
+costs paid. `GET /api/evaluator/placebo` returns the latest run and the history.
+
+It uses the research window on at most the `top` largest names (default **100**, at most 500), or the research
+symbols for a symbol scope, with **5** seeds by default: the checks test the evaluator, not a strategy, and the full
+top-500 scope ran out of memory at 4 GiB. A run whose job dies (out of memory, timeout) keeps the job's error.
