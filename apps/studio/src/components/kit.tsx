@@ -1,6 +1,7 @@
 // Shared UI components (#73), used by Datasets (Syncs/Transforms/Catalog/Health) and later Research, Ideas,
 // Simulations and Signals. Uses the studio's CSS tokens; status is always icon + text, never color alone.
 import React, { useEffect, type ReactNode } from 'react';
+import { termOf } from './glossary';
 import {
   AlertTriangle,
   Ban,
@@ -79,7 +80,9 @@ export function KpiCard({
     <div className="overview-card kpi-card">
       {icon && <div className="overview-icon">{icon}</div>}
       <div className="kpi-body">
-        <span>{label}</span>
+        <span className={termOf(label) ? 'term' : undefined} title={termOf(label)}>
+          {label}
+        </span>
         <strong>{value}</strong>
         {delta && <em className={`kpi-delta ${delta.tone ?? 'neutral'}`}>{delta.text}</em>}
       </div>

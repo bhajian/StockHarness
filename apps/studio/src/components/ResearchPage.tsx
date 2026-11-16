@@ -1,6 +1,7 @@
 // Research Lab (#116): the research loop at a glance. KPIs, the pipeline board, the live activity feed (SSE), charts,
 // the settings drawer (models and skills per role, focus, gates versions, budget alerts, schedule) and human steering.
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { termOf } from './glossary';
 import {
   Activity,
   CircleDollarSign,
@@ -373,12 +374,24 @@ function Scorecards({ kpis }: { kpis: any }) {
               <th className="num">Proposed</th>
               <th className="num">Approved</th>
               <th className="num">Evaluated</th>
-              <th className="num">Promising</th>
-              <th className="num">Successful</th>
-              <th className="num">Yield / 100</th>
-              <th className="num">Median Sharpe</th>
-              <th className="num">Median excess</th>
-              <th className="num">Code attempts</th>
+              <th className="num" title={termOf('Promising')}>
+                Promising
+              </th>
+              <th className="num" title={termOf('Successful')}>
+                Successful
+              </th>
+              <th className="num" title={termOf('Yield / 100')}>
+                Yield / 100
+              </th>
+              <th className="num" title={termOf('Median Sharpe')}>
+                Median Sharpe
+              </th>
+              <th className="num" title={termOf('Median excess')}>
+                Median excess
+              </th>
+              <th className="num" title={termOf('Code attempts')}>
+                Code attempts
+              </th>
             </tr>
           </thead>
           <tbody>
