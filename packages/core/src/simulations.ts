@@ -25,6 +25,10 @@ export const simulationConfigSchema = z.object({
     // A display label: anything but control characters and slashes.
     .regex(/^[^\u0000-\u001f/\\]+$/, 'no control characters or slashes'),
   description: z.string().max(2000).default(''),
+  /** The verdict the idea had when this ran (an automatic run of a promising or successful idea). */
+  label: z.enum(['promising', 'successful']).optional(),
+  /** Started by the platform after a verdict, not by a person. */
+  auto: z.boolean().optional(),
   /** The ideas, by reference (T-n). plugin and version pin the code; filled in when the config is saved. */
   ideas: z
     .array(
@@ -452,6 +456,8 @@ export async function listSimulations(ownerId: string) {
         period: { start: s.config.period.start, end: s.config.period.end },
         status: s.status,
         usesHoldout: s.usesHoldout,
+        ...(s.config.label ? { label: s.config.label } : {}),
+        ...(s.config.auto ? { auto: true } : {}),
         cagr: sum.cagr ?? null,
         sharpe: sum.sharpe ?? null,
         maxDrawdown: sum.max_drawdown ?? null,

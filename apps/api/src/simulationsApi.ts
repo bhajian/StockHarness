@@ -59,6 +59,29 @@ simulationsRouter.post('/simulations/estimate', async (req, res) => {
   const config = await resolveSimulationConfig(req.principal!.tenantId, req.body?.config ?? req.body);
   res.json({ config, estimate: await estimateSimulation(req.principal!.tenantId, config) });
 });
+// The automatic 10-year simulations of every promising or successful idea that has none yet, one at a time (admin).
+simulationsRouter.post('/simulations/auto-backfill', async (req, res) => {
+  adminOnly(req.principal!.user.role);
+  const ownerId = req.principal!.tenantId;
+  const { ideasToAutoSimulate, autoSimulateIdea } =
+    await import('../../../packages/core/src/autoSimulate.js');
+  const todo = await ideasToAutoSimulate(ownerId);
+  void (async () => {
+    for (const t of todo) {
+      const r = await autoSimulateIdea(ownerId, t).catch((e) => ({ error: String(e?.message ?? e) }));
+      const id = (r as any).started;
+      if (id) {
+        const { simulations } = await import('../../../packages/core/src/simulations.js');
+        for (let i = 0; i < 720; i++) {
+          const s = await simulations().findOne({ _id: id }, { projection: { status: 1 } });
+          if (!s || s.status !== 'running') break;
+          await new Promise((ok) => setTimeout(ok, 5000));
+        }
+      }
+    }
+  })();
+  res.status(202).json({ queued: todo.map((t) => `T-${t.number}`) });
+});
 simulationsRouter.post('/simulations', async (req, res) => {
   adminOnly(req.principal!.user.role);
   const { simulation, estimate } = await startSimulation(

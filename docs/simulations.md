@@ -159,3 +159,15 @@ daily-return correlation with every pick is at most the cap (0.5 by default) ove
 8 ideas. Every candidate gets an audit line (picked, or why not). **Simulate this book** opens New simulation with
 the picks over the exploration window; a simulation over the holdout counts as trials and is limited per idea (#450).
 `POST /api/simulations/portfolio-builder {maxIdeas, corrCap, minOverlapDays}` returns the proposal.
+
+## Automatic simulations of promising and successful ideas
+
+When the Judge's verdict makes an idea **successful** or **promising**, a simulation of that idea starts by itself:
+10 years to the latest price (no earlier than a year after the first price, so every lookback has data), $1M, the
+research scope, through the holdout (`allowHoldout`; it uses one of the idea's holdout looks, and counts as a trial).
+It carries `label` (`promising` / `successful`) and `auto: true` in its config, shown as a pill in the list and on the
+simulation's page. A promising idea is simulated even though it did not pass every gate: the label says it is not
+proven. Each code version of an idea gets one automatic run.
+
+`POST /api/simulations/auto-backfill` (admin) runs them, one at a time, for every promising or successful idea that
+has none yet.
