@@ -14,6 +14,14 @@ export const placeboRuns = () => collection<any>('placebo_runs');
 
 /** Run the suite in the background; returns the run record at once. */
 export const PLACEBO_TOP = 100;
+/** The suite's parts, as `pipeline/strategy/placebo.py` `parts` lists them. */
+export const placeboParts = (seeds: number, names: string[] = []) => [
+  ...Array.from({ length: seeds }, (_, k) => `random:${k}`),
+  ...names.map((s) => `hold:${s}`),
+  'benchmark',
+  'future_peek',
+  'costs',
+];
 export const PLACEBO_SEEDS = 5;
 export async function startPlacebo(
   ownerId: string,
@@ -43,34 +51,47 @@ export async function startPlacebo(
   };
   await placeboRuns().insertOne(doc);
   void (async () => {
-    try {
-      const outcome = await runCodeJob(
-        { ownerId, runId: `placebo-${doc._id}`, key: '1', signal: AbortSignal.timeout(6 * 3600 * 1000) },
+    // #514: one job per part (each random seed, each buy-and-hold name, the benchmark, future peek, costs), so no
+    // job holds more than one check; then a small job turns the parts into the suite's result.
+    const signal = AbortSignal.timeout(6 * 3600 * 1000);
+    const policies = await pitPolicies(ownerId);
+    const common = { params: doc.params, policies, ...(readableEnd ? { readable_end: readableEnd } : {}) };
+    const job = (key: string, params: Record<string, unknown>, purpose: string) =>
+      runCodeJob(
+        { ownerId, runId: `placebo-${doc._id}`, key, signal },
         {
           code: JOB_CODE,
-          params: {
-            action: 'placebo',
-            params: doc.params,
-            policies: await pitPolicies(ownerId),
-            ...(readableEnd ? { readable_end: readableEnd } : {}),
-          },
-          timeoutSeconds: 6 * 3600,
+          params: { ...common, ...params },
+          timeoutSeconds: 3600,
           memory: config.EXECUTOR_EVALUATION_MEMORY,
-          purpose: `Placebo and known-answer checks ${doc.params.start} → ${doc.params.end}`,
+          purpose,
         },
       );
+    const errorOf = (outcome: Awaited<ReturnType<typeof runCodeJob>>, result?: { error?: any }) =>
+      result?.error?.message ?? outcome.error ?? `the job ${outcome.status}`;
+    try {
+      const parts = placeboParts(doc.params.seeds, doc.params.names);
+      const entries: any[] = [];
+      for (const [k, part] of parts.entries()) {
+        const outcome = await job(String(k + 1), { action: 'placebo_part', part }, `Placebo check ${part}`);
+        const result = outcome.result as { ok: boolean; entries?: any[]; error?: any } | undefined;
+        if (outcome.status === 'succeeded' && result?.ok) entries.push(...(result.entries ?? []));
+        else entries.push({ check: part, passed: false, error: errorOf(outcome, result) });
+        await placeboRuns().updateOne(
+          { _id: doc._id },
+          { $set: { progress: { done: k + 1, of: parts.length, part } } },
+        );
+      }
+      const outcome = await job('summary', { action: 'placebo_summary', entries }, 'Placebo summary');
       const result = outcome.result as { ok: boolean; placebo?: any; error?: any } | undefined;
+      const ok = outcome.status === 'succeeded' && !!result?.ok;
       await placeboRuns().updateOne(
         { _id: doc._id },
         {
           $set: {
-            status: outcome.status === 'succeeded' && result?.ok ? 'succeeded' : 'failed',
+            status: ok ? 'succeeded' : 'failed',
             ...(result?.placebo ? { result: result.placebo, passed: result.placebo.passed } : {}),
-            ...(result?.error ? { error: result.error } : {}),
-            // #514: a job that died (out of memory, timeout) has no result: keep its own error.
-            ...(!result?.error && outcome.status !== 'succeeded'
-              ? { error: { message: outcome.error ?? `the job ${outcome.status}` } }
-              : {}),
+            ...(!ok ? { error: { message: errorOf(outcome, result) } } : {}),
             finishedAt: new Date(),
           },
         },
