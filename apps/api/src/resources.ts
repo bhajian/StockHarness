@@ -449,7 +449,7 @@ export async function deleteResource(kind: ResourceKind, principal: ResourcePrin
   const removed = await collection<Resource>(kind).findOneAndDelete({ _id: id, ownerId });
   if (!removed) throw new HttpError(404, 'Resource not found');
   if (kind === 'knowledge')
-    await dropKnowledgeIndex(removed as { _id: string; vectorStore?: 'weaviate' | 'qdrant' }).catch((error) =>
+    await dropKnowledgeIndex(removed as { _id: string; vectorStore?: 'weaviate' }).catch((error) =>
       console.warn('Could not remove a knowledge index:', safeError(error)),
     );
   if (kind === 'skills') await emitHarnessEvent(ownerId, 'skill.uninstalled', { skill_id: id });

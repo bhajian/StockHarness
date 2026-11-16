@@ -2,7 +2,7 @@
  * Vector storage behind knowledge bases. Chunking, embedding and tenant scoping stay in core; a driver only stores
  * vectors with their payload and searches them. Every query is filtered by `ownerId` inside the store as well.
  */
-export const vectorStoreKinds = ['weaviate', 'qdrant', 'opensearch', 'elasticsearch', 'openai'] as const;
+export const vectorStoreKinds = ['weaviate'] as const;
 export type VectorStoreKind = (typeof vectorStoreKinds)[number];
 export type VectorPayload = {
   ownerId: string;

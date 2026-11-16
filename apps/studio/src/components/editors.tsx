@@ -759,10 +759,6 @@ export function KnowledgeEditor({ value, data, onClose, onSaved }: Props) {
   }, []);
   const storeLabels: Record<string, string> = {
     weaviate: 'Weaviate',
-    qdrant: 'Qdrant',
-    opensearch: 'OpenSearch',
-    elasticsearch: 'Elasticsearch',
-    openai: 'OpenAI-compatible Vector Stores (embeds text itself)',
   };
   return (
     <Modal title={value ? 'Edit knowledge base' : 'Create a knowledge base'} onClose={onClose}>

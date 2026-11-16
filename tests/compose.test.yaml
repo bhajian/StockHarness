@@ -15,11 +15,6 @@ services:
       &test-stores # No gateway here, like installs created before machines existed: the configured gateway is trusted on its own.
       ALLOWED_PRIVATE_HOSTS: fixtures,host.docker.internal
       SMTP_TRANSPORT: json
-      QDRANT_URL: http://qdrant:6333
-      OPENSEARCH_URL: http://opensearch:9200
-      ELASTICSEARCH_URL: http://elasticsearch:9200
-      OPENAI_VECTOR_STORES_URL: http://fixtures:9090/openai/v1
-      OPENAI_VECTOR_STORES_API_KEY: test-vector-stores-key
       # Every test file signs in; the suites together exceed the production limit of 20 per ten minutes.
       LOGIN_RATE_LIMIT: 500
       # Dependency triggers (#92) settle for a minute in production; the tests do not wait that long.
@@ -28,24 +23,8 @@ services:
       PIPELINE_STUB_EXECUTORS: '1'
       # Dataset syncs call the fixture FMP (#83).
       FMP_BASE_URL: http://fixtures:9090/fmp/stable
-    depends_on: &test-store-services
-      qdrant: { condition: service_healthy }
-      opensearch: { condition: service_healthy }
-      elasticsearch: { condition: service_healthy }
   runner:
     environment: *test-stores
-    depends_on: *test-store-services
-  # The test stack always runs the optional stores, so every vector store driver is exercised.
-  qdrant:
-    profiles: !reset []
-  opensearch:
-    profiles: !reset []
-    environment:
-      OPENSEARCH_JAVA_OPTS: -Xms256m -Xmx256m -XX:ActiveProcessorCount=2 -XX:MaxDirectMemorySize=256m
-  elasticsearch:
-    profiles: !reset []
-    environment:
-      ES_JAVA_OPTS: -Xms256m -Xmx256m
   gateway:
     environment:
       GATEWAY_HEARTBEAT_SECONDS: 5

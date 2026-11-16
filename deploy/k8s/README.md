@@ -74,9 +74,7 @@ Change the four `images` entries in `overlays/nebius/kustomization.yaml` to your
 repositories and immutable digests (or unique release tags). `PLATFORMS` defaults to `linux/amd64`;
 set it explicitly if your nodes use ARM. `BUILD_CONNECTORS=1` also publishes the outbound
 Go machine connector and OpenShell edge. These execute beside the target machines/OpenShell
-installation, not inside the server pod. The optional Qdrant, OpenSearch, Elasticsearch and
-OpenAI vector-store integrations can use external endpoints through the ConfigMap/Secret;
-Weaviate is the deployed default. No LLM is bundled: configure a model provider in Studio.
+installation, not inside the server pod. Weaviate is the only vector store. No LLM is bundled: configure a model provider in Studio.
 
 Nebius node groups with a service account that can read the registry pull images automatically.
 This is the preferred durable configuration; it does not embed a 12-hour user access token.
