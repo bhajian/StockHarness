@@ -4,6 +4,10 @@ Run by the `macro_daily` Transform (#99): `compute(read)` rebuilds every date (a
 history of its inputs. A day without a treasury print (a bond-market holiday) takes the latest earlier print up to
 TREASURY_CARRY_DAYS back, never a later one. Sector returns use one exchange's series per day (#388): NASDAQ, the
 one both the daily snapshot and the historical endpoint serve, else the first exchange by name.
+
+#445: the benchmark is total return. FMP doesn't serve ^SP500TR, so spx_tr_1d is SPY's close plus the dividend on
+its ex-date over the previous close (SPY never split; its 0.09% fee makes it a slightly conservative benchmark).
+rf_1d is the 3-month T-bill (annual %, as known that day) as a daily rate, for Sharpe and alpha over cash.
 """
 from __future__ import annotations
 
@@ -12,7 +16,7 @@ from bisect import bisect_right
 from ..core import pit
 from ._resolve import as_date
 
-TV = "3"
+TV = "4"  # 4: spx_tr_1d (SPY close + dividends) and rf_1d (3-month T-bill per trading day), #445
 TREASURY_CARRY_DAYS = 5
 SECTOR_EXCHANGE = "NASDAQ"
 
@@ -31,10 +35,19 @@ def compute(read):
         d: ex[SECTOR_EXCHANGE] if SECTOR_EXCHANGE in ex else ex[sorted(ex)[0]] for d, ex in by_exchange.items()
     }
     spx, vix, ndx = idx.get("^GSPC", {}), idx.get("^VIX", {}), idx.get("^IXIC", {})
+    spy = idx.get("SPY", {})
+    spy_div = {}
+    try:
+        for r in read("benchmark_dividends", {"symbol": "SPY"}, ["symbol", "date", "dividend"]):
+            if r.get("date") and r.get("dividend"):
+                spy_div[str(r["date"])[:10]] = float(r["dividend"])
+    except Exception:  # noqa: BLE001 - not synced yet: spx_tr_1d stays empty, the evaluator falls back
+        pass
+    prev_spy = None
     tr_dates = sorted(tr)
     rows = []
     prev_spx = None
-    for d in sorted(set(tr) | set(spx) | set(vix) | set(sectors)):
+    for d in sorted(set(tr) | set(spx) | set(vix) | set(sectors) | set(spy)):
         t = tr.get(d) or _nearest_prior(tr, tr_dates, d, TREASURY_CARRY_DAYS)
         s = spx.get(d)
         y10, y2, m3 = _g(t, "year10"), _g(t, "year2"), _g(t, "month3")
@@ -51,6 +64,9 @@ def compute(read):
                 "spx_close": s,
                 "ndx_close": ndx.get(d),
                 "spx_ret_1d": (s / prev_spx - 1.0) if (s is not None and prev_spx) else None,
+                "spy_close": spy.get(d),
+                "spx_tr_1d": ((spy[d] + spy_div.get(d, 0.0)) / prev_spy - 1.0) if (spy.get(d) and prev_spy) else None,
+                "rf_1d": (1.0 + m3 / 100.0) ** (1.0 / 252) - 1.0 if isinstance(m3, (int, float)) else None,
                 "sector_returns": sectors.get(d, {}),
                 "known_at": pit.eod_known_at(as_date(d)).isoformat(),
                 "as_of_date": d,
@@ -60,6 +76,8 @@ def compute(read):
         )
         if s is not None:
             prev_spx = s
+        if spy.get(d):
+            prev_spy = spy[d]
     return rows
 
 

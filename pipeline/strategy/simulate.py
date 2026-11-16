@@ -31,7 +31,7 @@ from .engine import (EvaluationError, _current, _universe_on, ensure_indexes, pl
                      trading_days, universe_top)
 from .reader import PitReader
 
-SIMULATOR_VERSION = "1.0.0"
+SIMULATOR_VERSION = "1.1.0"  # 1.1: total-return benchmark, rf_return per session, Sharpe over cash (#445)
 COLLECTIONS = ("sim_orders", "sim_trades", "sim_portfolio_daily", "sim_positions")
 DEFAULTS = {
     "capital": 1_000_000.0,
@@ -137,8 +137,13 @@ def simulate(ideas: list[dict], *, source, policies: dict, params: dict, config:
     ticker = {r["security_id"]: next((i.get("value") for i in r.get("identifiers") or [] if i.get("type") == "ticker"), None)
               for r in sec_rows}
     htb = set(sim.get("hard_to_borrow") or []) | {r["security_id"] for r in sec_rows if r.get("hard_to_borrow")}
-    spx = {r["date"]: r.get("spx_ret_1d") for r in source.find("macro_daily", {"date": {"$gte": first, "$lte": end}},
-                                                                 ["date", "spx_ret_1d"])}
+    # #445: the benchmark is the S&P 500 total return (SPY + dividends), the price index only where it is missing;
+    # rf_1d is the 3-month T-bill per day, for Sharpe and alpha over cash.
+    macro = {r["date"]: r for r in source.find("macro_daily", {"date": {"$gte": first, "$lte": end}},
+                                               ["date", "spx_ret_1d", "spx_tr_1d", "rf_1d"])}
+    spx = {d: (m["spx_tr_1d"] if isinstance(m.get("spx_tr_1d"), (int, float)) else m.get("spx_ret_1d"))
+           for d, m in macro.items()}
+    rf = {d: m.get("rf_1d") for d, m in macro.items()}
     broker = PaperBroker(
         float(sim["capital"]), commission_bps=float(costs["commission_bps"]), slippage_bps=float(costs["slippage_bps"]),
         borrow_bps=float(costs["borrow_cost_bps_default"]), delisting_return=float(costs["delisting_return"]),
@@ -196,6 +201,7 @@ def simulate(ideas: list[dict], *, source, policies: dict, params: dict, config:
                     blocked[key] = (d, reason)
         row, positions = broker.close_day(d, sector)
         row["spx_return"] = spx.get(d)
+        row["rf_return"] = rf.get(d)
         portfolio.append(row)
         positions_out.extend(positions)
     # Lots still open at the end are marked to market as trades closed "end" (not filled, no costs).
@@ -217,10 +223,15 @@ def _plan_idea(idea, plans, plugins, metas, *, source, reader, days, scope, lag,
     plugin = contract.load(idea["code"])
     over = idea.get("overrides") or {}
     meta = {**plugin.META, **{k: over[k] for k in ("side", "top_n", "rebalance") if over.get(k) is not None}}
+    params = {**plugin.params, **(idea.get("plugin_params") or {})}
     plans[idea["id"]] = plan_books(plugin, meta, source=source, reader=reader, days=days, scope=scope, lag=lag,
-                                   gross=gross, plugin_params={**plugin.params, **(idea.get("plugin_params") or {})},
-                                   top=top)
-    plugins[idea["id"]], metas[idea["id"]] = plugin, meta
+                                   gross=gross, plugin_params=params, top=top)
+    # #447: review() runs on a fresh instance of the plugin. Pass 1 has already called signal() on every date, so
+    # module state that signal() kept (a cache of the last scores) would show review() the future on every exit date.
+    # The review instance only ever sees dates in order, so its own state is causal. It gets the idea's parameters.
+    reviewer = contract.load(idea["code"])
+    reviewer.params = params
+    plugins[idea["id"]], metas[idea["id"]] = reviewer, meta
 
 
 def _tr(bar) -> float:
@@ -419,7 +430,8 @@ def _result(ideas, plans, metas, sim, costs, params, portfolio, trades, orders, 
         if sig.get("rank") and sig.get("of"):
             q = min(5, 1 + int(5 * (sig["rank"] - 1) / max(1, sig["of"])))
             rank_buckets.setdefault(f"Q{q}", []).append(t["return"] or 0.0)
-    summary = metrics.summary(rets, periods)
+    rf = [r["rf_return"] if isinstance(r.get("rf_return"), (int, float)) else 0.0 for r in portfolio]
+    summary = metrics.summary(rets, periods, rf)
     return {
         "simulator_version": SIMULATOR_VERSION,
         "evaluator_version": EVALUATOR_VERSION,
@@ -431,7 +443,7 @@ def _result(ideas, plans, metas, sim, costs, params, portfolio, trades, orders, 
         "period": {"start": params.get("start"), "end": params.get("end"), "first_trade": portfolio[0]["date"] if portfolio else None,
                    "days": len(portfolio), "readable_end": readable_end},
         "summary": {**{k: (round(v, 8) if isinstance(v, float) and math.isfinite(v) else v) for k, v in summary.items()},
-                    "sortino": metrics.sortino(rets, periods), "calmar": metrics.calmar(rets, periods),
+                    "sortino": metrics.sortino(rets, periods, rf), "calmar": metrics.calmar(rets, periods),
                     "final_nav": round(navs[-1], 2) if navs else None, "capital": sim["capital"],
                     "spx_total_return": metrics.total_return(spx), "orders": len(orders),
                     "trades": len([t for t in trades if t["exit_reason"] != "open"]),
@@ -451,7 +463,8 @@ def _result(ideas, plans, metas, sim, costs, params, portfolio, trades, orders, 
             "nav": navs, "equity": _equity(rets),
             "spx_equity": _equity(spx), "returns": rets,
             "drawdown": [round(x, 8) for x in metrics.drawdown_series(rets)],
-            "rolling_sharpe_126": [round(x, 6) if x is not None else None for x in metrics.rolling_sharpe(rets, 126, periods)],
+            "rolling_sharpe_126": [round(x, 6) if x is not None else None
+                                   for x in metrics.rolling_sharpe(list(metrics.over_rf(rets, rf)), 126, periods)],
             "gross": [r["gross"] for r in portfolio], "net": [r["net"] for r in portfolio],
             "long": [r["long_value"] / r["nav"] if r["nav"] else None for r in portfolio],
             "short": [-r["short_value"] / r["nav"] if r["nav"] else None for r in portfolio],

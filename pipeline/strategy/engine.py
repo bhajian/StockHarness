@@ -250,7 +250,7 @@ def evaluate(code: str, *, source, policies: dict, params: dict, config: dict | 
     ticker = {r["security_id"]: _ticker(r) for r in sec_rows}
     macro = {r["date"]: r for r in source.find(
         "macro_daily", {"date": {"$gte": (date.fromisoformat(first_exec) - timedelta(days=420)).isoformat(), "$lte": end}},
-        ["date", "spx_ret_1d", "spx_close", "vix"])}
+        ["date", "spx_ret_1d", "spx_tr_1d", "rf_1d", "spx_close", "vix"])}
 
     comm = (float(cfg["commission_bps"]) + float(cfg["slippage_bps"])) / 1e4
     periods = int(cfg["trading_days_per_year"])
@@ -259,6 +259,8 @@ def evaluate(code: str, *, source, policies: dict, params: dict, config: dict | 
     w: dict[str, float] = {}
     delisted: set[str] = set()
     out_dates, out_ret, out_spx, out_gross, out_turn, out_sector_bench = [], [], [], [], [], []
+    out_rf: list[float] = []
+    bench_fallback = 0  # days the benchmark is the price index (no SPY total return that day)
     costs_paid = borrow_paid = 0.0
     trades = 0
     extreme = []  # held names with a daily return beyond ±50% (data problems or real events worth a look)
@@ -327,7 +329,14 @@ def evaluate(code: str, *, source, policies: dict, params: dict, config: dict | 
         borrow_paid += borrow
         out_dates.append(d)
         out_ret.append(ret)
-        out_spx.append((macro.get(d) or {}).get("spx_ret_1d"))
+        # #445: the benchmark is the S&P 500 total return (SPY + dividends); the price index only where it is missing.
+        m = macro.get(d) or {}
+        if isinstance(m.get("spx_tr_1d"), (int, float)):
+            out_spx.append(m["spx_tr_1d"])
+        else:
+            out_spx.append(m.get("spx_ret_1d"))
+            bench_fallback += isinstance(m.get("spx_ret_1d"), (int, float))
+        out_rf.append(float(m["rf_1d"]) if isinstance(m.get("rf_1d"), (int, float)) else 0.0)
         out_sector_bench.append(bench - borrow if benchmarks else None)
         out_gross.append(sum(abs(v) for v in w.values()))
         out_turn.append(turnover)
@@ -335,11 +344,13 @@ def evaluate(code: str, *, source, policies: dict, params: dict, config: dict | 
     for s, (side, growth) in list(open_trades.items()):  # marked to market
         close_trade(s, side, growth)
 
-    summary = metrics.summary(out_ret, periods)
+    # #445: Sharpe, Sortino, alpha and the folds are over the risk-free rate (the raw Sharpe is kept as sharpe_raw).
+    summary = metrics.summary(out_ret, periods, out_rf)
     spx_clean = [x if isinstance(x, (int, float)) else 0.0 for x in out_spx]
+    ex_ret = list(metrics.over_rf(out_ret, out_rf))
     factor_rets = _factor_returns(source, policies, cfg, targets, eligible_at, rets, out_dates, readable_end or end,
                                   start) if benchmarks else None
-    regressors = {"market": spx_clean, **(factor_rets or {})}
+    regressors = {"market": list(metrics.over_rf(spx_clean, out_rf)), **(factor_rets or {})}
     n_days = max(1, len(out_dates))
     record = {
         "evaluator_version": EVALUATOR_VERSION,
@@ -350,7 +361,9 @@ def evaluate(code: str, *, source, policies: dict, params: dict, config: dict | 
         "period": {"start": start, "end": end, "first_trade": first_exec, "days": len(out_dates),
                    "readable_end": readable_end or end},
         "data_snapshot": _snapshot(source, end),
-        "summary": _rounded({**summary, "sortino": metrics.sortino(out_ret, periods),
+        "benchmark": {"name": "S&P 500 total return (SPY with dividends)", "risk_free": "3-month T-bill",
+                      "price_index_days": bench_fallback},
+        "summary": _rounded({**summary, "sortino": metrics.sortino(out_ret, periods, out_rf),
                              "calmar": metrics.calmar(out_ret, periods), "hit_rate": metrics.hit_rate(out_ret)})
         | {"spx_total_return": _round(metrics.total_return(spx_clean)), "trades": trades,
            "avg_turnover": _round(sum(out_turn) / max(1, len(rebalances))),
@@ -360,8 +373,8 @@ def evaluate(code: str, *, source, policies: dict, params: dict, config: dict | 
             "spx": _rounded(metrics.excess(out_ret, spx_clean, periods)),
             "sector": _rounded(metrics.excess(out_ret, out_sector_bench, periods)) if benchmarks else None,
         },
-        "by_regime": _by_regime(out_dates, out_ret, macro, periods),
-        "factors": {**_rounded(metrics.ols(out_ret, regressors, periods=periods)),
+        "by_regime": _by_regime(out_dates, out_ret, macro, periods, out_rf),
+        "factors": {**_rounded(metrics.ols(ex_ret, regressors, periods=periods)),
                     "factors": sorted(regressors), "note": None if factor_rets else "market only (no features_ranked or a large universe)"},
         "by_sector": [{"sector": k, "contribution": _round(contrib[k]), "avg_weight": _round(exposure[k] / n_days, 6)}
                       for k in sorted(contrib, key=lambda k: (-abs(contrib[k]), k))],
@@ -369,10 +382,10 @@ def evaluate(code: str, *, source, policies: dict, params: dict, config: dict | 
         "series": {"dates": out_dates, "series": {
             "returns": [_round(x) for x in out_ret], "equity": _equity(out_ret), "spx_equity": _equity(spx_clean),
             "drawdown": [_round(x) for x in metrics.drawdown_series(out_ret)],
-            "rolling_sharpe_126": [_round(x, 6) if x is not None else None for x in metrics.rolling_sharpe(out_ret, 126, periods)],
+            "rolling_sharpe_126": [_round(x, 6) if x is not None else None for x in metrics.rolling_sharpe(ex_ret, 126, periods)],
             "spx_returns": [_round(x) if isinstance(x, (int, float)) else None for x in out_spx],
             "gross": [_round(x, 6) for x in out_gross], "turnover": [_round(x, 6) for x in out_turn]}},
-        "folds": [_rounded(f) for f in metrics.folds(out_dates, out_ret, int(cfg["walk_forward"].get("min_days", 20)), periods)],
+        "folds": [_rounded(f) for f in metrics.folds(out_dates, out_ret, int(cfg["walk_forward"].get("min_days", 20)), periods, out_rf)],
         "warnings": _warnings(rebalances, extreme),
         "rebalances": rebalances,
         "holdings": {"date": max(targets), "weights": {s: _round(v, 8) for s, v in sorted(targets[max(targets)].items())}},
@@ -384,7 +397,7 @@ def evaluate(code: str, *, source, policies: dict, params: dict, config: dict | 
     record["by_name"] = _by_name(names_acc, ticker, sector, n_days)
     # The deflated Sharpe depends on how many trials the whole swarm has run, so it lives outside the hash.
     trials = params.get("trials") or {}
-    record["trial_context"] = _rounded(metrics.deflated_sharpe(out_ret, int(trials.get("count") or 1), trials.get("sharpe_variance")))
+    record["trial_context"] = _rounded(metrics.deflated_sharpe(ex_ret, int(trials.get("count") or 1), trials.get("sharpe_variance")))
     return record
 
 
@@ -418,7 +431,7 @@ def _sector_means(day: dict, sector: dict, names: list[str]) -> dict:
     return {k: sum(v) / len(v) for k, v in sums.items()}
 
 
-def _by_regime(dates, returns, macro, periods) -> dict:
+def _by_regime(dates, returns, macro, periods, rf=None) -> dict:
     """Returns split by market trend (S&P 500 above / below its 200-day average) and by VIX (>= 25 = high)."""
     closes = sorted((d, r["spx_close"]) for d, r in macro.items() if isinstance(r.get("spx_close"), (int, float)))
     sma, window = {}, []
@@ -429,14 +442,19 @@ def _by_regime(dates, returns, macro, periods) -> dict:
         if len(window) == 200:
             sma[d] = (c, sum(window) / 200)
     groups: dict[str, dict[str, list[float]]] = {"trend": {}, "volatility": {}}
+    rf_of = dict(zip(dates, rf)) if rf is not None else {}
+    excess: dict[str, dict[str, list[float]]] = {"trend": {}, "volatility": {}}
     for d, r in zip(dates, returns):
+        x = r - rf_of.get(d, 0.0)
         if d in sma:
+            excess["trend"].setdefault("up" if sma[d][0] >= sma[d][1] else "down", []).append(x)
             groups["trend"].setdefault("up" if sma[d][0] >= sma[d][1] else "down", []).append(r)
         vix = (macro.get(d) or {}).get("vix")
         if isinstance(vix, (int, float)):
             groups["volatility"].setdefault("high" if vix >= 25 else "normal", []).append(r)
+            excess["volatility"].setdefault("high" if vix >= 25 else "normal", []).append(x)
     return {g: {k: _rounded({"days": len(v), "total_return": metrics.total_return(v),
-                             "ann_return": sum(v) / len(v) * periods, "sharpe": metrics.sharpe(v, periods)})
+                             "ann_return": sum(v) / len(v) * periods, "sharpe": metrics.sharpe(excess[g][k], periods)})
                 for k, v in sorted(groups[g].items())} for g in groups}
 
 

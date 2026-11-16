@@ -33,7 +33,7 @@ class Engine(unittest.TestCase):
         b = run(MOMENTUM, src, days[70], days[-1])
         self.assertEqual(a, b)
         self.assertTrue(a["record_hash"].startswith("sha256:"))
-        self.assertEqual(a["evaluator_version"], "1.0.0")
+        self.assertEqual(a["evaluator_version"], "1.1.0")
         self.assertGreater(a["summary"]["rebalances"], 30)
         self.assertEqual(len(a["series"]["dates"]), len(a["series"]["series"]["equity"]))
         c = run(MOMENTUM, src, days[70], days[-1], params={"top_n": 3})
@@ -178,3 +178,25 @@ class UniverseTop(unittest.TestCase):
         self.assertEqual(r["params"]["universe"], {"top_by_market_cap": 3}, "recorded, so the record says its scope")
         with self.assertRaises(EvaluationError):
             run(code, src, days[5], days[-1], params={"universe": {"top_by_market_cap": 0}})
+
+
+class Benchmark(unittest.TestCase):
+    """#445: the benchmark is the S&P 500 total return; Sharpe, Sortino, alpha and folds are over the risk-free rate."""
+
+    def test_total_return_benchmark_and_sharpe_over_cash(self):
+        src, days = synthetic.market(n_sec=30, n_days=300, seed=3)
+        price_only = run(MOMENTUM, src, days[70], days[-1])
+        self.assertEqual(price_only["benchmark"]["price_index_days"] > 0, True, "no SPY: falls back to the index")
+        self.assertAlmostEqual(price_only["summary"]["sharpe"], price_only["summary"]["sharpe_raw"])
+        for m in src.collections["macro_daily"]:
+            m["spx_tr_1d"] = m["spx_ret_1d"] + 0.0001  # dividends: ~2.5% a year
+            m["rf_1d"] = 0.00016  # ~4% a year
+        tr = run(MOMENTUM, src, days[70], days[-1])
+        self.assertEqual(tr["benchmark"]["price_index_days"], 0)
+        self.assertLess(tr["excess"]["spx"]["excess_cagr"], price_only["excess"]["spx"]["excess_cagr"])
+        self.assertLess(tr["summary"]["sharpe"], tr["summary"]["sharpe_raw"])
+        self.assertAlmostEqual(tr["summary"]["sharpe_raw"], price_only["summary"]["sharpe_raw"])
+        self.assertAlmostEqual(tr["summary"]["rf_cagr"], (1.00016) ** 252 - 1, places=6)
+        self.assertLess(tr["summary"]["sortino"], price_only["summary"]["sortino"])
+        self.assertLess(tr["factors"]["alpha_annual"], price_only["factors"]["alpha_annual"] + 1e-9)
+        self.assertLess(tr["folds"][0]["sharpe"], tr["folds"][0]["sharpe_raw"])

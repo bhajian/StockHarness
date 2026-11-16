@@ -96,6 +96,7 @@ before(async () => {
     'eod_prices',
     'treasury_rates',
     'eod_index',
+    'benchmark_dividends',
     'sector_performance',
     'index_constituents',
     'index_changes',

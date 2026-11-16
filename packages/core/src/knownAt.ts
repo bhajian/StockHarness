@@ -54,6 +54,7 @@ export const KNOWN_AT: Record<string, KnownAtRule> = {
   earnings_calendar: { type: 'nextSession', field: 'date' },
   dividends_calendar: ts('declarationDate', 'date'),
   dividends_history: ts('declarationDate', 'date'),
+  benchmark_dividends: ts('declarationDate', 'date'),
   splits_calendar: { type: 'dayBefore', field: 'date' },
   splits_history: { type: 'dayBefore', field: 'date' },
   insider_trades: ts('filingDate'),

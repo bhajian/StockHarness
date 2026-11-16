@@ -64,7 +64,7 @@ test('accepts kind: List, the Datasets DatasetSyncs export and config-io bare li
   assert.ok(skills.docs.length >= 1 && skills.docs.every((d) => d.kind === 'Skill'));
   const syncsRepo = parseObjects(await readFile('deploy/config-io/exports/dataset-syncs.yaml', 'utf8'));
   assert.deepEqual(syncsRepo.errors, []);
-  assert.equal(syncsRepo.docs.length, 56);
+  assert.equal(syncsRepo.docs.length, 57); // + benchmark dividends (SPY), #445
   const json = parseObjects(
     '[{"name":"EOD","dataset":"eod_prices"},{"name":"Rates","dataset":"treasury_rates"}]',
     'DatasetSync',

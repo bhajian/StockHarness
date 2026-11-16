@@ -321,6 +321,7 @@ spec:
     - treasury_rates
     - eod_index
     - sector_performance
+    - benchmark_dividends
   outputs:
     - collection: macro_daily
       key:
@@ -359,7 +360,16 @@ spec:
         ndx_close:
           description: Nasdaq Composite close
         spx_ret_1d:
-          description: S&P 500 1-day return
+          description: S&P 500 1-day price return (^GSPC, no dividends)
+          unit: ratio
+        spy_close:
+          description: SPY close
+          unit: USD
+        spx_tr_1d:
+          description: "S&P 500 1-day total return: SPY's close plus its dividend on the ex-date, over the previous close. The evaluator's benchmark (#445)"
+          unit: ratio
+        rf_1d:
+          description: Risk-free daily rate from the 3-month T-bill as known that day, (1 + ust_3m/100)^(1/252) − 1 (#445)
           unit: ratio
         sector_returns:
           description: Sector average change that day, by sector
@@ -377,6 +387,7 @@ spec:
       - dataset:treasury_rates
       - dataset:eod_index
       - dataset:sector_performance
+      - dataset:benchmark_dividends
   incremental:
     mode: full
     lookback_days: 0

@@ -648,7 +648,7 @@ export const COLLECTION_FIELD_DOCS: Record<string, Record<string, FieldDoc>> = {
   eod_prices: { date: text('Trading day of the bar.') },
   eod_index: {
     date: text('Trading day of the bar.'),
-    symbol: text('Index symbol: ^GSPC, ^VIX, ^DJI, ^IXIC, ^RUT.'),
+    symbol: text('Index symbol: ^GSPC, ^VIX, ^DJI, ^IXIC, ^RUT; and SPY, the total-return benchmark (#445).'),
   },
   historical_market_cap: { date: text('Trading day of the market cap.') },
   treasury_rates: { date: text('Date of the published par yield curve.') },
@@ -680,6 +680,7 @@ export const COLLECTION_FIELD_DOCS: Record<string, Record<string, FieldDoc>> = {
   },
   dividends_calendar: { date: text('Ex-dividend date.') },
   dividends_history: { date: text('Ex-dividend date.') },
+  benchmark_dividends: { date: text('Ex-dividend date of the SPY dividend.'), symbol: text('SPY.') },
   splits_calendar: { date: text('Split effective (ex) date.') },
   splits_history: { date: text('Split effective (ex) date.') },
   analyst_grades_history: { date: text('Date of the rating action.') },
@@ -800,7 +801,12 @@ export const COLLECTION_FIELD_DOCS: Record<string, Record<string, FieldDoc>> = {
     borrow: usd('Borrow fees paid on the session.'),
     turnover: frac('Value traded ÷ the previous NAV.'),
     positions: count('Open positions at the close.'),
-    spx_return: frac('S&P 500 return on the session (benchmark; empty when not priced).'),
+    spx_return: frac(
+      'S&P 500 total return on the session (SPY with dividends, #445; the price index where SPY is missing; empty when not priced).',
+    ),
+    rf_return: frac(
+      'Risk-free return on the session (3-month T-bill, #445); Sharpe and Sortino are over it.',
+    ),
   },
   sim_positions: {
     simulation_id: SIM_ID,

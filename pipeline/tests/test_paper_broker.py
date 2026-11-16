@@ -144,6 +144,18 @@ class Exits(unittest.TestCase):
         _, rows = sim([reviewed], src, days[70], days[-1])
         self.assertIn("invalidation", {t["exit_reason"] for t in rows["sim_trades"]})
 
+    def test_review_never_sees_state_from_later_signals(self):
+        """#447: pass 1 calls signal() on every date before the daily review(); module state signal() keeps (here the
+        latest signal date) must not reach review(). The canary exits every name if it sees a later date."""
+        src, days = synthetic.market(n_sec=10, n_days=200, seed=4)
+        canary = MOMENTUM.replace("def signal(ctx):\n", "SEEN = {}\n\ndef signal(ctx):\n    SEEN['last'] = str(ctx.date)\n") + (
+            "\ndef review(ctx, held):\n"
+            "    peeked = SEEN.get('last', '') > str(ctx.date)\n"
+            "    return {s: 'invalidation' for s in held} if peeked else {}\n")
+        self.assertIn("SEEN['last']", canary)
+        _, rows = sim([canary], src, days[70], days[-1])
+        self.assertNotIn("invalidation", {t["exit_reason"] for t in rows["sim_trades"]})
+
     def test_take_profit_fixed(self):
         src, days = synthetic.market(n_sec=10, n_days=200, seed=8, sigma=0.03)
         _, rows = sim([MOMENTUM], src, days[70], days[-1], exits={"take_profit": 0.05})

@@ -3145,13 +3145,13 @@ year has 252 trading days.
 
 #### Sharpe ratio
 
-The Sharpe ratio is the mean daily return divided by its standard deviation, times √252. **No risk-free rate is
-subtracted**, so it is the raw reward-to-volatility ratio.
+The Sharpe ratio is the mean daily return **over the risk-free rate** divided by its standard deviation, times √252
+(evaluator 1.1, #445). The risk-free rate is the 3-month T-bill as known each day (`macro_daily.rf_1d`). The raw ratio,
+with nothing subtracted, is kept as `sharpe_raw`. Sortino, alpha, the folds and the regime split are over the same rate.
 
-> Example: a strategy averages **+0.068%** a day with a daily standard deviation of **1.0%**.
-> Sharpe = 0.00068 / 0.010 × √252 = 0.068 × 15.87 = **1.08**. This is T-5's Sharpe.
-> The default gate is 0.5. Because cash earned 4–5% over 2023–2025, a Sharpe with the risk-free rate subtracted
-> would be lower than the one shown here.
+> Example: a strategy averages **+0.068%** a day with a daily standard deviation of **1.0%**, while cash earns
+> **0.017%** a day (about 4.4% a year). Sharpe = (0.00068 − 0.00017) / 0.010 × √252 = 0.051 × 15.87 = **0.81**.
+> The raw ratio would be 1.08. The default gate is 0.5.
 
 The **holdout Sharpe** is the same measure, computed over the holdout run alone.
 
@@ -3252,9 +3252,10 @@ Either one fails the theory outright.
   you whether the strategy picked good names, or just sat in a sector that went up. It is shown only for universes
   of 600 names or fewer.
 
-> **Caveat:** the S&P 500 benchmark (`macro_daily.spx_ret_1d`) is the _price_ return of the index level (`^GSPC`), without
-> dividends, while strategies earn total returns (`tr_1d`, dividends included). So every "excess over the S&P 500" is
-> flattered by roughly the index's dividend yield, about 1.3–1.5% a year. The fix is ticketed as #363.
+The S&P 500 benchmark is its **total return** (`macro_daily.spx_tr_1d`, evaluator 1.1, #445): SPY's close plus its
+dividends, the same basis as a strategy's `tr_1d`. FMP doesn't serve the total-return index, and SPY's 0.09% fee makes it
+slightly conservative. On a day without a SPY price the evaluator uses the price index (`spx_ret_1d`) and counts those
+days in `benchmark.price_index_days`.
 
 #### Folds
 
@@ -5154,7 +5155,7 @@ them.
 | **Cycle**                    | One run of the research loop: the Theorists, the pre-code Judge, the Coder, then the post-result Judge.                                                                                                                                           |
 | **Deflated Sharpe**          | The probability that the Sharpe ratio beats what the luckiest of all the workspace's trials would show by chance. A gate: at least 0.95.                                                                                                          |
 | **Evaluation**               | One run of the trusted evaluator: a plugin version over a window and scope. It produces a record (metrics, series, per-name results) and counts as one trial.                                                                                     |
-| **Excess (vs the S&P 500)**  | Return per year above the S&P 500. Note: the benchmark is the index price return, without dividends (#363).                                                                                                                                       |
+| **Excess (vs the S&P 500)**  | Return per year above the S&P 500 total return (SPY with dividends, #445).                                                                                                                                                                        |
 | **Gate**                     | A fixed threshold that a verdict is checked against (Sharpe, deflated Sharpe, positive excess years, alpha t, trades, holdings, warnings, holdout). Gates are versioned, and a version locks at its first verdict.                                |
 | **Harness**                  | A workflow of agents and steps, drawn on the Harnesses canvas. The research loop is a harness.                                                                                                                                                    |
 | **Holdout**                  | The last 18 months of data, locked away from research. Each idea version gets one run on it, at its verdict.                                                                                                                                      |

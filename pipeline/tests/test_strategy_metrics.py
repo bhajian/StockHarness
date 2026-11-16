@@ -97,3 +97,18 @@ def signal(ctx):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class OverRiskFree(unittest.TestCase):
+    """#445: Sharpe and Sortino over a daily risk-free series."""
+
+    def test_summary_over_rf(self):
+        from pipeline.strategy import metrics as m
+        r = [0.001, -0.0005, 0.002, 0.0, 0.0015, -0.001] * 50
+        rf = [0.00016] * len(r)
+        s = m.summary(r, 252, rf)
+        self.assertAlmostEqual(s["sharpe_raw"], m.sharpe(r, 252))
+        self.assertAlmostEqual(s["sharpe"], m.sharpe([x - 0.00016 for x in r], 252))
+        self.assertLess(s["sharpe"], s["sharpe_raw"])
+        self.assertLess(m.sortino(r, 252, rf), m.sortino(r, 252))
+        self.assertNotIn("sharpe_raw", m.summary(r, 252))
