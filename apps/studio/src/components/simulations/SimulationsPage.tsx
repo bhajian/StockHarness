@@ -1,13 +1,14 @@
 // Simulations (#126): the list of runs, a run's own page (/simulations/:id[/tab]) and the schedule modal
 // (/simulations?new=T-1,T-2 opens it with those ideas; #125).
 import React, { useEffect, useState } from 'react';
-import { Plus, Play } from 'lucide-react';
+import { Plus, Play, Layers } from 'lucide-react';
 import { api } from '../../api';
 import { Skeleton, StatusPill } from '../kit';
 import { PagedRows, rankOf, SortHead, useSort } from '../tableKit';
 import { go, num, pct, setQuery, useLocation } from '../ideas/nav';
 import { SimulationDetail } from './SimulationDetail';
 import { ScheduleModal } from './ScheduleModal';
+import { PortfolioBuilder } from './PortfolioBuilder';
 
 export const money = (v: unknown) =>
   typeof v === 'number' && Number.isFinite(v)
@@ -56,6 +57,7 @@ export function SimulationsPage({ isAdmin }: { isAdmin: boolean }) {
 
 function SimulationList({ isAdmin }: { isAdmin: boolean }) {
   const [rows, setRows] = useState<any[] | null>(null);
+  const [building, setBuilding] = useState(false);
   useEffect(() => {
     let stop = false;
     const load = () =>
@@ -93,11 +95,17 @@ function SimulationList({ isAdmin }: { isAdmin: boolean }) {
           </p>
         </div>
         {isAdmin && (
-          <button type="button" className="button primary" onClick={() => openSchedule()}>
-            <Plus size={14} /> New simulation
-          </button>
+          <div className="idea-actions">
+            <button type="button" className="button secondary" onClick={() => setBuilding(true)}>
+              <Layers size={14} /> Build a portfolio
+            </button>
+            <button type="button" className="button primary" onClick={() => openSchedule()}>
+              <Plus size={14} /> New simulation
+            </button>
+          </div>
         )}
       </header>
+      {building && <PortfolioBuilder onClose={() => setBuilding(false)} />}
       {!rows.length ? (
         <div className="empty-state">
           <p>No simulations yet.</p>

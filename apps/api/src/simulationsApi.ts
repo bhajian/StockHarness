@@ -16,6 +16,7 @@ import {
   startSimulation,
 } from '../../../packages/core/src/simulations.js';
 import { exportObjects } from './objects.js';
+import { proposePortfolio } from '../../../packages/core/src/portfolio.js';
 
 export const simulationsRouter = Router();
 const adminOnly = (role: string) => {
@@ -39,6 +40,21 @@ simulationsRouter.get('/simulations/configs', async (req, res) => {
   );
 });
 /** The resolved config (pinned versions, symbols) and the runtime estimate, without starting anything. */
+// #461: a low-correlation book of the promising and successful ideas, with an audit of every pick.
+simulationsRouter.post('/simulations/portfolio-builder', async (req, res) => {
+  const b = req.body ?? {};
+  const num = (v: unknown, lo: number, hi: number) =>
+    typeof v === 'number' && Number.isFinite(v) ? Math.max(lo, Math.min(hi, v)) : undefined;
+  res.json(
+    await proposePortfolio(req.principal!.tenantId, {
+      ...(num(b.maxIdeas, 2, 8) !== undefined ? { maxIdeas: Math.round(num(b.maxIdeas, 2, 8)!) } : {}),
+      ...(num(b.corrCap, 0, 1) !== undefined ? { corrCap: num(b.corrCap, 0, 1)! } : {}),
+      ...(num(b.minOverlapDays, 20, 2520) !== undefined
+        ? { minOverlapDays: Math.round(num(b.minOverlapDays, 20, 2520)!) }
+        : {}),
+    }),
+  );
+});
 simulationsRouter.post('/simulations/estimate', async (req, res) => {
   const config = await resolveSimulationConfig(req.principal!.tenantId, req.body?.config ?? req.body);
   res.json({ config, estimate: await estimateSimulation(req.principal!.tenantId, config) });
