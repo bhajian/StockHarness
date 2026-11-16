@@ -3497,6 +3497,11 @@ textarea::placeholder {
 .num-chip.sourced:hover {
   text-decoration: underline;
 }
+.num-chip.parameter {
+  background: var(--surface-2, #f3f4f6);
+  color: inherit;
+  border-color: transparent;
+}
 .num-chip.unsourced {
   background: #fbe9e7;
   color: #a3291c;

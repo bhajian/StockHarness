@@ -338,9 +338,30 @@ function metricValues(evals: Evaluation[]) {
   }
   return out;
 }
-/** Numbers in a text, each with the evaluation it comes from (or null: unsourced). */
-export function sourceNumbers(text: string, values: { value: number; evaluationId: string }[]) {
-  const chips: { text: string; value: number; evaluationId: string | null }[] = [];
+/** #279: a unit after the number makes it a design parameter (252-day, 3 names, 10 bps), not a result. */
+const PARAM_AFTER =
+  /^\s*-?\s*(?:trading\s+)?(?:days?|sessions?|weeks?|months?|quarters?|years?|yrs?|names?|stocks?|securities|holdings|positions|bps|basis\s+points?)\b/i;
+/** #279: so does a parameter phrase before it (top 20%, lookback of 63, every 21, rebalance 5). */
+const PARAM_BEFORE =
+  /\b(?:top|bottom|lookback(?:\s+of)?|window(?:\s+of)?|every|rebalance(?:d)?(?:\s+every)?|hold(?:ing)?(?:\s+for)?|first|last|past|decile|quintile|percentile)\s*$/i;
+export type NumberChip = {
+  text: string;
+  value: number;
+  evaluationId: string | null;
+  /** #279: sourced (links its evaluation), unsourced (matches none) or parameter (a design choice, not checked). */
+  kind: 'sourced' | 'unsourced' | 'parameter';
+};
+/**
+ * Numbers in a text, each with the evaluation it comes from. Design parameters are neutral; with `claims: false` (a
+ * Theorist's proposal, or an idea with no evaluation yet) a number that matches nothing is neutral too (#279).
+ */
+export function sourceNumbers(
+  text: string,
+  values: { value: number; evaluationId: string }[],
+  opts: { claims?: boolean } = {},
+) {
+  const claims = opts.claims ?? true;
+  const chips: NumberChip[] = [];
   for (const m of text.matchAll(NUMBER)) {
     const raw = m[0];
     const before = text.slice(Math.max(0, m.index! - 2), m.index!);
@@ -349,6 +370,12 @@ export function sourceNumbers(text: string, values: { value: number; evaluationI
     const n = Number(raw.replace('%', '').replace(',', '.'));
     if (!Number.isFinite(n)) continue;
     if (!pctSign && Number.isInteger(n) && (Math.abs(n) < 10 || (n >= 1900 && n <= 2100))) continue; // counts, years
+    const after = text.slice(m.index! + raw.length, m.index! + raw.length + 24);
+    const lead = text.slice(Math.max(0, m.index! - 24), m.index!);
+    if (PARAM_AFTER.test(after) || PARAM_BEFORE.test(lead)) {
+      chips.push({ text: raw, value: n, evaluationId: null, kind: 'parameter' });
+      continue;
+    }
     const decimals = (raw.replace('%', '').split(/[.,]/)[1] ?? '').length;
     const tol = 0.5 * 10 ** -Math.max(decimals, 0) + 1e-9;
     const candidates = pctSign ? [n / 100, n] : [n, n / 100];
@@ -359,7 +386,13 @@ export function sourceNumbers(text: string, values: { value: number; evaluationI
           Math.abs(v.value * (pctSign ? 100 : 1) - n) <= tol,
       ),
     );
-    chips.push({ text: raw, value: n, evaluationId: hit?.evaluationId ?? null });
+    const evaluationId = hit?.evaluationId ?? null;
+    chips.push({
+      text: raw,
+      value: n,
+      evaluationId,
+      kind: evaluationId ? 'sourced' : claims ? 'unsourced' : 'parameter',
+    });
   }
   return chips;
 }
@@ -389,8 +422,12 @@ export async function ideaDebate(ownerId: string, id: string) {
     ...(h.actor.userId ? { userId: h.actor.userId } : {}),
     reasoning: h.reasoning,
     ...(h.data ? { data: h.data } : {}),
-    // Agents' numbers are checked; people's comments and system links are not.
-    numbers: h.actor.role === 'human' || h.type === 'link' ? [] : sourceNumbers(h.reasoning, values),
+    // Agents' numbers are checked; people's comments and system links are not. A Theorist proposes (its numbers are
+    // design choices), and before any evaluation nothing can be cited: their unmatched numbers are neutral (#279).
+    numbers:
+      h.actor.role === 'human' || h.type === 'link'
+        ? []
+        : sourceNumbers(h.reasoning, values, { claims: h.actor.role !== 'theorist' && values.length > 0 }),
   }));
 }
 

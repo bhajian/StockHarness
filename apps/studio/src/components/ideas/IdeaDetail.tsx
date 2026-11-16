@@ -518,14 +518,18 @@ function Review({
       setBusy(false);
     }
   };
-  const unsourced = events.reduce((n, e) => n + e.numbers.filter((c: any) => !c.evaluationId).length, 0);
+  const unsourced = events.reduce(
+    (n, e) => n + e.numbers.filter((c: any) => !c.evaluationId && c.kind !== 'parameter').length,
+    0,
+  );
   return (
     <div className="idea-review">
       <p className="muted-line">
         {events.length} events. Numbers the agents cite are checked against this idea&apos;s evaluations:{' '}
         <span className="num-chip sourced">sourced</span> links to the evaluation it comes from,{' '}
         <span className="num-chip unsourced">unsourced</span> matches none
-        {unsourced ? ` (${unsourced} here)` : ''}.
+        {unsourced ? ` (${unsourced} here)` : ''}; <span className="num-chip parameter">parameter</span> is a
+        design choice or a proposal&apos;s number, not checked.
       </p>
       <ol className="debate">
         {events.map((e) => (
@@ -592,7 +596,7 @@ function describe(e: any) {
   return `${STATUS_LABEL[e.from] ?? e.from} → ${STATUS_LABEL[e.to] ?? e.to}`;
 }
 /** The text with each cited number wrapped in a chip. */
-function withChips(text: string, chips: { text: string; evaluationId: string | null }[]) {
+function withChips(text: string, chips: { text: string; evaluationId: string | null; kind?: string }[]) {
   if (!chips.length) return text;
   const out: React.ReactNode[] = [];
   let rest = text;
@@ -611,6 +615,14 @@ function withChips(text: string, chips: { text: string; evaluationId: string | n
         >
           {c.text}
         </button>
+      ) : c.kind === 'parameter' ? (
+        <span
+          key={i}
+          className="num-chip parameter"
+          title="A design parameter or a proposal's number: not checked"
+        >
+          {c.text}
+        </span>
       ) : (
         <span key={i} className="num-chip unsourced" title="Not found in this idea's evaluations">
           {c.text}
