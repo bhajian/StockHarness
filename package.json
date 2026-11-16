@@ -20,10 +20,7 @@
     "test:browser": "playwright test",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "generate:guardrail-templates": "node --import tsx scripts/generate-guardrail-templates.ts",
-    "pretypecheck": "npm run generate:guardrail-templates && npm run generate:openharness-api && npm run generate:openharness-support",
-    "pretest": "npm run generate:guardrail-templates",
-    "predev": "npm run generate:guardrail-templates",
+    "pretypecheck": "npm run generate:openharness-api && npm run generate:openharness-support",
     "generate:openharness-api": "node --import tsx scripts/generate-openharness-api.ts",
     "generate:openharness-support": "node --import tsx scripts/generate-openharness-support.ts"
   },

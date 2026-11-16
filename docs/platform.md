@@ -55,7 +55,7 @@ Each saved harness contains its agent cards. Existing graphs and IDs carry over 
 
 ## What you get
 
-See the [NeMo Guardrails setup](guardrails.md) for safety policies and harness attachments,.
+Guardrails (NeMo, Garak) were removed from StockHarness (#472).
 
 | Area                | What is included                                                                                                                                                                                                                                                                                                       |
 | ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

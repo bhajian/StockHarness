@@ -4810,14 +4810,9 @@ with that account as its administrator. The studio's **Add teammate** form does 
 
 ### Guardrails
 
-Guardrails (safety policies run by NeMo Guardrails or the built-in checker) do not have a page in this build's
-sidebar. They appear in the harness editor: a **NeMo Guardrail** box attached to an agent's top port, with a
-**Guardrail policy** field. Workspace-wide default policies are stored on the workspace (`PUT /api/tenant` with
-`guardrailIds`). Exports reference policies by name and never include them; an import needs a matching enabled
-policy on the target.
-
-`docs/guardrails.md` describes a **Guardrails** page (policy templates, **Try it out**, recent decisions). That page
-is not in the StockHarness sidebar: guardrails are set per agent in the harness editor.
+Guardrails (NeMo, Garak and the built-in checker) were removed (#472): StockHarness is a research and
+simulation app and doesn't run production sandboxing. Saved `guardrailIds` on agents, harnesses or the workspace are
+kept for YAML compatibility and ignored.
 
 ### Related components outside Settings
 

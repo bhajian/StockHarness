@@ -21,5 +21,3 @@ data:
   MONGODB_MCP_URL: http://mongodb-mcp:3000/mcp
   EXECUTOR_BACKEND: kubernetes
   EXECUTOR_CALLBACK_URL: http://api:8088
-  GARAK_PROBES_URL: http://guardrail-evaluation:8001
-  NEMO_GUARDRAILS_URL: http://guardrails:8000

@@ -10,7 +10,5 @@ resources:
   - python-executor.yaml
   - rabbitmq.yaml
   - weaviate.yaml
-  - guardrails.yaml
-  - guardrail-evaluation.yaml
   - proxy.yaml
   - network-policy.yaml

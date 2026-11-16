@@ -1,9 +1,0 @@
-models: []
-colang_version: '1.0'
-rails:
-  input:
-    flows:
-      - openharness policy
-  dialog:
-    user_messages:
-      embeddings_only: true
