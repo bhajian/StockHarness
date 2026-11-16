@@ -23,6 +23,57 @@ _DATE = re.compile(r"^\d{4}-\d{2}-\d{2}")
 _BANNED_OPS = ("$where", "$function", "$accumulator")
 
 
+# #449: simulation ledgers hold future returns (simulations run over the holdout too) and dq_issues is an audit
+# log: neither is research data, whatever the catalog says.
+REFUSED_PREFIXES = ("sim_",)
+REFUSED_COLLECTIONS = {"dq_issues"}
+
+
+def _iso(v) -> str | None:
+    if v is None:
+        return None
+    if hasattr(v, "date") and callable(v.date) and not isinstance(v, str):
+        return v.date().isoformat()
+    if hasattr(v, "isoformat") and not isinstance(v, str):
+        return v.isoformat()
+    s = str(v)[:10]
+    return s if s and s != "None" and s != "nan" and s != "NaT" else None
+
+
+def _mask_intervals(items, as_of: str):
+    """#449: a *_history / identifiers list as known on `as_of`: later intervals hidden, a later end shown open."""
+    if not isinstance(items, list):
+        return items
+    out = []
+    for i in items:
+        if not isinstance(i, dict):
+            out.append(i)
+            continue
+        vf, vt = _iso(i.get("valid_from")), _iso(i.get("valid_to"))
+        if vf and vf > as_of:
+            continue
+        out.append({**i, "valid_to": None} if vt and vt > as_of else i)
+    return out
+
+
+def mask_as_of(frame, as_of: str):
+    """#449: static and interval rows as they were known on `as_of` (no future ends, delistings or activity)."""
+    if not len(frame):
+        return frame
+    out = frame.copy()
+    for col in out.columns:
+        c = str(col)
+        if c == "identifiers" or c.endswith("_history"):
+            out[col] = out[col].map(lambda v: _mask_intervals(v, as_of))
+    if "valid_to" in out.columns:
+        out["valid_to"] = out["valid_to"].map(lambda v: None if (_iso(v) or "") > as_of else v)
+    if "delisted_date" in out.columns:
+        out["delisted_date"] = out["delisted_date"].map(lambda v: None if (_iso(v) or "") > as_of else v)
+        if "is_active" in out.columns:
+            out["is_active"] = out["delisted_date"].map(lambda v: _iso(v) is None)
+    return out
+
+
 class DataAccessError(PermissionError):
     """A read the point-in-time policy refuses (an unknown, current-only or out-of-range read)."""
 
@@ -86,6 +137,8 @@ class PitReader:
         self.missing_columns: dict[str, list[str]] = {}  # collection -> requested columns no row has (#251)
 
     def policy(self, collection: str) -> dict:
+        if collection in REFUSED_COLLECTIONS or collection.startswith(REFUSED_PREFIXES):
+            raise DataAccessError(f"{collection} cannot be read by strategies: it is not point-in-time research data (#449)")
         p = self.policies.get(collection)
         if p is None:
             raise DataAccessError(
@@ -114,7 +167,9 @@ class PitReader:
         parts = [f for f in (flt or {}, self._scope_filter(collection)) if f]
         fields = None
         if columns:
-            fields = list(dict.fromkeys([*columns, *(known_at.rule_fields(rule) if rule else [])]))
+            # is_active is rebuilt from delisted_date as of the read date (#449).
+            extra = ["delisted_date"] if "is_active" in columns else []
+            fields = list(dict.fromkeys([*columns, *extra, *(known_at.rule_fields(rule) if rule else [])]))
         if rule:
             parts.append(known_at.coarse_filter(rule, self.end))
             if rule["type"] == "asOf" and self.start:
@@ -139,7 +194,8 @@ class PitReader:
                 if not self.columns_seen.get(collection) or len(known) > len(self.columns_seen[collection]):
                     self.columns_seen[collection] = known
         if columns:
-            want = list(dict.fromkeys([*columns, *(["as_of_date"] if rule else [])]))
+            want = list(dict.fromkeys([*columns, *(["delisted_date"] if "is_active" in columns else []),
+                                       *(["as_of_date"] if rule else [])]))
             frame = frame.reindex(columns=want)
         as_ofs = frame["as_of_date"].to_numpy(dtype=str) if rule and len(frame) else None
         self._cache[key] = (frame, as_ofs, bool(rule))
@@ -197,6 +253,9 @@ class PitReader:
             out = out[out[ids_key].isin(set(ids))].reset_index(drop=True) if ids_key in out.columns else out.iloc[0:0]
             if columns and ids_key not in columns:
                 out = out.drop(columns=[ids_key])
+        out = mask_as_of(out, as_of)
+        if columns and "is_active" in columns and "delisted_date" not in columns and "delisted_date" in out.columns:
+            out = out.drop(columns=["delisted_date"])
         self.stats["rows"] += len(out)
         return out
 
@@ -208,7 +267,8 @@ class PitReader:
         """
         import pandas as pd
 
-        cols = None if columns is None else list(dict.fromkeys([*columns, ids_key]))
+        cols = None if columns is None else list(dict.fromkeys(
+            [*columns, ids_key, *(["delisted_date"] if "is_active" in columns else [])]))
         key = json.dumps([collection, rest, cols, ids_key], sort_keys=True, default=str)
         entry = self._ids_cache.setdefault(key, {"names": set(), "frame": None, "as_ofs": None, "pit": False})
         missing = sorted(set(ids) - entry["names"])
