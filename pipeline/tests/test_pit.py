@@ -81,3 +81,19 @@ class AsOfMasking(unittest.TestCase):
         for c in ("sim_trades", "dq_issues"):
             with self.assertRaises(DataAccessError):
                 self.r.read_df(c, as_of="2020-01-02")
+
+
+class FilteredReadCache(unittest.TestCase):
+    """#514: a plugin filtering on its own date makes a new read every date; the reader keeps only the latest few."""
+
+    def test_date_dependent_filters_do_not_accumulate(self):
+        from pipeline.strategy import reader as rd, synthetic
+
+        src, days = synthetic.market(n_sec=5, n_days=120, seed=4)
+        r = rd.PitReader(src, synthetic.POLICIES, end=days[-1], start=days[0])
+        for d in days[20:80]:
+            r.read_df("prices_daily", {"date": {"$gt": d}}, ["security_id", "date", "tr_1d"], as_of=d, lookback_days=10)
+        self.assertLessEqual(len(r._filtered), rd.FILTERED_CACHE)
+        r.read_df("prices_daily", None, ["security_id", "tr_1d"], as_of=days[50], lookback_days=10)
+        r.read_df("prices_daily", None, ["security_id", "tr_1d"], as_of=days[60], lookback_days=10)
+        self.assertEqual(len(r._cache), 1, "an unfiltered read is one shared entry")

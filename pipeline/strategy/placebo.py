@@ -140,10 +140,15 @@ def run_part(part: str, source, policies: dict, *, start: str, end: str, readabl
         free = _evaluate(RANDOM.format(seed=0), source, policies, base,
                          {**(config or {}), "commission_bps": 0, "slippage_bps": 0, "impact": {"coef": 0.0}}, readable_end)
         paid = (rec.get("summary") or {}).get("costs_paid") or 0.0
-        lift = _compound((free.get("series") or {}).get("series", {}).get("returns", [])) - _compound(
-            (rec.get("series") or {}).get("series", {}).get("returns", []))
-        return [{"check": "costs", "passed": paid > 0 and lift > 0 and abs(lift - paid) < 0.5 * paid + 0.002,
-                 "costs_paid": paid, "return_lift": lift}]
+        with_costs = _compound((rec.get("series") or {}).get("series", {}).get("returns", []))
+        without = _compound((free.get("series") or {}).get("series", {}).get("returns", []))
+        lift = without - with_costs
+        # Costs compound: each rebalance keeps (1 - cost) of the book, so the log growth rises by about the costs
+        # paid (summed), not the total return (a 16% cost over eight years lifted a 2x return by 45 points, #514).
+        log_lift = math.log((1 + without) / (1 + with_costs)) if with_costs > -1 and without > -1 else None
+        return [{"check": "costs", "passed": paid > 0 and log_lift is not None and log_lift > 0
+                 and abs(log_lift - paid) < 0.25 * paid + 0.002,
+                 "costs_paid": paid, "return_lift": lift, "log_growth_lift": log_lift}]
     if kind == "lag" and lag_code:  # diagnostic: the edge at lag 1, 2 and 5
         lags = {}
         for lag in (1, 2, 5):

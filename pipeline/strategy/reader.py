@@ -13,6 +13,7 @@ weekly walk over years makes one query per distinct read. Plugins never get a da
 """
 from __future__ import annotations
 
+from collections import OrderedDict
 import json
 import re
 from datetime import date, timedelta
@@ -119,6 +120,9 @@ def _future_dates(flt, as_of: str, op: str = "") -> bool:
     return flt[:10] >= as_of if op == "$gt" else flt[:10] > as_of
 
 
+FILTERED_CACHE = 8  # filtered reads kept per reader (the latest ones)
+
+
 class PitReader:
     def __init__(self, source, policies: dict[str, dict], *, end: str, start: str | None = None,
                  scope_ids: list[str] | None = None, scope_tickers: list[str] | None = None,
@@ -131,6 +135,10 @@ class PitReader:
         self.scope_tickers = list(scope_tickers) if scope_tickers else None
         self.max_lookback_days = max_lookback_days
         self._cache: dict[str, tuple] = {}
+        # Reads with the plugin's own filter (e.g. date > ctx.date) differ on every date: keep only the latest few,
+        # or a weekly plugin over eight years holds hundreds of window-sized frames (the placebo peek ran out of
+        # memory at 4 GiB). Unfiltered reads share one entry per collection and columns, as before.
+        self._filtered: "OrderedDict[str, tuple]" = OrderedDict()
         self._ids_cache: dict[str, dict] = {}
         self.stats = {"reads": 0, "rows": 0, "lookahead_attempts": 0, "refused": 0}
         self.columns_seen: dict[str, list[str]] = {}  # collection -> columns its rows have (for clear errors)
@@ -162,6 +170,9 @@ class PitReader:
         key = json.dumps([collection, flt, columns], sort_keys=True, default=str)
         if key in self._cache:
             return self._cache[key]
+        if key in self._filtered:
+            self._filtered.move_to_end(key)
+            return self._filtered[key]
         p = self.policy(collection)
         rule = p.get("rule") if p.get("mode") == "pit" else None
         parts = [f for f in (flt or {}, self._scope_filter(collection)) if f]
@@ -198,8 +209,14 @@ class PitReader:
                                        *(["as_of_date"] if rule else [])]))
             frame = frame.reindex(columns=want)
         as_ofs = frame["as_of_date"].to_numpy(dtype=str) if rule and len(frame) else None
-        self._cache[key] = (frame, as_ofs, bool(rule))
-        return self._cache[key]
+        entry = (frame, as_ofs, bool(rule))
+        if flt:
+            self._filtered[key] = entry
+            while len(self._filtered) > FILTERED_CACHE:
+                self._filtered.popitem(last=False)
+        else:
+            self._cache[key] = entry
+        return entry
 
     def trading_day_before(self, d: str, n: int) -> str:
         """The session n trading days before d (static trading_calendar, cached; weekdays as a fallback)."""
