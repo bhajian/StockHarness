@@ -165,6 +165,20 @@ function EvaluationDetail({ id }: { id: string }) {
           {e.pluginName} v{e.pluginVersion}{' '}
           <StatusPill status={e.status === 'succeeded' ? 'succeeded' : e.status} />
           {e.mode === 'holdout' && <StatusPill status="warn" label="holdout (one shot)" />}
+          {r?.reconciliation && r.reconciliation.status !== 'unavailable' && (
+            <span
+              title={
+                r.reconciliation.status === 'reconciled'
+                  ? `An independent executor (as-traded prices, splits on share counts, dividends as paid) agrees with these returns on every day (largest gap ${r.reconciliation.max_daily_bps} bps).`
+                  : `The independent executor disagrees on ${r.reconciliation.breach_days} day(s), up to ${r.reconciliation.max_daily_bps} bps: see Reconciliation below.`
+              }
+            >
+              <StatusPill
+                status={r.reconciliation.status === 'reconciled' ? 'succeeded' : 'failed'}
+                label={r.reconciliation.status === 'reconciled' ? 'reconciled' : 'not reconciled'}
+              />
+            </span>
+          )}
         </h2>
         <span className="muted-line">
           {e.params.start} → {e.params.end}
@@ -348,6 +362,9 @@ export function EvaluationReport({ record: r }: { record: Record<string, any> })
         />
       </div>
       {r.by_name?.rows?.length ? <ByNameTable byName={r.by_name} /> : null}
+      {r.reconciliation && r.reconciliation.status !== 'unavailable' && (
+        <Reconciliation rec={r.reconciliation} tape={r.signal_tape} />
+      )}
       <details className="provenance">
         <summary>Provenance</summary>
         <pre>
@@ -624,5 +641,67 @@ function RegimesTable({ byRegime }: { byRegime: Record<string, Record<string, an
         ))}
       </tbody>
     </table>
+  );
+}
+
+/** #467: the evaluator's returns against an independent executor's, day by day, and the trading-rule checks. */
+function Reconciliation({ rec, tape }: { rec: Record<string, any>; tape?: Record<string, any> }) {
+  const ok = rec.status === 'reconciled';
+  const violations: any[] = rec.rules?.violations ?? [];
+  return (
+    <details className="provenance reconciliation" open={!ok}>
+      <summary>
+        Reconciliation: {ok ? 'reconciled' : 'not reconciled'} · {rec.days} days · largest daily gap{' '}
+        {rec.max_daily_bps} bps · drift {pct(rec.drift_per_year)} a year
+      </summary>
+      <p className="muted-line">
+        The signal tape
+        {tape
+          ? ` (${tape.rebalances} rebalances, ${tape.rows} positions, ${tape.hash?.slice(0, 19)})`
+          : ''}{' '}
+        was executed again by a separate ledger: fills at the as-traded close, splits applied to share counts,
+        dividends as paid per share. Its daily return before costs must match the evaluator&apos;s within{' '}
+        {rec.tolerances?.day_bps} bps, and drift less than {pct(rec.tolerances?.drift_per_year)} a year.
+        {rec.rules ? ` ${rec.rules.checked} fills checked against the trading rules.` : ''}
+      </p>
+      {!!rec.breaches?.length && (
+        <table aria-label="Reconciliation breaches">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Evaluator</th>
+              <th>Executor</th>
+              <th>Gap (bps)</th>
+              <th>Names that differ most</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rec.breaches.map((b: any) => (
+              <tr key={b.date}>
+                <td>{b.date}</td>
+                <td>{b.missing ? '—' : pct(b.evaluator)}</td>
+                <td>{b.missing ? 'missing' : pct(b.executor)}</td>
+                <td>{b.diff_bps ?? '—'}</td>
+                <td>
+                  {(b.names ?? [])
+                    .map((n: any) => `${n.security_id} ${pct(n.evaluator)} vs ${pct(n.executor)}`)
+                    .join('; ')}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      {!!violations.length && (
+        <ul>
+          {violations.map((v, i) => (
+            <li key={i}>
+              {v.rule.replaceAll('_', ' ')}: {v.exec_date}
+              {v.security_id ? ` · ${v.security_id}` : ''}
+            </li>
+          ))}
+        </ul>
+      )}
+    </details>
   );
 }

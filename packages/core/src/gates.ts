@@ -32,7 +32,8 @@ export const gatesSchema = z.object({
   /** Alpha t-statistic after the factor regression (Newey-West). */
   minAlphaT: z.number().default(2),
   /** Evaluation warnings that fail the theory outright. */
-  blockingWarnings: z.array(z.string()).default(['empty_book', 'extreme_returns']),
+  // #467: an evaluation the independent executor does not reconcile with is not trusted either.
+  blockingWarnings: z.array(z.string()).default(['empty_book', 'extreme_returns', 'reconciliation_breach']),
 });
 export type Gates = z.infer<typeof gatesSchema>;
 export const DEFAULT_GATES: Gates = gatesSchema.parse({});
