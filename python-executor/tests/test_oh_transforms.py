@@ -51,6 +51,24 @@ class Outputs(unittest.TestCase):
         self.assertEqual(DB["prices_t"].count_documents({"security_id": "S1"}), 3)
         self.assertEqual(DB["prices_t"].find_one({"security_id": "S1", "date": "2026-11-02"})["close"], 99)
 
+    def test_prune_moves_rows_the_run_no_longer_produces_to_retired(self):
+        """#518: a full-output transform's stale rows are archived, not lost; a near-empty run is refused."""
+        DB["prices_t"].drop()
+        DB["prices_t_retired"].drop()
+        rows = [{"security_id": f"S{k}", "date": "2026-11-02", "known_at": "2026-11-02", "close": k} for k in range(40)]
+        oh.upsert("prices_t", rows, key=["security_id", "date"], known_at_field="known_at")
+        res = oh.upsert("prices_t", rows[:39], key=["security_id", "date"], known_at_field="known_at", prune=True)
+        self.assertEqual(res["retired"], 1)
+        self.assertEqual(DB["prices_t"].count_documents({}), 39)
+        old = DB["prices_t_retired"].find_one({})
+        self.assertEqual((old["security_id"], old["close"]), ("S39", 39))
+        self.assertIn("retired_at", old)
+        with self.assertRaises(RuntimeError):  # 39 of 39 would go: an input failed, not 39 real removals
+            oh.upsert("prices_t", rows[:1], key=["security_id", "date"], known_at_field="known_at", prune=True)
+        self.assertEqual(DB["prices_t"].count_documents({}), 39, "nothing retired when refused")
+        DB["prices_t"].drop()
+        DB["prices_t_retired"].drop()
+
     def test_point_in_time_and_keys_are_enforced(self):
         out = oh.output("prices_t")
         with self.assertRaisesRegex(ValueError, "known_at"):
