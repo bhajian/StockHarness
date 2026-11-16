@@ -10,13 +10,13 @@ resources:
 images:
   - name: openharness
     newName: 491085405405.dkr.ecr.us-east-1.amazonaws.com/openharness/app
-    newTag: 408d298410a3
+    newTag: 73d1b88d0d5e
   - name: openharness-mongodb-mcp
     newName: 491085405405.dkr.ecr.us-east-1.amazonaws.com/openharness/mongodb-mcp
     newTag: c6f90af9dacf
   - name: openharness-python-executor
     newName: 491085405405.dkr.ecr.us-east-1.amazonaws.com/openharness/python-executor
-    newTag: 408d298410a3
+    newTag: 73d1b88d0d5e
 patches:
   # Drop the Caddy TLS proxy (the ALB replaces it).
   - patch: |-
