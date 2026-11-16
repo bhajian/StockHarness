@@ -241,3 +241,52 @@ test(
     await T.updateTransform(owner, t._id, { ...T.transformSpec(t), enabled: false });
   },
 );
+
+test(
+  '#525: a downstream waits while its upstream still has runs queued (a rebuild in chunks), then fires once',
+  { skip: skipReason },
+  async () => {
+    const x = await T.createTransform(owner, {
+      ...base,
+      name: 'tg_x',
+      inputs: ['eod_prices'],
+      outputs: out('tg_x'),
+    });
+    await T.createTransform(owner, {
+      ...base,
+      name: 'tg_y',
+      inputs: ['tg_x'],
+      outputs: out('tg_y'),
+      trigger: { after: ['transform:tg_x'] },
+    });
+    const xId = (x as any)._id ?? (x as any).id;
+    // Two chunks of X: the first completes (its event marks Y), the second is still queued.
+    for (const [start, end] of [
+      ['2026-10-01', '2026-10-15'],
+      ['2026-10-16', '2026-10-31'],
+    ])
+      await requestTransformRun(owner, xId, {
+        trigger: 'manual',
+        range: 'custom',
+        start,
+        end,
+        autostart: false,
+      });
+    const [first] = (await runsOf('tg_x')).filter((r) => r.status === 'queued');
+    assert.ok(
+      await executeTransformRun(first._id, async () => ({
+        id: randomUUID(),
+        status: 'succeeded',
+        stdout: '',
+        stderr: '',
+        durationMs: 1,
+        meta: { stats: {} },
+      })),
+    );
+    assert.deepEqual(await tick(), [], 'Y waits: X still has a queued chunk');
+    assert.equal((await runsOf('tg_y')).length, 0);
+    await complete('tg_x');
+    assert.deepEqual(await tick(), ['tg_y'], 'once X is idle, Y runs');
+    assert.equal((await runsOf('tg_y')).length, 1, 'once');
+  },
+);
