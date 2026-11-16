@@ -63,6 +63,43 @@ def as_traded_factors(dates, splits, effective):
     return out
 
 
+# #481: the as-paid reading of a dividend is kept unless its yield on the previous close passes this while the other
+# reading's doesn't; a dividend above MAX_DIVIDEND_YIELD of the previous close is a data error and is dropped.
+BASIS_YIELD = 0.15
+MAX_DIVIDEND_YIELD = 0.5
+
+
+def bar_dividend(paid, adj, k, prev_close):
+    """(dividend on the bar's share basis, DQ flags) from FMP's as-paid and split-adjusted amounts (#443, #481).
+
+    `k` is the as-traded factor of the bar (close_raw / close). As paid ÷ k is right when FMP's `dividend` is as paid
+    (AVGO 2023: 4.60 / 10 = 0.46 = adjDividend). FMP sometimes has no adjDividend, or a `dividend` already on today's
+    basis (NYMT 2020, 1:4 reverse split later: 0.484 / 0.25 = 1.94 on a 10.20 close, 19% in a day); then the
+    reading with a plausible yield is used and the row is flagged. A dividend larger than half the previous close is
+    junk (NSTD 2024: 10.71 on 0.11) and leaves tr_1d.
+    """
+    flags = []
+    as_paid = paid / k if paid else None
+    if as_paid is not None and adj:
+        div = as_paid
+        if abs(as_paid - adj) > 0.2 * adj:
+            div = min(as_paid, adj)
+            flags.append("dividend_basis_uncertain")
+    elif as_paid is not None:
+        div = as_paid
+        if k != 1.0 and prev_close and prev_close > 0:
+            y_paid, y_today = as_paid / prev_close, paid / prev_close
+            if y_paid > BASIS_YIELD and y_today <= BASIS_YIELD:
+                div = paid
+                flags.append("dividend_basis_uncertain")
+    else:
+        div = adj or 0.0
+    if div and prev_close and prev_close > 0 and div / prev_close > MAX_DIVIDEND_YIELD:
+        div = 0.0
+        flags.append("implausible_dividend")
+    return div or 0.0, flags
+
+
 # #255: a close below this is a junk quote (FMP serves 4e-19 between real closes on some dead instruments).
 MIN_PRICE = 1e-4
 # A day's total return beyond ×10 or ÷10 with no split or dividend is a data error, not a return.
@@ -125,9 +162,8 @@ def compute_symbol_rows(bars, dividends_by_exdate, splits_by_exdate, adj_dividen
         f = factors.get(d, 1.0)
         r = splits_by_exdate.get(d, 1.0) or 1.0
         k = traded.get(d, 1.0)
-        paid = dividends_by_exdate.get(d)
-        div = (paid / k if paid else adj_divs.get(d, 0.0)) or 0.0  # on the bar's share basis
-        flags = _dq_flags(b, prev_close, r, div, recent_closes)
+        div, div_flags = bar_dividend(dividends_by_exdate.get(d), adj_divs.get(d), k, prev_close)
+        flags = _dq_flags(b, prev_close, r, div, recent_closes) + div_flags
         ret_1d = tr_1d = None
         usable = close is not None and close >= MIN_PRICE
         if close is not None and 0 < close < MIN_PRICE:

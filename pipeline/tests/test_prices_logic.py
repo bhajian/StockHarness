@@ -107,6 +107,48 @@ class TestSymbolRows(unittest.TestCase):
         rows = p.compute_symbol_rows(bars, {}, {date(2024, 2, 1): 2.0})
         self.assertEqual([r["close_raw"] for r in rows], [50, 51])
 
+    def test_ambiguous_basis_takes_the_plausible_reading(self):
+        """#481: NYMT 2020-09-30, a later 1:4 reverse split, no adjDividend, FMP's 0.484 already on today's basis."""
+        bars = [
+            {"date": date(2020, 9, 29), "open": 10, "high": 10.5, "low": 10, "close": 10.2, "volume": 5},
+            {"date": date(2020, 9, 30), "open": 10, "high": 10.3, "low": 9.9, "close": 10.2, "volume": 5},
+            {"date": date(2023, 3, 9), "open": 5, "high": 5, "low": 5, "close": 5.0, "volume": 5},
+            {"date": date(2023, 3, 10), "open": 5, "high": 5, "low": 5, "close": 5.0, "volume": 5},
+        ]
+        rows = p.compute_symbol_rows(bars, {date(2020, 9, 30): 0.484}, {date(2023, 3, 9): 0.25})
+        self.assertAlmostEqual(rows[1]["close_raw"], 2.55)
+        self.assertAlmostEqual(rows[1]["dividend"], 0.484)
+        self.assertIn("dividend_basis_uncertain", rows[1]["dq_flags"])
+        self.assertLess(rows[1]["tr_1d"] - rows[1]["ret_1d"], 0.05)
+
+    def test_junk_dividend_leaves_the_total_return(self):
+        """#481: NSTD 2024-04-15, a 10.71 dividend on a 0.11 close."""
+        bars = [
+            {"date": date(2024, 4, 12), "open": 0.11, "high": 0.12, "low": 0.11, "close": 0.115, "volume": 5},
+            {"date": date(2024, 4, 15), "open": 0.11, "high": 0.12, "low": 0.11, "close": 0.113, "volume": 5},
+        ]
+        rows = p.compute_symbol_rows(bars, {date(2024, 4, 15): 10.71169}, {})
+        self.assertIsNone(rows[1]["dividend"])
+        self.assertAlmostEqual(rows[1]["tr_1d"], rows[1]["ret_1d"])
+        self.assertIn("implausible_dividend", rows[1]["dq_flags"])
+
+    def test_real_special_dividend_is_kept(self):
+        # TRMD-like: 2.40 on a 34.60 close, no split: kept, no flag.
+        bars = [
+            {"date": date(2026, 9, 9), "open": 37, "high": 37, "low": 36, "close": 37.0, "volume": 5},
+            {"date": date(2026, 9, 10), "open": 35, "high": 35, "low": 34, "close": 34.6, "volume": 5},
+        ]
+        rows = p.compute_symbol_rows(bars, {date(2026, 9, 10): 2.4}, {}, {date(2026, 9, 10): 2.4})
+        self.assertAlmostEqual(rows[1]["dividend"], 2.4)
+        self.assertEqual([f for f in rows[1]["dq_flags"] if "dividend" in f], [])
+
+    def test_adjusted_amount_disagreeing_takes_the_smaller(self):
+        r = p.bar_dividend(4.6, 0.046, 10.0, 63.2)
+        self.assertEqual(r, (0.046, ["dividend_basis_uncertain"]))
+        div, flags = p.bar_dividend(4.6, 0.46, 10.0, 63.2)
+        self.assertAlmostEqual(div, 0.46)
+        self.assertEqual(flags, [])
+
     def test_dq_flags(self):
         bars = [
             {"date": date(2024, 1, 2), "open": 10, "high": 5, "low": 10, "close": 8, "volume": 0},  # high<low, zero_vol
