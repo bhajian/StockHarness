@@ -400,3 +400,12 @@ test('SimulationConfig and SimulationRun round trip into an empty workspace; del
   assert.equal((await request(`/simulations/${simId}`)).status, 404);
   assert.equal((await request(`/simulations/${simId}/trades`)).status, 404);
 });
+
+test('#461: the portfolio builder proposes a book with an audit of every candidate', async () => {
+  const r = await ok('/simulations/portfolio-builder', { maxIdeas: 4, corrCap: 0.6 });
+  assert.ok(Array.isArray(r.picked) && Array.isArray(r.audit) && Array.isArray(r.candidates));
+  assert.equal(r.rules.maxIdeas, 4);
+  assert.equal(r.audit.length, r.candidates.length);
+  if (r.picked.length) assert.equal(r.simulation.ideas.length, r.picked.length);
+  else assert.equal(r.simulation, null);
+});

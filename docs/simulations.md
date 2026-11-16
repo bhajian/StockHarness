@@ -149,3 +149,12 @@ seed: 0
 
 Both are covered by the round-trip test in `tests/integration/simulations.test.ts` (export, import into an empty
 workspace, export again, identical YAML).
+
+## Portfolio Builder (#461)
+
+**Simulations → Build a portfolio** combines the promising and successful ideas into one book by a written rule:
+best score first (the holdout excess when an idea has one, else its exploration Sharpe), adding an idea only when its
+daily-return correlation with every pick is at most the cap (0.5 by default) over at least 252 days in common, up to
+8 ideas. Every candidate gets an audit line (picked, or why not). **Simulate this book** opens New simulation with
+the picks over the exploration window; a simulation over the holdout counts as trials and is limited per idea (#450).
+`POST /api/simulations/portfolio-builder {maxIdeas, corrCap, minOverlapDays}` returns the proposal.
