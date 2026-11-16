@@ -36,7 +36,7 @@ class Engine(unittest.TestCase):
         b = run(MOMENTUM, src, days[70], days[-1])
         self.assertEqual(a, b)
         self.assertTrue(a["record_hash"].startswith("sha256:"))
-        self.assertEqual(a["evaluator_version"], "1.8.0")
+        self.assertEqual(a["evaluator_version"], "1.9.0")
         self.assertGreater(a["summary"]["rebalances"], 30)
         self.assertEqual(len(a["series"]["dates"]), len(a["series"]["series"]["equity"]))
         c = run(MOMENTUM, src, days[70], days[-1], params={"top_n": 3})

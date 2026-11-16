@@ -82,15 +82,15 @@ Success is mechanical. `set_verdict(successful | failed)` applies the active gat
 (`GET/POST /api/research/gates`; defaults below) to the theory's latest exploration evaluation and its
 holdout:
 
-| Gate                                                | Default      |
-| --------------------------------------------------- | ------------ |
-| Exploration Sharpe                                  | ≥ 0.5        |
-| Deflated Sharpe probability (all trials)            | ≥ 0.95       |
-| Years with positive excess over the S&P 500         | ≥ 60%        |
-| Holdout excess over the S&P 500 / holdout Sharpe    | > 0 / ≥ 0.3  |
-| Trades / average names held                         | ≥ 100 / ≥ 10 |
-| Alpha t-stat after factors (Newey-West)             | ≥ 2          |
-| Blocking warnings (`empty_book`, `extreme_returns`) | none         |
+| Gate                                                                         | Default      |
+| ---------------------------------------------------------------------------- | ------------ |
+| Exploration Sharpe                                                           | ≥ 0.5        |
+| Deflated Sharpe probability (all trials)                                     | ≥ 0.95       |
+| Years with positive excess over the S&P 500                                  | ≥ 60%        |
+| Holdout excess over the S&P 500 / holdout Sharpe                             | > 0 / ≥ 0.3  |
+| Trades / average names held                                                  | ≥ 100 / ≥ 10 |
+| Alpha t-stat after factors (Newey-West)                                      | ≥ 2          |
+| Blocking warnings (`empty_book`, `extreme_returns`, `reconciliation_breach`) | none         |
 
 - **Holdout:** when the exploration gates pass and the theory has no holdout yet, a `successful` request spends
   the theory's one holdout shot on that code version first (#105), then decides.

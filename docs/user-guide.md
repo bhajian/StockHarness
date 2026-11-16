@@ -3235,12 +3235,13 @@ The average number of names in the book (long plus short) per rebalance.
 
 #### Blocking warnings
 
-| Warning           | Meaning                                                                                                                                                                                                     |
-| ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `empty_book`      | On some rebalances `signal(ctx)` returned no usable scores for eligible names, usually because of a wrong column name or NaNs. The warning shows the count, out of how many rebalances, and the first date. |
-| `extreme_returns` | A held name moved more than 50% in one day: a data problem or a real event worth a look. Check `prices_daily.dq_flags`.                                                                                     |
+| Warning                 | Meaning                                                                                                                                                                                                                                            |
+| ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `empty_book`            | On some rebalances `signal(ctx)` returned no usable scores for eligible names, usually because of a wrong column name or NaNs. The warning shows the count, out of how many rebalances, and the first date.                                        |
+| `extreme_returns`       | A held name moved more than 50% in one day: a data problem or a real event worth a look. Check `prices_daily.dq_flags`.                                                                                                                            |
+| `reconciliation_breach` | An independent ledger (as-traded prices, splits on share counts, dividends as paid) disagrees with the evaluator's daily returns by more than 5 bps on some day, or drifts more than 1% a year (#467). The warning names the dates and securities. |
 
-Either one fails the theory outright.
+Any one fails the theory outright (`reconciliation_breach` from gates created after #467).
 
 #### Excess vs the S&P 500, and vs sector
 

@@ -18,7 +18,8 @@ import json
 import math
 from datetime import date, datetime, timedelta
 
-from . import EVALUATOR_MAJOR, EVALUATOR_VERSION, contract, costs, delisting, metrics
+from . import EVALUATOR_MAJOR, EVALUATOR_VERSION, contract, costs, delisting, executor, metrics, reconcile
+from . import tape as tapes
 from .config import load_config
 from .context import StrategyContext
 from .reader import PitReader
@@ -396,6 +397,7 @@ def evaluate(code: str, *, source, policies: dict, params: dict, config: dict | 
         name_acc(s)["trades"].append(side * (growth - 1))
 
     eligible_now: list[str] = []
+    eval_contrib: dict[str, dict[str, float]] = {}  # #467: date -> name -> weight × return, for the reconciliation
     for d in days[days.index(first_exec):]:
         churn["now"] = day_index[d]
         day = rets.get(d, {})
@@ -419,6 +421,7 @@ def evaluate(code: str, *, source, policies: dict, params: dict, config: dict | 
             sec = sec_today.get(s, "Unknown")
             contrib[sec] = contrib.get(sec, 0.0) + wt * r
             exposure[sec] = exposure.get(sec, 0.0) + abs(wt)
+            eval_contrib.setdefault(d, {})[s] = wt * r
             a = name_acc(s)
             a["contribution"] += wt * r
             a["abs_weight"] += abs(wt)
@@ -499,6 +502,10 @@ def evaluate(code: str, *, source, policies: dict, params: dict, config: dict | 
                                   start) if benchmarks else None
     regressors = {"market": list(metrics.over_rf(spx_clean, out_rf)), **(factor_rets or {})}
     n_days = max(1, len(out_dates))
+    # #467: the signal tape (what was asked for), executed independently on as-traded prices and reconciled daily.
+    tape = tapes.build(plan, out_dates, lag)
+    executed = executor.run(tape, source, cfg, tapes.eligible_sets(plan))
+    recon = reconcile.compare(out_dates, out_before_costs, executed, eval_contrib, periods)
     record = {
         "evaluator_version": EVALUATOR_VERSION,
         "plugin": {**(plugin_ref or {}), "hash": plugin.hash, "evaluator_major": EVALUATOR_MAJOR, "meta": meta},
@@ -554,7 +561,15 @@ def evaluate(code: str, *, source, policies: dict, params: dict, config: dict | 
             if start < SURVIVORSHIP_COMPLETE_FROM else []) + ([{
             "code": "hindsight_scope", "names": len(params.get("symbols") or []),
             "hint": "a fixed list of names chosen today is selected with hindsight; use an index or top-N scope (#455)"}]
-            if params.get("symbols") else []),
+            if params.get("symbols") else []) + ([{
+            "code": "reconciliation_breach", "breach_days": recon["breach_days"], "max_daily_bps": recon["max_daily_bps"],
+            "drift_per_year": recon["drift_per_year"], "rule_violations": (recon["rules"] or {}).get("violation_count", 0),
+            "examples": recon["breaches"][:3],
+            "hint": "the independent executor (as-traded prices, splits on shares, dividends as paid) disagrees with "
+                    "the evaluator's returns; the examples name the securities and dates (#467)"}]
+            if recon["status"] == "not_reconciled" else []),
+        "signal_tape": tapes.summary(tape),
+        "reconciliation": recon,
         "rebalances": rebalances,
         "holdings": {"date": max(targets), "weights": {s: _round(v, 8) for s, v in sorted(targets[max(targets)].items())}},
         "reader": dict(reader.stats),

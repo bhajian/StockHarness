@@ -100,12 +100,22 @@ before(async () => {
   const prices: object[] = [];
   const universe: object[] = [];
   const macro: object[] = [];
+  const close: Record<string, number> = {}; // #467: as-traded closes for the independent executor
   for (const d of DAYS) {
     let sum = 0;
     IDS.forEach((s, k) => {
       const r = Math.round((drift[k] + (rand() - 0.5) * 0.03) * 1e8) / 1e8;
       sum += r;
-      prices.push({ security_id: s, date: d, as_of_date: d, tr_1d: r, ret_1d: r, ticker: `T${k}` });
+      close[s] = (close[s] ?? 100) * (1 + r);
+      prices.push({
+        security_id: s,
+        date: d,
+        as_of_date: d,
+        tr_1d: r,
+        ret_1d: r,
+        close: close[s],
+        ticker: `T${k}`,
+      });
       universe.push({ security_id: s, date: d, as_of_date: d, in_universe: true });
     });
     macro.push({ date: d, as_of_date: d, spx_ret_1d: sum / IDS.length });
@@ -145,7 +155,11 @@ test('an evaluation runs in the executor and is reproducible', async () => {
   const a = await evaluate(body);
   assert.equal(a.status, 'succeeded', JSON.stringify(a.error));
   const r = a.record;
-  assert.equal(r.evaluator_version, '1.8.0');
+  assert.equal(r.evaluator_version, '1.9.0');
+  // #467: the signal tape, executed again by the independent ledger, reconciles with the evaluator.
+  assert.match(r.signal_tape.hash, /^sha256:[0-9a-f]{64}$/);
+  assert.equal(r.reconciliation.status, 'reconciled', JSON.stringify(r.reconciliation.breaches?.slice(0, 2)));
+  assert.equal(r.reconciliation.rules.violation_count, 0);
   assert.equal(r.plugin.name, 'momentum_40d');
   assert.match(r.plugin.hash, /^sha256:[0-9a-f]{64}$/);
   assert.equal(r.period.first_trade, DAYS[46], 'executed at the next close');

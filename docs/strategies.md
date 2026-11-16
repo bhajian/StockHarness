@@ -73,6 +73,31 @@ inputs give an identical record. Every evaluation increments the workspace's glo
 
 Run one with `POST /api/evaluations` `{ plugin, version?, params }` (202; poll `GET /api/evaluations/:id`).
 
+## Signal tape, independent executor and reconciliation (#467)
+
+The evaluator works in two stages, and a second, separate ledger checks the first:
+
+1. **Signal tape.** The signal walk (`plan_books`) reads data only through the point-in-time reader and produces,
+   for every rebalance, the signal date, the session it executes at (signal date + lag), a hash of the eligible
+   names, and each name in the book with its score, rank and target weight (`pipeline/strategy/tape.py`). The tape
+   is canonical JSON with a sha256; the record keeps `signal_tape: {hash, rebalances, rows, lag}`. The same code,
+   parameters and data give the same hash.
+2. **Independent executor** (`pipeline/strategy/executor.py`) trades the tape with a shares-and-cash ledger and
+   imports nothing from the evaluator (only the tape schema and the delisting rules). It fills each book at the
+   as-traded close (`close_raw`) of its session, multiplies share counts by the ratio on a split's ex-date, and
+   adds dividends **as paid per share** from `corporate_actions` (reinvested in the name at that close; a short
+   pays them). A bad print is not a price. It never reads `tr_1d`.
+3. **Reconciliation** (`pipeline/strategy/reconcile.py`): every day, the executor's return before costs against
+   the evaluator's. A day breaches above **5 bps**; the run breaches when the compounded growth drifts apart by
+   more than **1% a year**. Each breach day lists the names whose contributions differ most. The executor also
+   checks the trading rules: every fill is `lag` sessions after its signal, on a trading session, at a price that
+   exists, in a name that was eligible on the signal date.
+
+The record carries `reconciliation: {status, days, breach_days, max_daily_bps, drift_per_year, breaches, rules}`;
+a breach adds the `reconciliation_breach` warning, which blocks the verdict in new gate versions. The evaluation
+page shows **reconciled / not reconciled** next to the title and the breaches below the results. An as-paid
+dividend added to a split-adjusted price (#443) breaches on its ex-date and names the security.
+
 ## Walk-forward folds and the locked holdout (#105)
 
 - **Folds:** every record has `folds`, the metrics of each calendar year of the evaluation window scored on its
