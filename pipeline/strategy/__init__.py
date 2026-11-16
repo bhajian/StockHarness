@@ -4,6 +4,6 @@ Agents write plugins (contract.py); fixed platform code reads data point-in-time
 and scores the result.
 """
 
-EVALUATOR_VERSION = "1.0.0"
+EVALUATOR_VERSION = "1.1.0"  # 1.1: total-return benchmark, Sharpe and alpha over the risk-free rate (#445)
 # Plugins declare compatibility with the evaluator's major version.
 EVALUATOR_MAJOR = EVALUATOR_VERSION.split(".")[0]

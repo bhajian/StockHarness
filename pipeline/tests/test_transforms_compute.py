@@ -112,6 +112,28 @@ class MacroDaily(unittest.TestCase):
         self.assertAlmostEqual(rows[1]["spx_ret_1d"], 0.01)
         self.assertEqual(rows[1]["ust_10y"], 4.0, "nearest prior treasury within 3 days")
 
+    def test_spy_total_return_and_risk_free(self):
+        """#445: spx_tr_1d = SPY close plus its dividend on the ex-date over the previous close; rf_1d from the 3m bill."""
+        data = {
+            "treasury_rates": [{"date": "2026-01-05", "year10": 4.0, "year2": 3.5, "month3": 5.0, "year30": 4.5}],
+            "eod_index": [
+                {"symbol": "^GSPC", "date": "2026-01-05", "close": 100}, {"symbol": "^GSPC", "date": "2026-01-06", "close": 99},
+                {"symbol": "SPY", "date": "2026-01-05", "close": 500.0}, {"symbol": "SPY", "date": "2026-01-06", "close": 495.0},
+            ],
+            "benchmark_dividends": [{"symbol": "SPY", "date": "2026-01-06", "dividend": 2.0}],
+            "sector_performance": [],
+        }
+        rows = macro_daily.compute(reader(data))
+        self.assertAlmostEqual(rows[1]["spx_ret_1d"], -0.01)
+        self.assertAlmostEqual(rows[1]["spx_tr_1d"], (495.0 + 2.0) / 500.0 - 1)
+        self.assertIsNone(rows[0]["spx_tr_1d"])
+        self.assertAlmostEqual(rows[0]["rf_1d"], 1.05 ** (1 / 252) - 1)
+        self.assertAlmostEqual(rows[1]["rf_1d"], rows[0]["rf_1d"], msg="the bill carries to the next day")
+
+    def test_without_spy_the_total_return_is_empty(self):
+        data = {"treasury_rates": [], "eod_index": [{"symbol": "^GSPC", "date": "2026-01-05", "close": 100}], "sector_performance": []}
+        self.assertIsNone(macro_daily.compute(reader(data))[0]["spx_tr_1d"])
+
     def test_full_history_carry_limit_and_no_future_values(self):
         """#388: every day with inputs gets the curve; holidays carry the last print up to 5 days, never a later one."""
         data = {

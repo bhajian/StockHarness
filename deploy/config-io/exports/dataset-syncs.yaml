@@ -88,6 +88,23 @@ spec:
 apiVersion: stockharness/v1
 kind: DatasetSync
 metadata:
+  name: L1 — Benchmark dividends (SPY)
+spec:
+  dataset: benchmark_dividends
+  connection: FMP
+  enabled: true
+  symbolsMode: universe
+  schedule:
+    enabled: true
+    everyMinutes: 10080
+    input: L1 sync benchmark_dividends
+    at: 02:31
+    weekday: 6
+    timezone: America/New_York
+---
+apiVersion: stockharness/v1
+kind: DatasetSync
+metadata:
   name: L1 — Biggest gainers
 spec:
   dataset: biggest_gainers

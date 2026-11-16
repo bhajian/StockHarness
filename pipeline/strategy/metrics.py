@@ -40,6 +40,15 @@ def sharpe(returns, periods: int = DAYS_PER_YEAR, rf: float = 0.0) -> float:
     return float(np.mean(a) / sd * math.sqrt(periods)) if sd > 0 else 0.0
 
 
+def over_rf(returns, rf=None) -> np.ndarray:
+    """Daily returns over the risk-free rate (#445): `rf` is a daily series on the same days (missing = 0)."""
+    r = np.asarray(returns, dtype=float)
+    if rf is None:
+        return r
+    f = np.nan_to_num(np.asarray(rf, dtype=float))
+    return r - f if len(f) == len(r) else r
+
+
 def drawdown_series(returns) -> np.ndarray:
     nav = np.cumprod(1 + np.nan_to_num(np.asarray(returns, dtype=float)))
     peak = np.maximum.accumulate(np.concatenate([[1.0], nav]))[1:]
@@ -51,36 +60,43 @@ def max_drawdown(returns) -> float:
     return float(dd.min()) if len(dd) else 0.0
 
 
-def summary(returns, periods: int = DAYS_PER_YEAR) -> dict:
-    return {
+def summary(returns, periods: int = DAYS_PER_YEAR, rf=None) -> dict:
+    """`sharpe` is over the risk-free rate when `rf` (daily, same days) is given (#445); `sharpe_raw` is over 0."""
+    out = {
         "total_return": total_return(returns),
         "cagr": cagr(returns, periods),
         "ann_vol": ann_vol(returns, periods),
-        "sharpe": sharpe(returns, periods),
+        "sharpe": sharpe(over_rf(returns, rf), periods),
         "max_drawdown": max_drawdown(returns),
         "days": int(len(_arr(returns))),
     }
+    if rf is not None:
+        out["sharpe_raw"] = sharpe(returns, periods)
+        out["rf_cagr"] = cagr(np.nan_to_num(np.asarray(rf, dtype=float)), periods)
+    return out
 
 
-def folds(dates: list[str], returns, min_days: int = 20, periods: int = DAYS_PER_YEAR) -> list[dict]:
+def folds(dates: list[str], returns, min_days: int = 20, periods: int = DAYS_PER_YEAR, rf=None) -> list[dict]:
     """Walk-forward results per calendar year (#105): each year is scored on its own returns only."""
     by_year: dict[str, list[int]] = {}
     for i, d in enumerate(dates):
         by_year.setdefault(d[:4], []).append(i)
     out = []
     r = list(returns)
+    f = list(rf) if rf is not None and len(rf) == len(r) else None
     for year in sorted(by_year):
         idx = by_year[year]
         seg = [r[i] for i in idx]
         out.append({"fold": year, "start": dates[idx[0]], "end": dates[idx[-1]], "partial": len(idx) < min_days,
-                    **summary(seg, periods)})
+                    **summary(seg, periods, [f[i] for i in idx] if f else None)})
     return out
 
 
 # --- #106: the full set ----------------------------------------------------------------------------------------
-def sortino(returns, periods: int = DAYS_PER_YEAR) -> float:
-    """Annualized mean over annualized downside deviation (target 0), as empyrical.sortino_ratio."""
-    a = _arr(returns)
+def sortino(returns, periods: int = DAYS_PER_YEAR, rf=None) -> float:
+    """Annualized mean over annualized downside deviation (target 0), as empyrical.sortino_ratio; over the
+    risk-free rate when `rf` is given (#445)."""
+    a = _arr(over_rf(returns, rf))
     if len(a) < 2:
         return 0.0
     dd = math.sqrt(float(np.mean(np.minimum(a, 0.0) ** 2))) * math.sqrt(periods)

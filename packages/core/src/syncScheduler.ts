@@ -18,6 +18,7 @@ const P0 = new Set([
   'dividends_calendar',
   'splits_calendar',
   'dividends_history',
+  'benchmark_dividends',
   'splits_history',
   'historical_market_cap',
   'index_constituents',
