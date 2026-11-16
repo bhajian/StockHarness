@@ -84,7 +84,14 @@ export function ResearchSetup({
     set({ theoristProviders: theoristRows.map((r) => (r.i === i ? v : r.providerId)) });
   const setTheoristProfile = (i: number, v: string) =>
     set({ profiles: theoristRows.map((r) => (r.i === i ? v : r.profile)) });
-  const scopeKind = s.scope?.kind === 'top_market_cap' ? (s.scope.top === 500 ? 'sp500' : 'top') : 'symbols';
+  const scopeKind =
+    s.scope?.kind === 'index'
+      ? `index:${s.scope.index ?? 'sp500'}`
+      : s.scope?.kind === 'top_market_cap'
+        ? s.scope.top === 500
+          ? 'sp500'
+          : 'top'
+        : 'symbols';
   const spend = status.spend ?? {};
   const models: any[] = spend.models ?? [];
   // Models of the agents, so they appear in the budget table before they have spent anything.
@@ -314,11 +321,16 @@ export function ResearchSetup({
       <section className="setup-section" aria-label="Scope">
         <h3>Evaluation scope</h3>
         <p className="muted-line">
-          What every evaluation tests: the stocks it ranks and the years before the holdout. The S&P 500 proxy
-          is the 500 largest US stocks by market cap on each date (point in time, delisted names included).
+          What every evaluation tests: the stocks it ranks and the years before the holdout. An index means
+          its members on each date (point in time, from the index change history, delisted members included).
+          The S&P 500 proxy is the 500 largest US stocks by market cap on each date. A symbol list is
+          today&apos;s choice of names, so its results carry a hindsight warning.
         </p>
         <div className="segmented" role="radiogroup" aria-label="Scope kind">
           {[
+            ['index:sp500', 'S&P 500 members'],
+            ['index:ndx', 'Nasdaq-100'],
+            ['index:dji', 'Dow'],
             ['sp500', 'S&P 500 proxy (top 500)'],
             ['top', 'Top N by market cap'],
             ['symbols', 'A symbol list'],
@@ -331,8 +343,9 @@ export function ResearchSetup({
               className={scopeKind === k ? 'active' : ''}
               onClick={() =>
                 set({
-                  scope:
-                    k === 'symbols'
+                  scope: k.startsWith('index:')
+                    ? { kind: 'index', index: k.slice(6), top: s.scope?.top ?? 500 }
+                    : k === 'symbols'
                       ? { kind: 'symbols', top: s.scope?.top ?? 500 }
                       : {
                           kind: 'top_market_cap',
@@ -357,7 +370,10 @@ export function ResearchSetup({
               />
             </Field>
           )}
-          <Field label="Evaluation years (before the holdout)" hint="15 = all history, from a year after the first price">
+          <Field
+            label="Evaluation years (before the holdout)"
+            hint="15 = all history, from a year after the first price"
+          >
             <input
               type="number"
               min={1}

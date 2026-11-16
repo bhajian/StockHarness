@@ -45,6 +45,8 @@ export const simulationConfigSchema = z.object({
   symbols: z.array(z.string().min(1).max(20)).max(2000).optional(),
   /** #300: the N largest names by market cap on each date (500 = the S&P 500 proxy), instead of symbols. */
   universeTop: z.number().int().min(1).max(5000).optional(),
+  /** #455: an index's members on each date. */
+  universeIndex: z.enum(['sp500', 'ndx', 'dji']).optional(),
   capital: z.number().positive().max(1e12).default(1_000_000),
   benchmark: z.enum(['spx']).default('spx'),
   allocation: z.enum(['equal', 'risk_parity', 'custom']).default('equal'),
@@ -158,8 +160,10 @@ export async function resolveSimulationConfig(ownerId: string, input: unknown): 
   if (new Set(ideas.map((i) => i.idea)).size !== ideas.length)
     throw new HttpError(400, 'an idea appears twice in the simulation');
   // Neither symbols nor a top-N: the research scope (#300).
-  if (!c.symbols && !c.universeTop) {
+  if (!c.symbols && !c.universeTop && !c.universeIndex) {
     const rs = await collection<any>('research_settings').findOne({ _id: ownerId });
+    if (rs?.scope?.kind === 'index' || (rs && !rs.scope))
+      return { ...c, ideas, universeIndex: rs?.scope?.index ?? 'sp500' };
     if (rs?.scope?.kind === 'top_market_cap') return { ...c, ideas, universeTop: rs.scope.top ?? 500 };
     if (rs?.evaluationSymbols?.length) return { ...c, ideas, symbols: rs.evaluationSymbols as string[] };
   }
@@ -327,6 +331,7 @@ export async function simulationJobParams(ownerId: string, sim: Simulation, read
       end: c.period.end,
       ...(c.symbols?.length ? { symbols: c.symbols } : {}),
       ...(c.universeTop ? { universe: { top_by_market_cap: c.universeTop } } : {}),
+      ...(c.universeIndex ? { universe: { index: c.universeIndex } } : {}),
       capital: c.capital,
       allocation: {
         mode: c.allocation,

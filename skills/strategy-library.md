@@ -478,8 +478,8 @@ Card IDs S01–S42 match the strategy-ideas table in `PRODUCT.md` §7.
 
 - **How it works:** names added to the S&P 500 see forced buying, and predicting additions captures part of that.
 - **Signal:** rank eligible non-members by market cap, profitability (4 positive quarters of GAAP earnings) and liquidity.
-- **Data:** _(planned, M8.04)_ `index_membership`. Constituents return 402 on the current plan.
-- **Status:** blocked.
+- **Data:** `index_membership` (point-in-time S&P 500, Nasdaq-100 and Dow intervals) and `universe_daily.in_sp500` / `in_ndx` / `in_dji` per date (#388, #455). An evaluation can also run on an index's members (`universe: {index: "sp500"}`).
+- **Status:** testable.
 
 ### Size, liquidity, macro and seasonality
 

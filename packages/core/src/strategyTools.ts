@@ -139,7 +139,10 @@ export const STRATEGY_TOOLS = [
             plugin_params: { type: 'object' },
             universe: {
               type: 'object',
-              properties: { top_by_market_cap: { type: 'integer', minimum: 1 } },
+              properties: {
+                top_by_market_cap: { type: 'integer', minimum: 1 },
+                index: { type: 'string', enum: ['sp500', 'ndx', 'dji'] },
+              },
               description: 'Only the N largest names by market cap on each date',
             },
           },
@@ -203,7 +206,12 @@ async function testChecks(ownerId: string) {
   const { activeGates } = await import('./gates.js');
   const { researchSettings } = await import('./researchLoop.js');
   const [g, s] = await Promise.all([activeGates(ownerId), researchSettings(ownerId)]);
-  const scope = s.scope?.kind === 'top_market_cap' ? { top: s.scope.top } : { symbols: s.evaluationSymbols };
+  const scope =
+    s.scope?.kind === 'index'
+      ? { index: s.scope.index }
+      : s.scope?.kind === 'top_market_cap'
+        ? { top: s.scope.top }
+        : { symbols: s.evaluationSymbols };
   return { min_holdings: g.gates.minHoldings, scope };
 }
 export async function testStrategy(ownerId: string, args: TestArgs, execute: typeof runCodeJob = runCodeJob) {

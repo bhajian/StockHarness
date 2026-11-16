@@ -15,6 +15,7 @@ import { theories } from './theories.js';
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
+const INDEX_NAMES: Record<string, string> = { sp500: 'S&P 500', ndx: 'Nasdaq-100', dji: 'Dow Jones' };
 export async function workspaceMap(ownerId: string) {
   const [syncs, trs, catalog, settings] = await Promise.all([
     datasetSyncs().find({ ownerId }).sort({ name: 1 }).toArray(),
@@ -125,9 +126,11 @@ export async function workspaceMap(ownerId: string) {
     s.kind === 'parallel' ? s.agents : s.kind === 'agent' ? [s] : [],
   );
   const scope =
-    settings.scope?.kind === 'top_market_cap'
-      ? `the ${settings.scope.top} largest US stocks by market cap on each date${settings.scope.top === 500 ? ' (S&P 500 proxy)' : ''}`
-      : `${plural(settings.evaluationSymbols.length, 'symbol')}: ${settings.evaluationSymbols.slice(0, 8).join(', ')}${settings.evaluationSymbols.length > 8 ? ' …' : ''}`;
+    settings.scope?.kind === 'index'
+      ? `${INDEX_NAMES[settings.scope.index ?? 'sp500']} members on each date (point in time)`
+      : settings.scope?.kind === 'top_market_cap'
+        ? `the ${settings.scope.top} largest US stocks by market cap on each date${settings.scope.top === 500 ? ' (S&P 500 proxy)' : ''}`
+        : `${plural(settings.evaluationSymbols.length, 'symbol')}: ${settings.evaluationSymbols.slice(0, 8).join(', ')}${settings.evaluationSymbols.length > 8 ? ' …' : ''}`;
   // What the research agents can read through their data tools: point-in-time and static collections.
   const readable = catalog.filter((c) => ['pit', 'static'].includes(c.timeSemantics?.status));
   const research = {

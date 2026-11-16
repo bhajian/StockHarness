@@ -124,7 +124,11 @@ before(async () => {
   assert.equal((await ok('/objects/import', { yaml: seedSkills, dryRun: false })).applied, true);
   await ok(
     '/research/settings',
-    { evaluationSymbols: ['T0', 'T1', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'], evaluationYears: 1 },
+    {
+      scope: { kind: 'symbols' },
+      evaluationSymbols: ['T0', 'T1', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'],
+      evaluationYears: 1,
+    },
     'PUT',
   );
   await ok('/research/steering', { note: 'Prefer short-horizon price signals this week.' });

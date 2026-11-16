@@ -73,15 +73,22 @@ def resolve_scope(source, symbols: list[str] | None) -> tuple[list[str] | None, 
     return sorted(set(ids)), sorted(set(tickers))
 
 
-def _universe_on(source, d: str, scope: list[str] | None, days: list[str], top: int | None = None) -> list[str]:
+INDEX_FLAGS = {"sp500": "in_sp500", "ndx": "in_ndx", "dji": "in_dji"}
+
+
+def _universe_on(source, d: str, scope: list[str] | None, days: list[str], top=None) -> list[str]:
     """In-universe security_ids on `d` (universe_daily for that session, else the latest of the 5 before).
 
-    `top` (#300): only the `top` largest by that session's market cap, e.g. 500 as an S&P 500 proxy. Point in time and
-    survivorship-free: the ranking uses universe_daily on that date, delisted names included.
+    `top` (#300): only the `top` largest by that session's market cap. Or (#455) "index:sp500" / "index:ndx" /
+    "index:dji": the index's members on that date (universe_daily.in_<index>, point in time from index_membership).
+    Point in time and survivorship-free: universe_daily on that date, delisted names included.
     """
+    index = top[6:] if isinstance(top, str) and top.startswith("index:") else None
+    top = None if index else top
     i = days.index(d)
     for back in days[max(0, i - 5): i + 1][::-1]:
-        flt = {"date": back, "in_universe": True, **({"security_id": {"$in": scope}} if scope else {})}
+        flt = {"date": back, "in_universe": True, **({"security_id": {"$in": scope}} if scope else {}),
+               **({INDEX_FLAGS[index]: True} if index else {})}
         rows = source.find("universe_daily", flt, ["security_id", "market_cap"] if top else ["security_id"])
         if rows:
             if top:
@@ -98,8 +105,13 @@ def ensure_indexes(source) -> None:
         ensure("universe_daily", [("date", 1), ("in_universe", 1)])
 
 
-def universe_top(params: dict) -> int | None:
-    """params.universe.top_by_market_cap (#300), validated."""
+def universe_top(params: dict):
+    """params.universe.top_by_market_cap (#300) or params.universe.index (#455: "index:<name>"), validated."""
+    index = (params.get("universe") or {}).get("index")
+    if index is not None:
+        if index not in INDEX_FLAGS:
+            raise EvaluationError(f"universe.index must be one of {', '.join(sorted(INDEX_FLAGS))}")
+        return f"index:{index}"
     top = (params.get("universe") or {}).get("top_by_market_cap")
     if top is None:
         return None
@@ -108,7 +120,7 @@ def universe_top(params: dict) -> int | None:
     return top
 
 
-def top_scope(source, days: list[str], every: str, scope, top: int | None, lag: int):
+def top_scope(source, days: list[str], every: str, scope, top, lag: int):
     """The securities that are ever in the top N on a rebalance date (#300 memory): reads are narrowed to them,
     so a top-500 run does not load every security's rows. Each date's eligible list is unchanged (point in time):
     this only stops loading names that are never in scope. Returns (security_ids, tickers) or (scope, None)."""
@@ -420,7 +432,10 @@ def evaluate(code: str, *, source, policies: dict, params: dict, config: dict | 
         "warnings": _warnings(rebalances, extreme, held_flags) + ([{
             "code": "survivorship_pre_2021", "since": start,
             "hint": "FMP lists delistings only from late 2020: names that died in 2016-2020 are partly missing (#463)"}]
-            if start < SURVIVORSHIP_COMPLETE_FROM else []),
+            if start < SURVIVORSHIP_COMPLETE_FROM else []) + ([{
+            "code": "hindsight_scope", "names": len(params.get("symbols") or []),
+            "hint": "a fixed list of names chosen today is selected with hindsight; use an index or top-N scope (#455)"}]
+            if params.get("symbols") else []),
         "rebalances": rebalances,
         "holdings": {"date": max(targets), "weights": {s: _round(v, 8) for s, v in sorted(targets[max(targets)].items())}},
         "reader": dict(reader.stats),

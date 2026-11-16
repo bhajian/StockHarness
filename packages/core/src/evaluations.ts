@@ -25,7 +25,13 @@ export const evaluationParams = z
     /** Values the plugin reads as ctx.params (over META.params). */
     plugin_params: z.record(z.unknown()).optional(),
     /** #300: only the N largest names by market cap on each date (500 = an S&P 500 proxy), point in time. */
-    universe: z.object({ top_by_market_cap: z.number().int().min(1).max(5000) }).optional(),
+    universe: z
+      .object({
+        top_by_market_cap: z.number().int().min(1).max(5000).optional(),
+        /** #455: an index's members on each date. */
+        index: z.enum(['sp500', 'ndx', 'dji']).optional(),
+      })
+      .optional(),
   })
   .refine((p) => p.start <= p.end, 'start must be on or before end');
 /** #325: how a name subset is picked and checked (pipeline/strategy/subset.py has the defaults). */
@@ -440,7 +446,13 @@ export const holdoutInput = z.object({
       rebalance: z.enum(['daily', 'weekly', 'monthly']).optional(),
       plugin_params: z.record(z.unknown()).optional(),
       /** #300: only the N largest names by market cap on each date (500 = an S&P 500 proxy), point in time. */
-      universe: z.object({ top_by_market_cap: z.number().int().min(1).max(5000) }).optional(),
+      universe: z
+        .object({
+          top_by_market_cap: z.number().int().min(1).max(5000).optional(),
+          /** #455: an index's members on each date. */
+          index: z.enum(['sp500', 'ndx', 'dji']).optional(),
+        })
+        .optional(),
     })
     .default({}),
 });

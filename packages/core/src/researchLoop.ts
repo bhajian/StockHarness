@@ -35,12 +35,14 @@ export const researchSettingsSchema = z.object({
   /** The evaluation scope the Coder uses: symbols and how many years before the holdout. */
   evaluationSymbols: z.array(z.string().min(1).max(20)).max(2000).default(DEFAULT_SYMBOLS),
   /**
-   * The evaluation scope (#300): the symbols above, or the N largest names by market cap on each date (point in
-   * time; N = 500 is the S&P 500 proxy, since the FMP plan has no constituents list).
+   * The evaluation scope: an index's members on each date (#455, point in time from index_membership; the default),
+   * the N largest names by market cap on each date (#300), or a fixed symbol list (hindsight-selected: the record
+   * warns).
    */
   scope: z
     .object({
-      kind: z.enum(['symbols', 'top_market_cap']).default('symbols'),
+      kind: z.enum(['index', 'symbols', 'top_market_cap']).default('index'),
+      index: z.enum(['sp500', 'ndx', 'dji']).default('sp500'),
       top: z.number().int().min(1).max(5000).default(500),
     })
     .default({}),
@@ -175,6 +177,7 @@ export async function evaluationParams(ownerId: string, s?: ResearchSettings) {
   const wanted = addYears(end, -st.evaluationYears);
   const floor = await evaluationFloor(ownerId, end);
   const start = floor && wanted < floor ? floor : wanted;
+  if (st.scope?.kind === 'index') return { start, end, universe: { index: st.scope.index ?? 'sp500' } };
   return st.scope?.kind === 'top_market_cap'
     ? { start, end, universe: { top_by_market_cap: st.scope.top } }
     : { start, end, symbols: st.evaluationSymbols };
