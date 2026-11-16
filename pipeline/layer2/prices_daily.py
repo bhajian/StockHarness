@@ -16,7 +16,7 @@ from .prices_logic import compute_symbol_rows, pick_bars
 from ._resolve import as_date, security_symbols
 
 UTC = timezone.utc
-TV = "9"  # 9: real crashes keep their return, only reverting prints are dropped (#451); 8: implausible or ambiguous-basis dividends (#481); 7: dividends on the bars' split basis (#443), close_raw as traded (#444); 6: bars on non-trading days are dropped (#437); 5: notes, preferreds, warrants, units and funds are skipped (#393); 4: one ticker per date, junk quotes and ×10 days without an action carry no return (#255); 3: #240
+TV = "10"  # 10: a regular and a special dividend on one ex-date are summed (#518); 9: real crashes keep their return, only reverting prints are dropped (#451); 8: implausible or ambiguous-basis dividends (#481); 7: dividends on the bars' split basis (#443), close_raw as traded (#444); 6: bars on non-trading days are dropped (#437); 5: notes, preferreds, warrants, units and funds are skipped (#393); 4: one ticker per date, junk quotes and ×10 days without an action carry no return (#255); 3: #240
 ERROR_FLAGS = ("zero_or_negative_price", "high_lt_low", "implausible_price")
 BAR_FIELDS = ["_id", "symbol", "date", "open", "high", "low", "close", "volume", "vwap"]
 
@@ -52,16 +52,16 @@ def compute(read, window=None, *, security_ids=None):
     for sid in sorted(sec_syms):
         acts = actions.get(sid, [])
         splits = {a["ex_date"]: a.get("split_ratio") for a in acts if a["action_type"] == "split" and a.get("split_ratio")}
-        divs = {
-            a["ex_date"]: a.get("dividend_amount")
-            for a in acts
-            if a["action_type"] in ("cash_dividend", "special_dividend") and a.get("dividend_amount")
-        }
-        adj_divs = {
-            a["ex_date"]: a.get("adj_dividend_amount")
-            for a in acts
-            if a["action_type"] in ("cash_dividend", "special_dividend") and a.get("adj_dividend_amount")
-        }
+        # #518: a regular and a special dividend on one ex-date both count (their sum is what a holder received).
+        divs: dict = {}
+        adj_divs: dict = {}
+        for a in acts:
+            if a["action_type"] not in ("cash_dividend", "special_dividend"):
+                continue
+            if a.get("dividend_amount"):
+                divs[a["ex_date"]] = divs.get(a["ex_date"], 0.0) + a["dividend_amount"]
+            if a.get("adj_dividend_amount"):
+                adj_divs[a["ex_date"]] = adj_divs.get(a["ex_date"], 0.0) + a["adj_dividend_amount"]
         # A split inside the window changes the factor of every earlier bar: rewrite this security's history.
         full = window is None or any(ex >= lookback for ex in splits)
         q = {"symbol": {"$in": sorted(sec_syms[sid])}}

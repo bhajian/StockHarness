@@ -11,7 +11,8 @@ spec:
     import oh
     from pipeline.layer2.corporate_actions import compute
 
-    oh.output("corporate_actions").upsert(compute(lambda c, f=None, cols=None: oh.read(c, f, columns=cols)))
+    # Every run writes the whole output: a row it no longer produces is moved to corporate_actions_retired (#518).
+    oh.output("corporate_actions").upsert(compute(lambda c, f=None, cols=None: oh.read(c, f, columns=cols)), prune=True)
   inputs:
     - securities
     - dividends_calendar
@@ -33,7 +34,7 @@ spec:
         security_id:
           description: StockHarness security id
         action_type:
-          description: split, cash_dividend or special_dividend
+          description: split, cash_dividend or special_dividend (FMP's own Special label decides, and a day with both has one row of each, issue 518)
         ex_date:
           description: Ex-date
         record_date:
@@ -497,7 +498,7 @@ spec:
           description: "Close as traded that day: close × the ratios of the later splits the bars already reflect (#444). Use it for price levels ($5 filter); use close or adj_close for returns."
           unit: USD
         dividend:
-          description: Dividend per share on this bar's share basis (as paid ÷ later split ratios), the one in tr_1d (#443)
+          description: Dividend per share on this bar's share basis (as paid ÷ later split ratios), the one in tr_1d (#443); a regular and a special dividend on the same ex-date are summed (#518)
           unit: USD
         volume:
           description: Volume

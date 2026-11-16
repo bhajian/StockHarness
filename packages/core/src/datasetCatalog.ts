@@ -242,7 +242,7 @@ export const DATASET_CATALOG: DatasetDef[] = [
     endpoint: 'dividends-calendar',
     scope: 'market',
     incremental: 'window',
-    keyFields: ['symbol', 'date'],
+    keyFields: ['symbol', 'date', 'frequency'], // #518: two dividends on one day are two rows
     dateField: 'date',
     supportsDateRange: true,
     perSymbol: false,
@@ -705,11 +705,13 @@ export const DATASET_CATALOG: DatasetDef[] = [
     endpoint: 'dividends',
     scope: 'per-symbol',
     incremental: 'snapshot',
-    keyFields: ['symbol', 'date'],
+    // #518: a regular and a special dividend on one ex-date are two FMP rows: the frequency keeps both.
+    keyFields: ['symbol', 'date', 'frequency'],
     dateField: 'date',
     supportsDateRange: false,
     perSymbol: true,
-    params: { limit: 100 },
+    // #518: every dividend (100 cut monthly payers' history to about eight years).
+    params: { limit: 1000 },
     sparse: 'only companies that pay dividends',
     defaultCollection: 'dividends_history',
     recommendedEveryMinutes: WEEKLY,
