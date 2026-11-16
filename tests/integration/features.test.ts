@@ -152,10 +152,14 @@ for (const mode of ['arguments', 'incomplete', 'persistent']) {
     );
     assert.ok(!JSON.stringify(retries).includes('x'.repeat(30)), 'raw malformed arguments are not logged');
     if (mode === 'persistent') {
-      assert.equal(run.status, 'failed');
+      // Since #126 an exhausted recovery does not fail the run: the agent answers from the evidence it saved,
+      // without tools (recovery_limit). No tool from a malformed batch ever runs.
+      assert.equal(run.status, 'succeeded', run.error);
       assert.equal(calls.length, 1, 'even the valid call preceding an invalid call must not execute');
-      assert.match(run.error, /malformed or incomplete JSON arguments/);
+      const exhausted = run.events.find((e: any) => e.type === 'model_error');
+      assert.match(exhausted.message, /malformed or incomplete JSON arguments.*recovery exhausted/);
       assert.equal(run.events.filter((e: any) => e.type === 'model_error').length, 1);
+      assert.ok(run.events.some((e: any) => e.type === 'recovery_limit'));
     } else {
       assert.equal(run.status, 'succeeded', run.error);
       assert.equal(calls.length, 2);

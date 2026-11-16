@@ -8,6 +8,8 @@ const admin = { email: 'admin@openharness.test', password: 'Integration-test-pas
 const tag = Date.now().toString(36);
 const headers = { Origin: base };
 let providerId = '';
+/** #160: knowledge bases need an embedding model entry (a combined chat + embedding provider is split at start). */
+let embeddingId = '';
 let connectionName = '';
 let sessionCookies: Awaited<ReturnType<APIRequestContext['storageState']>>['cookies'];
 
@@ -43,6 +45,15 @@ test.beforeAll(async ({ request }) => {
     embeddingModel: 'test-embedding',
   });
   providerId = provider.id;
+  let embedding = providers.find((p: any) => p.name === 'Browser embedding');
+  embedding ??= await api(request, '/providers', 'POST', {
+    name: 'Browser embedding',
+    modelType: 'embedding',
+    kind: 'openai-compatible',
+    baseUrl: 'http://fixtures:9090/v1',
+    model: 'test-embedding',
+  });
+  embeddingId = embedding.id;
   connectionName = 'Browser tools';
   const connections = await api(request, '/connections');
   let connection = connections.find((c: any) => c.name === connectionName);
@@ -223,7 +234,7 @@ test('knowledge bases are created from the top bar, index uploads and answer sea
   await page.locator('.topbar button[aria-label="New knowledge base"]').click();
   const name = `Browser knowledge ${tag}`;
   await page.getByLabel('Knowledge base name').fill(name);
-  await page.getByLabel('Embedding provider').selectOption(providerId);
+  await page.getByLabel('Embedding provider').selectOption(embeddingId);
   await page.getByRole('button', { name: /save knowledge base/i }).click();
   await expect(page.locator('.kb-files-title h3')).toHaveText(name, { timeout: 15000 });
   await expect(page.locator('.kb-card.active', { hasText: name })).toBeVisible();
@@ -256,7 +267,7 @@ test('knowledge starter uploads a document inline and creates a grounded harness
   await starter.getByRole('button', { name: 'Create knowledge base', exact: true }).click();
   const kbDialog = page.getByRole('dialog', { name: 'Create a knowledge base' });
   await kbDialog.getByLabel('Knowledge base name').fill(`Starter handbook ${tag}`);
-  await kbDialog.getByLabel('Embedding provider').selectOption(providerId);
+  await kbDialog.getByLabel('Embedding provider').selectOption(embeddingId);
   await kbDialog.getByRole('button', { name: /save knowledge base/i }).click();
   await expect(kbDialog).not.toBeVisible();
   await starter.getByLabel('Upload harness knowledge').setInputFiles({
@@ -450,7 +461,10 @@ test('harness settings set a knowledge workspace and learning, agents allow sub-
 }) => {
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(e.message));
-  const kb = await api(page.request, '/knowledge', 'POST', { name: `Browser workspace ${tag}`, providerId });
+  const kb = await api(page.request, '/knowledge', 'POST', {
+    name: `Browser workspace ${tag}`,
+    providerId: embeddingId,
+  });
   await page.reload();
   await expect(page.locator('.sidebar nav')).toBeVisible();
   const name = `Browser learner ${tag}`;
