@@ -15,29 +15,7 @@ delisting:
   distress: -0.55
   unknown: -0.30
   short: 0.0
-capacity_aum: 100000000 # (unused by the evaluator; see impact.aum and the record's capacity)
-# Market impact (#452, pipeline/strategy/costs.py): on top of commission + slippage, a trade pays
-# coef × 21-day volatility × √(traded value ÷ 20-day median dollar volume), at a book of `aum`, capped at max_impact.
-# The record's `capacity` is the book size at which the median trade reaches max_participation of ADV. Shorts pay
-# borrow by market cap: 25 bps (≥ $10B), 50 (≥ $2B), 200 (≥ $300M), 500 (smaller).
-impact:
-  aum: 10000000
-  coef: 1.0
-  max_impact: 0.05
-  max_participation: 0.1
-  vol_days: 21
-# Diversification (#465): every book (evaluations and simulations) holds at most max_weight of gross in one name and
-# sector_cap in one sector (by the sector on the signal date); the excess stays in cash. Simulations apply the same
-# caps to a name's total across ideas. The record's `concentration` shows effective names, the largest name and sector.
-evaluation_caps:
-  max_weight: 0.10
-  sector_cap: 0.30
-# Turnover (#466): a held name stays in the book while it ranks within top_n × rank_buffer (new names still come
-# from the top top_n), and a simulation doesn't buy a name back for reentry_cooldown_days sessions after a stop or
-# an invalidation exit. The record's summary.churn reports holding days, round trips, re-entries and cost drag.
-turnover:
-  rank_buffer: 1.5
-  reentry_cooldown_days: 10
+capacity_aum: 100000000 # assumed AUM for capacity estimates
 
 # Holdout lock (spec §5.3). Rules-mode backtests may not touch it.
 holdout_months: 18 # the last N months of price history; one shot per theory + code version (#105).

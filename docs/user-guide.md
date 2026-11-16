@@ -3798,24 +3798,9 @@ only this workspace's database. Each evaluation has up to an hour and 4 GiB of m
 5. **Execute the next day.** Trades fill at the **close one session after** the signal date
    (`execution_lag_days: 1`). Only names with a price that day can be traded. The new book earns from the following
    session.
-6. **Charge costs.** Each rebalance costs **commission 1 bp + slippage 5 bps = 6 bps** on the traded weight, plus
-   **market impact** (#452): 1 × the name's 21-day volatility × √(traded value ÷ its 20-day median dollar volume),
-   at an assumed **$10M** book (`backtest.yaml` `impact.aum`), capped at 5% per trade.
-   - Example: a 3.3% position on $10M ($330k) in a name trading $20M a day with 2% daily volatility costs about
-     0.02 × √0.0165 = **26 bps** of impact on top of the 6.
-   - Replacing the whole book trades 200% of weight (sell 100%, buy 100%), so it costs 12 bps plus impact.
-   - Shorts pay **borrow by size**, charged daily: 25 bps a year (market cap ≥ $10B), 50 (≥ $2B), 200 (≥ $300M),
-     500 (smaller); 50 when the market cap is unknown.
-   - **Caps** (#465): no name above **10%** and no sector above **30%** of the book (the sector on the signal
-     date); the excess stays in cash. A 5-name book holds 50% (10% each); 10 tech names hold 30%. Simulations cap
-     a name's total across ideas the same way. `concentration` reports effective names (1 ÷ Σw²), the largest name
-     and sector and the top-5 weight.
-   - **Turnover** (#466): a held name stays in the book while it ranks within 1.5 × `top_n` (new names come from
-     the top `top_n`), so names near the cut don't flicker in and out. `summary.churn` shows the average holding
-     days, round trips per name per year, the share of entries that re-buy a name sold within 10 sessions, and cost
-     drag (costs ÷ the return before costs). Simulations wait 10 sessions before re-buying after a stop.
-   - The record shows `impact_paid`, a `capacity` estimate (the book size at which the median trade is 10% of a
-     day's volume) and `returns_before_costs`. A name without ADV data pays the flat 6 bps only.
+6. **Charge costs.** Each rebalance costs **commission 1 bp + slippage 5 bps = 6 bps** on the traded weight.
+   - Replacing the whole book trades 200% of weight (sell 100%, buy 100%), so it costs 12 bps.
+   - Shorts pay **borrow of 50 bps a year** on their weight, charged daily.
 7. **Hold and drift.** Between rebalances, weights drift with each name's daily **total return**
    (`prices_daily.tr_1d`, else `ret_1d`).
 8. **Handle delistings.** A held name whose prices stop, and which is no longer active, takes a delisting return once
@@ -3899,7 +3884,7 @@ How the evaluator treats this plugin:
 
 - **Each month.** On the first session of each month, it scores the eligible names (the top 500 by market cap that
   day), goes long the 25 highest and short the 25 lowest at 50% gross each, and trades at the next day's close.
-- **Every day.** It charges 6 bps plus market impact on the traded weight, and borrow by size on the short side.
+- **Every day.** It charges 6 bps on the traded weight and 50 bps a year on the short side.
 - **Parameters.** The Coder can try `plugin_params: {"w_quality": 0.7}` without changing the code. Each such
   evaluation is still a new trial.
 

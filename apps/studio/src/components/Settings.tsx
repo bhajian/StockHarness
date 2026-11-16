@@ -1,4 +1,5 @@
 import { ApiExplorer } from './ApiExplorer';
+import { Tabs } from './kit';
 import { useEffect, useState } from 'react';
 import {
   FileCode2,
@@ -92,34 +93,21 @@ export function SettingsPage({ user, setUser, data, refresh, edit, act }: Settin
   return (
     <>
       <PageTitle title="Settings" />
-      <div className="tabs">
-        <button className={tab === 'models' ? 'active' : ''} onClick={() => setTab('models')}>
-          <Cpu size={16} />
-          Model providers
-        </button>
-        <button className={tab === 'email' ? 'active' : ''} onClick={() => setTab('email')}>
-          <Mail size={16} />
-          Email (SMTP)
-        </button>
-        <button className={tab === 'profile' ? 'active' : ''} onClick={() => setTab('profile')}>
-          <UserRound size={16} />
-          My profile
-        </button>
-        <button className={tab === 'secrets' ? 'active' : ''} onClick={() => setTab('secrets')}>
-          <Code2 size={16} />
-          Python secrets
-        </button>
-        <button className={tab === 'configuration' ? 'active' : ''} onClick={() => setTab('configuration')}>
-          <FileCode2 size={16} />
-          Configuration (YAML)
-        </button>
-        {user.role === 'admin' && (
-          <button className={tab === 'users' ? 'active' : ''} onClick={() => setTab('users')}>
-            <Users size={16} />
-            Team & workspace
-          </button>
-        )}
-      </div>
+      <Tabs
+        label="Settings"
+        value={tab as any}
+        onChange={(t) => setTab(t as any)}
+        tabs={[
+          { id: 'models', label: 'Model providers', icon: <Cpu size={16} /> },
+          { id: 'email', label: 'Email (SMTP)', icon: <Mail size={16} /> },
+          { id: 'profile', label: 'My profile', icon: <UserRound size={16} /> },
+          { id: 'secrets', label: 'Python secrets', icon: <Code2 size={16} /> },
+          { id: 'configuration', label: 'Configuration (YAML)', icon: <FileCode2 size={16} /> },
+          ...(user.role === 'admin'
+            ? [{ id: 'users', label: 'Team & workspace', icon: <Users size={16} /> }]
+            : []),
+        ]}
+      />
       {tab === 'models' && (
         <>
           <div className="section-toolbar">

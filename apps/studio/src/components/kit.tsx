@@ -248,18 +248,25 @@ export function Skeleton({ rows = 4 }: { rows?: number }) {
   );
 }
 
-/** Page tabs bound to the URL. */
+/**
+ * The one tab bar (#402). Page tabs (an underline bar under the page title) or, with `compact`, a segmented toggle
+ * inside a panel. Every tab bar in the studio is this component.
+ */
 export function Tabs<T extends string>({
   tabs,
   value,
   onChange,
+  compact,
+  label,
 }: {
   tabs: { id: T; label: string; icon?: ReactNode; badge?: ReactNode }[];
   value: T;
   onChange: (t: T) => void;
+  compact?: boolean;
+  label?: string;
 }) {
   return (
-    <div className="tabs page-tabs" role="tablist">
+    <div className={compact ? 'tabs compact' : 'tabs page-tabs'} role="tablist" aria-label={label}>
       {tabs.map((t) => (
         <button
           key={t.id}

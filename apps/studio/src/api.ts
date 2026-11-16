@@ -41,17 +41,9 @@ export const collections = [
   'skills',
   'datasetSyncs',
 ] as const;
-export type Platform = 'linux' | 'windows' | 'chrome' | 'openshell';
-/** Resource types in the inventory, in the order the studio offers them. */
-export const platformLabels: Record<Platform, string> = {
-  linux: 'Linux machine',
-  openshell: 'OpenShell managed machine',
-  chrome: 'Chrome',
-  windows: 'Windows',
-};
-/** The certificate authority that signed the harness certificate, and the SHA-256 of its file. */
-export type HarnessCa = { pem: string; sha256: string };
-/** A registered machine as reported by the device gateway, plus its mirrored connection. */
+// Machines and the device gateway were removed (#472); the types stay for saved harness data, and the list is empty.
+export type Platform = 'linux' | 'windows' | 'chrome';
+/** A registered machine, from before machines were removed (always none now). */
 export type Machine = {
   device_id: string;
   cluster_id?: string;
@@ -68,13 +60,10 @@ export type Machine = {
   tool_count: number | null;
   connectionId?: string;
   tools: { name: string; description?: string }[];
-  /** What the connector announced; `openshell_sandbox` marks an executor confined by OpenShell. */
   capabilities?: string[];
   created_at: string;
   endpoint: string;
 };
-export const isSandboxed = (m: Pick<Machine, 'capabilities'>) =>
-  Boolean(m.capabilities?.includes('openshell_sandbox'));
 export type ToolCatalog = Record<Platform, { name: string; description: string; risky?: boolean }[]>;
 export type Data = Record<(typeof collections)[number], Entity[]> & {
   /** Workspace defaults, such as the model provider new agents start with. */
@@ -85,8 +74,6 @@ export type Data = Record<(typeof collections)[number], Entity[]> & {
     publicUrl: string;
     catalog: Partial<ToolCatalog>;
     error?: string;
-    /** The harness CA when the server uses a private one; install commands can embed it. */
-    ca?: HarnessCa | null;
   };
 };
 export const emptyData: Data = {

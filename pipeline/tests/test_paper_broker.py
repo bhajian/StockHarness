@@ -6,8 +6,7 @@ from pipeline.strategy import engine, synthetic
 from pipeline.strategy.simulate import ListSink, simulate
 
 COSTS = {"commission_bps": 1, "slippage_bps": 5, "borrow_cost_bps_default": 50, "delisting_return": -0.3,
-         "execution_lag_days": 1, "sizing": {"gross_limit": 1.0},
-         "evaluation_caps": {"max_weight": None, "sector_cap": None}}
+         "execution_lag_days": 1, "sizing": {"gross_limit": 1.0}}
 
 MOMENTUM = '''import numpy as np
 META = {"side": "long", "horizon_days": 20, "rebalance": "weekly", "top_n": 5}
@@ -40,7 +39,7 @@ class Parity(unittest.TestCase):
     def test_one_idea_reproduces_the_evaluator_long(self):
         src, days = synthetic.market(n_sec=30, n_days=300, seed=3, momentum=1.0)
         ev, res = self.check(MOMENTUM, src, days[70], days[-1], 1e-9)
-        self.assertGreater(res["summary"]["trades"], 3)  # #466: the rank buffer keeps names, fewer round trips
+        self.assertGreater(res["summary"]["trades"], 10)
         self.assertAlmostEqual(res["summary"]["sharpe"], ev["summary"]["sharpe"], places=6)
 
     def test_long_short_and_delisting(self):
@@ -169,17 +168,6 @@ class Exits(unittest.TestCase):
         self.assertEqual(len(gone), 1)
         self.assertAlmostEqual(gone[0]["exit_price"], gone[0]["entry_price"], places=6)
         self.assertLess(res["summary"]["total_return"], 0.001)
-
-    def test_one_name_is_capped_across_ideas(self):
-        """#465: two ideas holding the same names: each name's total stays under the position cap."""
-        src, days = synthetic.market(n_sec=10, n_days=120, seed=4)
-        _, rows = sim([MOMENTUM, MOMENTUM], src, days[70], days[-1], constraints={"position_cap": 0.1})
-        by_day: dict = {}
-        for p in rows["sim_positions"]:
-            key = (p["date"], p["security_id"])
-            by_day[key] = by_day.get(key, 0.0) + abs(p.get("weight") or 0.0)
-        self.assertTrue(by_day)
-        self.assertLessEqual(max(by_day.values()), 0.1 + 0.02, "a name's total across ideas (drift aside)")
 
     def test_take_profit_fixed(self):
         src, days = synthetic.market(n_sec=10, n_days=200, seed=8, sigma=0.03)
