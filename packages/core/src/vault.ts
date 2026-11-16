@@ -72,7 +72,32 @@ export async function vaultNotes(ownerId: string): Promise<Note[]> {
   return notes;
 }
 
-export async function vaultTool(ownerId: string, name: string, args: Record<string, any>) {
+const scratch = () => collection<any>('vault_scratch');
+
+export async function vaultTool(
+  ownerId: string,
+  name: string,
+  args: Record<string, any>,
+  meta: { runId?: string; agentId?: string } = {},
+) {
+  if (name === 'vault_scratch') {
+    // #462: a Theorist's plan, kept with the run that wrote it.
+    const _id = `${(meta.runId ?? 'run').slice(0, 8)}-${Date.now().toString(36)}`;
+    await scratch().insertOne({
+      _id,
+      ownerId,
+      runId: meta.runId,
+      agentId: meta.agentId,
+      title: String(args.title ?? 'Plan').slice(0, 200),
+      text: String(args.text ?? '').slice(0, 8000),
+      at: new Date(),
+    });
+    return { path: `scratch/${_id}` };
+  }
+  if (name === 'vault_read' && String(args.path ?? '').startsWith('scratch/')) {
+    const s = await scratch().findOne({ ownerId, _id: String(args.path).slice(8) });
+    return s ? { path: args.path, title: s.title, text: s.text } : { error: `No note ${args.path}` };
+  }
   const notes = await vaultNotes(ownerId);
   const byPath = new Map(notes.map((n) => [n.path, n]));
   switch (name) {

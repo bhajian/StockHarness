@@ -319,7 +319,7 @@ export function ResearchPage({ data, isAdmin }: { data: Data; isAdmin: boolean }
 /** #460: how each Theorist model and each strategy family has done (yield = promising or successful per 100). */
 function Scorecards({ kpis }: { kpis: any }) {
   const [win, setWin] = useState<'all' | 'last90' | 'last30'>('all');
-  const [by, setBy] = useState<'byModel' | 'byFamily'>('byModel');
+  const [by, setBy] = useState<'byModel' | 'byFamily' | 'byMode'>('byModel');
   const rows: any[] = kpis?.[win]?.[by] ?? [];
   const n = (x: number | null | undefined, d = 2) => (x === null || x === undefined ? '—' : x.toFixed(d));
   const pc = (x: number | null | undefined) =>
@@ -337,6 +337,7 @@ function Scorecards({ kpis }: { kpis: any }) {
           tabs={[
             { id: 'byModel', label: 'By model' },
             { id: 'byFamily', label: 'By family' },
+            { id: 'byMode', label: 'By Theorist mode' },
           ]}
         />
         <Tabs
@@ -352,10 +353,18 @@ function Scorecards({ kpis }: { kpis: any }) {
         />
       </div>
       <div className="table-wrap">
-        <table aria-label={by === 'byModel' ? 'Scorecards by model' : 'Scorecards by family'}>
+        <table
+          aria-label={
+            by === 'byModel'
+              ? 'Scorecards by model'
+              : by === 'byFamily'
+                ? 'Scorecards by family'
+                : 'Scorecards by mode'
+          }
+        >
           <thead>
             <tr>
-              <th>{by === 'byModel' ? 'Model' : 'Family'}</th>
+              <th>{by === 'byModel' ? 'Model' : by === 'byFamily' ? 'Family' : 'Mode'}</th>
               <th className="num">Proposed</th>
               <th className="num">Approved</th>
               <th className="num">Evaluated</th>
