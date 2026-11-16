@@ -69,6 +69,23 @@ class Outputs(unittest.TestCase):
         DB["prices_t"].drop()
         DB["prices_t_retired"].drop()
 
+    def test_prune_by_retires_only_superseded_rows_of_days_the_run_wrote(self):
+        """#518: an older row of a day the run rewrote goes; a day the run did not produce stays."""
+        DB["prices_t"].drop()
+        DB["prices_t_retired"].drop()
+        old = [{"security_id": "S1", "date": "2026-11-02", "kind": "special", "known_at": "2026-11-02", "v": 1},
+               {"security_id": "S2", "date": "2026-11-02", "kind": "cash", "known_at": "2026-11-02", "v": 2}]
+        oh.upsert("prices_t", old, key=["security_id", "date", "kind"], known_at_field="known_at")
+        new = [{"security_id": "S1", "date": "2026-11-02", "kind": "cash", "known_at": "2026-11-02", "v": 1}]
+        res = oh.upsert("prices_t", new, key=["security_id", "date", "kind"], known_at_field="known_at",
+                        prune_by=["security_id", "date"])
+        self.assertEqual(res["retired"], 1)
+        left = sorted((d["security_id"], d["kind"]) for d in DB["prices_t"].find({}))
+        self.assertEqual(left, [("S1", "cash"), ("S2", "cash")], "S2's day was not produced: it stays")
+        self.assertEqual(DB["prices_t_retired"].find_one({})["kind"], "special")
+        DB["prices_t"].drop()
+        DB["prices_t_retired"].drop()
+
     def test_point_in_time_and_keys_are_enforced(self):
         out = oh.output("prices_t")
         with self.assertRaisesRegex(ValueError, "known_at"):

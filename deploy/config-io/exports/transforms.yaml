@@ -11,8 +11,9 @@ spec:
     import oh
     from pipeline.layer2.corporate_actions import compute
 
-    # Every run writes the whole output: a row it no longer produces is moved to corporate_actions_retired (#518).
-    oh.output("corporate_actions").upsert(compute(lambda c, f=None, cols=None: oh.read(c, f, columns=cols)), prune=True)
+    # A day this run wrote replaces its older rows (an old class, a revised amount): they move to
+    # corporate_actions_retired. Days the run did not produce are left alone (#518).
+    oh.output("corporate_actions").upsert(compute(lambda c, f=None, cols=None: oh.read(c, f, columns=cols)), prune_by=["security_id", "ex_date"])
   inputs:
     - securities
     - dividends_calendar

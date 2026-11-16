@@ -349,7 +349,7 @@ PRUNE_MAX_SHARE = 0.05  # #518: a prune that would retire more than this share o
 
 
 def upsert(collection: str, records: Iterable[dict], *, key: list[str], known_at_field: str | None = None,
-           prune: bool = False) -> dict:
+           prune: bool = False, prune_by: list[str] | None = None) -> dict:
     """Idempotent write on ``key``. Rows whose content did not change are skipped (content hash).
 
     Returns ``{"written": n, "unchanged": m}``. ``known_at_field``, when given, must be set on every row.
@@ -358,6 +358,9 @@ def upsert(collection: str, records: Iterable[dict], *, key: list[str], known_at
     not produce are *moved* to ``<collection>_retired`` (with ``retired_at``), never deleted outright. It refuses,
     and the run fails, when that would retire more than ``PRUNE_MAX_SHARE`` of the collection (an input that failed
     to load would otherwise retire everything).
+
+    ``prune_by`` (a prefix of the key, e.g. ``["security_id", "ex_date"]``) narrows it to *superseded* rows (#518): only
+    rows in a group this run wrote are retired, so an event the run did not produce at all is left alone.
     """
     from pymongo import UpdateOne
 
@@ -398,19 +401,23 @@ def upsert(collection: str, records: Iterable[dict], *, key: list[str], known_at
     _count(collection, "written", written)
     _count(collection, "unchanged", unchanged)
     out = {"written": written, "unchanged": unchanged}
-    if prune:
-        out["retired"] = _retire_missing(target, key, {tuple(r[k] for k in key) for r in rows})
+    if prune or prune_by:
+        groups = {tuple(r[k] for k in prune_by) for r in rows} if prune_by else None
+        out["retired"] = _retire_missing(target, key, {tuple(r[k] for k in key) for r in rows}, prune_by, groups)
         _count(collection, "retired", out["retired"])
     return out
 
 
-def _retire_missing(target, key: list[str], kept: set) -> int:
-    """Move the rows whose key is not in ``kept`` to ``<collection>_retired``; see ``upsert(prune=True)``."""
-    stale = [d["_id"] for d in target.find({}, {**{k: 1 for k in key}, "_id": 1}) if tuple(d.get(k) for k in key) not in kept]
+def _retire_missing(target, key: list[str], kept: set, by: list[str] | None = None, groups: set | None = None) -> int:
+    """Move the rows whose key is not in ``kept`` (and, with ``by``, whose group is in ``groups``) to
+    ``<collection>_retired``; see ``upsert(prune=True)``."""
+    stale = [d["_id"] for d in target.find({}, {**{k: 1 for k in key}, "_id": 1})
+             if tuple(d.get(k) for k in key) not in kept and (by is None or tuple(d.get(k) for k in by) in groups)]
     total = target.estimated_document_count()
     if not stale:
         return 0
-    if total and len(stale) > PRUNE_MAX_SHARE * total:
+    # With ``by`` only days the run wrote can lose rows, so a failed input can't empty the collection: no share guard.
+    if by is None and total and len(stale) > PRUNE_MAX_SHARE * total:
         raise RuntimeError(f"{target.name}: pruning would retire {len(stale)} of {total} rows (over "
                            f"{PRUNE_MAX_SHARE:.0%}); nothing was retired. Check the transform's inputs.")
     archive = target.database[f"{target.name}_retired"]
@@ -438,13 +445,14 @@ class _Output:
         self.collection = cfg["collection"]
         self._known = None if cfg.get("static") else cfg.get("known_at_field")
 
-    def upsert(self, records: Iterable[dict], *, prune: bool = False) -> dict:
+    def upsert(self, records: Iterable[dict], *, prune: bool = False, prune_by: list[str] | None = None) -> dict:
         # Point-in-time readers filter on the as_of field: index it with the key (#102).
         if self.cfg.get("as_of_field") and not _PREVIEW:
             _ensure_key_index(self.collection, [self.cfg["as_of_field"]])
         mode = self.cfg.get("write_mode", "upsert")
         if mode == "upsert":
-            return upsert(self.collection, records, key=self.cfg["key"], known_at_field=self._known, prune=prune)
+            return upsert(self.collection, records, key=self.cfg["key"], known_at_field=self._known, prune=prune,
+                          prune_by=prune_by)
         rows = list(records)
         if self._known and not _PREVIEW:
             for r in rows:
