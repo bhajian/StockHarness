@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api, errorMessage, send, timestamp } from '../api';
-import { Button, ErrorNotice } from './ui';
+import { Inbox } from 'lucide-react';
+import { Button, Empty, ErrorNotice } from './ui';
 import type { HumanRequest } from '../../../../packages/core/src/human.js';
 
 type RequestView = Omit<HumanRequest, 'createdAt' | 'expiresAt'> & { createdAt: string; expiresAt: string };
@@ -179,7 +180,7 @@ export function HumanInbox({ runId }: { runId?: string }) {
         </>
       )}
       {!runId && (
-        <label>
+        <label className="inbox-filter">
           Show tasks{' '}
           <select aria-label="Inbox task status" value={status} onChange={(e) => setStatus(e.target.value)}>
             <option value="pending">Pending</option>
@@ -194,7 +195,15 @@ export function HumanInbox({ runId }: { runId?: string }) {
         <RequestCard key={request._id} request={request} refresh={() => void refresh()} />
       ))}
       {!runId && !requests.length && (
-        <p>{status === 'pending' ? 'No pending requests.' : 'No matching requests.'}</p>
+        <Empty
+          icon={<Inbox size={22} />}
+          title={status === 'pending' ? 'Nothing waits for you' : 'No matching requests'}
+          text={
+            status === 'pending'
+              ? 'When an agent asks a question or needs an approval before acting, it appears here and the run waits for your answer.'
+              : 'Try another status to see earlier requests.'
+          }
+        />
       )}
     </section>
   );

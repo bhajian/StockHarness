@@ -554,7 +554,7 @@ export function RunsPage() {
           </table>
         </div>
       )}
-      <div className="pagination">
+      <div className="pagination" hidden={page === 0 && runs.length < 50}>
         <Button variant="secondary" disabled={page === 0} onClick={() => setPage((p) => p - 1)}>
           Previous
         </Button>

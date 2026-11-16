@@ -616,7 +616,11 @@ test('agent category tabs retain model, judge, limits and human settings', async
   await expect(modal.getByLabel('Token budget', { exact: true })).toHaveValue('2000000');
   await modal.getByRole('button', { name: 'Done', exact: true }).click();
   await page.getByRole('button', { name: 'Save', exact: true }).click();
-  const saved = (await api(page.request, '/workflows')).find((w: any) => w.name === name);
+  // The save is asynchronous: wait for the workflow to exist before reading it back.
+  let saved: any;
+  await expect
+    .poll(async () => (saved = (await api(page.request, '/workflows')).find((w: any) => w.name === name)))
+    .toBeTruthy();
   const config = saved.nodes.find((n: any) => n.type === 'agent').config;
   expect(config.patternConfig.judgeProviderId).toBe(providerId);
   expect(config.tokenBudget).toBe(2000000);

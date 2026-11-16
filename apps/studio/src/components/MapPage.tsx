@@ -34,6 +34,8 @@ export function MapPage() {
   const [m, setM] = useState<any>(null);
   const [error, setError] = useState('');
   const [showAllSources, setShowAllSources] = useState(false);
+  // #283: the prep column shows the transforms that need attention first, eight at a time, like the sources.
+  const [showAllPrep, setShowAllPrep] = useState(false);
   useEffect(() => {
     const load = () =>
       api('/map')
@@ -49,6 +51,12 @@ export function MapPage() {
   const sources = showAllSources
     ? m.sources
     : [...failing, ...m.sources.filter((s: any) => !failing.includes(s))].slice(0, 8);
+  const prepAttention = m.prep.filter(
+    (t: any) => t.lastRun && !['succeeded', 'skipped'].includes(t.lastRun.status),
+  );
+  const prep = showAllPrep
+    ? m.prep
+    : [...prepAttention, ...m.prep.filter((t: any) => !prepAttention.includes(t))].slice(0, 8);
   const first = m.checklist.find((c: any) => !c.done);
   return (
     <section className="page-section map-page">
@@ -141,7 +149,7 @@ export function MapPage() {
             its output collections, so every row says when it became known.
           </p>
           {!m.prep.length && <p className="muted-line">No transforms yet.</p>}
-          {m.prep.map((t: any) => (
+          {prep.map((t: any) => (
             <div key={t.id} className="map-card static">
               <span className="map-card-head">
                 <button
@@ -196,6 +204,11 @@ export function MapPage() {
               )}
             </div>
           ))}
+          {m.prep.length > 8 && (
+            <button type="button" className="link-button" onClick={() => setShowAllPrep(!showAllPrep)}>
+              {showAllPrep ? 'Show fewer' : `Show all ${m.prep.length}`}
+            </button>
+          )}
         </Column>
 
         <Arrow label="point-in-time data" />

@@ -47,9 +47,13 @@ export const researchSettingsSchema = z.object({
   scope: z
     .object({
       kind: z.enum(['index', 'symbols', 'top_market_cap']).default('index'),
-      index: z.enum(['sp500', 'ndx', 'dji']).default('sp500'),
+      index: z.enum(['sp500', 'ndx', 'dji']).optional(),
       top: z.number().int().min(1).max(5000).default(500),
     })
+    // The index belongs to an index scope only (S&P 500 when unset); a top-N or symbol scope carries none.
+    .transform(({ index, ...s }): { kind: typeof s.kind; top: number; index?: 'sp500' | 'ndx' | 'dji' } =>
+      s.kind === 'index' ? { ...s, index: index ?? 'sp500' } : s,
+    )
     .default({}),
   /** Years before the holdout to evaluate on (#453: all of it by default, from a year after the first price). */
   evaluationYears: z.number().int().min(1).max(15).default(15),

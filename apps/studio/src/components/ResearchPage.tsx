@@ -253,7 +253,9 @@ function ResearchLab({ data, isAdmin }: { data: Data; isAdmin: boolean }) {
             title="Verdicts per day"
             categories={charts.verdicts.dates}
             series={charts.verdicts.series}
+            stacked
             height={220}
+            empty="No verdicts in the last 30 days. The Judge's verdicts on evaluated ideas appear here by day."
           />
           <TimeSeriesChart
             title="Success rate"
@@ -261,6 +263,7 @@ function ResearchLab({ data, isAdmin }: { data: Data; isAdmin: boolean }) {
             presets={false}
             logToggle={false}
             height={220}
+            empty="No verdicts yet: the share of verdicts that are successful starts with the first one."
           />
           <TimeSeriesChart
             title="Cumulative trials"
@@ -268,12 +271,14 @@ function ResearchLab({ data, isAdmin }: { data: Data; isAdmin: boolean }) {
             presets={false}
             logToggle={false}
             height={220}
+            empty="No trials yet: every evaluation the Coder runs counts as one, towards the deflated Sharpe."
           />
           <BarChart
             title="Tokens by role (30 days)"
             categories={tokenChart.categories}
             series={tokenChart.series}
             height={220}
+            empty="No model calls in the last 30 days. Tokens appear here by role (Theorist, Judge, Coder) once cycles run."
           />
         </div>
       )}

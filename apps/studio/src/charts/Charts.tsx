@@ -114,6 +114,7 @@ export function TimeSeriesChart({
   kind = 'line',
   presets = true,
   logToggle = true,
+  empty,
 }: {
   data: SeriesPayload & { downsampled?: number };
   title: string;
@@ -124,6 +125,8 @@ export function TimeSeriesChart({
   kind?: 'line' | 'bar';
   presets?: boolean;
   logToggle?: boolean;
+  /** #283: shown instead of blank axes when no point has a value (say why, and what fills it). */
+  empty?: string;
 }) {
   const handle = useRef<EChartHandle | null>(null);
   const [preset, setPreset] = useState<Preset>('Max');
@@ -133,7 +136,8 @@ export function TimeSeriesChart({
     () => ({
       animation: false,
       color: SERIES_COLORS,
-      grid: { left: 56, right: 18, top: names.length > 1 ? 34 : 14, bottom: 56 },
+      // right: room for the last date label, which echarts centres on the edge (#283).
+      grid: { left: 56, right: 36, top: names.length > 1 ? 34 : 14, bottom: 56 },
       legend:
         names.length > 1
           ? {
@@ -185,7 +189,10 @@ export function TimeSeriesChart({
         name: n,
         type: kind,
         data: data.series[n].map((v) => (log && v !== null && v <= 0 ? null : v)),
-        showSymbol: false,
+        // A lone point (or a short series) is invisible as a line without its symbol (#283).
+        showSymbol: data.dates.length <= 60,
+        // A point on the last date sits on the plot's edge; don't clip it away.
+        clip: false,
         symbolSize: 8,
         connectNulls: false,
         lineStyle: { width: 2 },
@@ -249,13 +256,17 @@ export function TimeSeriesChart({
       }
       table={<SeriesTable data={data} unit={unit} />}
     >
-      <EChart
-        option={option}
-        height={height}
-        group={group}
-        ariaLabel={`${title}: ${names.join(', ')}`}
-        onReady={(h) => (handle.current = h)}
-      />
+      {empty && !Object.values(data.series).some((s) => s.some((v) => v !== null && v !== 0)) ? (
+        <ChartEmpty height={height} text={empty} />
+      ) : (
+        <EChart
+          option={option}
+          height={height}
+          group={group}
+          ariaLabel={`${title}: ${names.join(', ')}`}
+          onReady={(h) => (handle.current = h)}
+        />
+      )}
     </ChartFrame>
   );
 }
@@ -267,6 +278,8 @@ export function BarChart({
   subtitle,
   height = 240,
   horizontal = false,
+  stacked = false,
+  empty,
 }: {
   categories: string[];
   series: Record<string, number[]>;
@@ -274,6 +287,10 @@ export function BarChart({
   subtitle?: React.ReactNode;
   height?: number;
   horizontal?: boolean;
+  /** #283: one bar per category made of its series (readable with many categories). */
+  stacked?: boolean;
+  /** #283: shown instead of blank axes when every bar is zero. */
+  empty?: string;
 }) {
   const names = Object.keys(series);
   const cat = { type: 'category', data: categories, ...axisStyle, splitLine: { show: false } };
@@ -299,6 +316,7 @@ export function BarChart({
         name: n,
         type: 'bar',
         data: series[n],
+        ...(stacked ? { stack: 'total' } : {}),
         barMaxWidth: 22,
         barGap: '8%',
         itemStyle: {
@@ -309,7 +327,7 @@ export function BarChart({
         emphasis: { itemStyle: { opacity: 0.85 } },
       })),
     }),
-    [categories, series, horizontal, names.join('\u0000')],
+    [categories, series, horizontal, stacked, names.join('\u0000')],
   );
   return (
     <ChartFrame
@@ -338,8 +356,20 @@ export function BarChart({
         </table>
       }
     >
-      <EChart option={option} height={height} ariaLabel={title} />
+      {empty && !Object.values(series).some((s) => s.some((v) => !!v)) ? (
+        <ChartEmpty height={height} text={empty} />
+      ) : (
+        <EChart option={option} height={height} ariaLabel={title} />
+      )}
     </ChartFrame>
+  );
+}
+/** #283: a chart with nothing to draw says why, at the chart's height, so the grid keeps its shape. */
+function ChartEmpty({ height, text }: { height: number; text: string }) {
+  return (
+    <div className="chart-empty" style={{ height }} role="note">
+      {text}
+    </div>
   );
 }
 

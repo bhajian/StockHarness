@@ -1847,7 +1847,7 @@ textarea::placeholder {
 }
 .kpi-row {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); /* #283: six fit one row at 1440 px */
   gap: 12px;
   margin-bottom: 16px;
 }
@@ -1927,7 +1927,7 @@ textarea::placeholder {
 }
 @media (max-width: 1280px) {
   .transform-panes {
-    grid-template-columns: 220px minmax(0, 1fr);
+    grid-template-columns: 240px minmax(0, 1fr);
   }
   .transform-config {
     grid-column: 1 / -1;
@@ -1970,6 +1970,17 @@ textarea::placeholder {
 .input-collection-head small {
   margin-left: auto;
   color: var(--faint);
+  /* #283: "L1 · 1,234" stays on one line; the name gives way (it has a title). */
+  white-space: nowrap;
+  flex: none;
+}
+.input-collection-head .link-button {
+  min-width: 0;
+}
+.input-collection-head code {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .link-button {
   display: inline-flex;
@@ -3001,7 +3012,7 @@ textarea::placeholder {
 }
 .evaluation-page .kpi-row {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); /* #283: six fit one row at 1440 px */
   gap: 12px;
 }
 /* Collection bindings (#148) */
@@ -3144,7 +3155,7 @@ textarea::placeholder {
 }
 .evaluation-report .kpi-row {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); /* #283: six fit one row at 1440 px */
   gap: 12px;
 }
 .evaluation-report .eval-grid {
@@ -3962,7 +3973,12 @@ td.loss {
 }
 .research-lab {
   display: grid;
+  /* #283: one column that never grows past the page; wide parts (the board, tables) scroll inside. */
+  grid-template-columns: minmax(0, 1fr);
   gap: 16px;
+  min-width: 0;
+}
+.research-lab > * {
   min-width: 0;
 }
 .research-setup,
@@ -4362,8 +4378,14 @@ td.loss {
   margin: 0;
   padding: 0;
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  /* #283: the six steps in one row (or two rows of three), never five and an orphan. */
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 8px;
+}
+@media (max-width: 1280px) {
+  .map-checklist {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
 }
 .map-checklist button {
   width: 100%;
@@ -4557,7 +4579,9 @@ button.map-card:hover {
 }
 .map-arrow {
   flex: none;
-  align-self: center;
+  /* #283: level with the column heads, not adrift halfway down a tall column. */
+  align-self: flex-start;
+  margin-top: 26px;
   display: grid;
   justify-items: center;
   gap: 2px;
@@ -4939,4 +4963,76 @@ th.num .th-sort {
 .tabs.page-tabs button:focus-visible {
   outline: 2px solid var(--blue, #2f6fbe);
   outline-offset: -2px;
+}
+
+/* #283: the top bar fits at 1024 px: pills and status never wrap, and the spacing tightens before anything clips. */
+.data-freshness,
+.system-status,
+.topbar-action {
+  white-space: nowrap;
+}
+@media (max-width: 1200px) {
+  .topbar {
+    padding: 0 16px;
+    gap: 8px;
+  }
+  .topbar-right {
+    gap: 8px;
+  }
+  .topbar-tabs {
+    margin-left: 4px;
+  }
+  /* The status keeps its dot (and a tooltip); the word goes. */
+  .system-status-text {
+    display: none;
+  }
+  .data-freshness {
+    margin-right: 0;
+  }
+}
+
+/* #283: a chart with no data says so in its own box. */
+.chart-empty {
+  display: grid;
+  place-items: center;
+  text-align: center;
+  padding: 0 24px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+}
+
+/* #283: segmented choices wrap rather than clip their last option on narrow pages. */
+.segmented {
+  flex-wrap: wrap;
+  max-width: 100%;
+}
+
+/* #283: the inbox filter is a compact inline control, not a full-width bar. */
+.inbox-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0 12px;
+  font-size: 13px;
+}
+.inbox-filter select {
+  width: auto;
+  min-width: 160px;
+}
+
+/* #283: the hidden attribute always hides, even on elements whose class sets a display. */
+[hidden] {
+  display: none !important;
+}
+@media (max-width: 720px) {
+  /* Phones: the status dot's text goes, and the freshness pill may wrap, so the bar never scrolls sideways. */
+  .system-status {
+    display: none;
+  }
+  .data-freshness {
+    white-space: normal;
+  }
 }
