@@ -44,7 +44,8 @@ export const researchSettingsSchema = z.object({
       top: z.number().int().min(1).max(5000).default(500),
     })
     .default({}),
-  evaluationYears: z.number().int().min(1).max(15).default(3),
+  /** Years before the holdout to evaluate on (#453: all of it by default, from EVALUATION_FLOOR). */
+  evaluationYears: z.number().int().min(1).max(15).default(15),
   /** Effort and turns per research agent (#266): the defaults suit real runs; a dev smoke test uses medium / ~12. */
   agentEffort: z.enum(['light', 'medium', 'high', 'extra-high', 'max']).default('high'),
   agentMaxTurns: z.number().int().min(3).max(200).default(30),
@@ -156,12 +157,18 @@ export async function addSteeringNote(ownerId: string, note: string, by?: string
 }
 
 const addYears = (iso: string, n: number) => `${Number(iso.slice(0, 4)) + n}${iso.slice(4)}`;
+/**
+ * The earliest exploration start (#453): prices begin 2016-01-04, so a year later every 12-month lookback has data
+ * (an earlier start leaves the first year's books empty, which is a blocking warning).
+ */
+export const EVALUATION_FLOOR = '2017-01-03';
 /** The evaluation window the Coder should use: the years before the holdout, on the configured symbols. */
 export async function evaluationParams(ownerId: string, s?: ResearchSettings) {
   const st = s ?? (await researchSettings(ownerId));
   const end = (await evaluatorSettings(ownerId)).readableEnd ?? (await latestPriceDate(ownerId));
   if (!end) return undefined;
-  const start = addYears(end, -st.evaluationYears);
+  const wanted = addYears(end, -st.evaluationYears);
+  const start = wanted < EVALUATION_FLOOR ? EVALUATION_FLOOR : wanted;
   return st.scope?.kind === 'top_market_cap'
     ? { start, end, universe: { top_by_market_cap: st.scope.top } }
     : { start, end, symbols: st.evaluationSymbols };

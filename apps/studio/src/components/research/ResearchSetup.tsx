@@ -357,7 +357,7 @@ export function ResearchSetup({
               />
             </Field>
           )}
-          <Field label="Evaluation years (before the holdout)">
+          <Field label="Evaluation years (before the holdout)" hint="15 = all history, from 2017-01-03">
             <input
               type="number"
               min={1}

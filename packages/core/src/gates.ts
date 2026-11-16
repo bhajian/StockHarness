@@ -7,7 +7,11 @@ import { collection } from './db.js';
 import { HttpError } from './security.js';
 
 export const gatesSchema = z.object({
-  /** Exploration (out-of-sample, walk-forward) Sharpe. */
+  /**
+   * Exploration Sharpe over the risk-free rate (#445), on the whole exploration window. It is in-sample: the plugin
+   * was designed on that window, and the folds are calendar slices with no refit (#453). The holdout is the
+   * out-of-sample test.
+   */
   minSharpe: z.number().default(0.5),
   /** Deflated Sharpe probability over all trials (#106). */
   minDeflatedSharpe: z.number().min(0).max(1).default(0.95),
@@ -16,6 +20,7 @@ export const gatesSchema = z.object({
   /** The one-shot holdout (#105): excess over the S&P 500 above this, and Sharpe at least minHoldoutSharpe. */
   minHoldoutExcess: z.number().default(0),
   minHoldoutSharpe: z.number().default(0.3),
+  /** Round-trip trades (#453: a holding from entry to exit), not every re-weight. */
   minTrades: z.number().int().min(0).default(100),
   /** Average names held per rebalance. */
   minHoldings: z.number().min(0).default(10),
@@ -155,8 +160,17 @@ export function evaluateGates(gates: Gates, explore: Rec | undefined, holdout?: 
     share !== null && share >= gates.minPositiveExcessYears,
     years.map((y) => `${y.year} ${y.excess >= 0 ? '+' : ''}${(y.excess * 100).toFixed(1)}%`).join(', '),
   );
-  const trades = explore.summary?.trades ?? null;
-  add('trades', trades, gates.minTrades, trades !== null && trades >= gates.minTrades);
+  // #453: round trips (trade_stats.count); summary.trades counts every re-weight, which a 10-name monthly book piles up
+  // in months. Older records without trade_stats keep the old count.
+  const roundTrips = explore.trade_stats?.count ?? null;
+  const trades = roundTrips ?? explore.summary?.trades ?? null;
+  add(
+    'trades',
+    trades,
+    gates.minTrades,
+    trades !== null && trades >= gates.minTrades,
+    roundTrips !== null ? 'round-trip trades' : 'orders (record without trade_stats)',
+  );
   const holdings = avgHoldings(explore);
   add('holdings', holdings, gates.minHoldings, holdings >= gates.minHoldings, 'average names per rebalance');
   const alphaT = explore.factors?.alpha_t ?? null;

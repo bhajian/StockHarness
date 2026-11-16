@@ -3219,13 +3219,12 @@ used. The Factor exposures table then says "market only (no features_ranked or a
 
 #### Trades
 
-Trades are counted at every rebalance: each name whose target weight differs from its drifted weight counts as one
-trade. That includes topping a held name back up to equal weight. Entries, exits and resizes all count.
+The trades gate counts **round trips** (#453): a holding from entry to exit, the same count as the **Trade returns**
+chart (`trade_stats.count`). Re-weighting a held name back to equal weight doesn't count. Records made before
+evaluator 1.4 without `trade_stats` keep the older count of every re-weight.
 
-> Example: a weekly book of 30 names over 3 years has about 156 rebalances. It records thousands of trades, so it
-> passes easily. A **monthly** book of 10 names over 1 year (12 rebalances) records at most about 120 and may fail.
-
-The **Trade returns** chart counts trades differently: as round trips, from entry to exit.
+> Example: a monthly book of 10 names that replaces 3 names a month makes about 36 round trips a year: 100 takes
+> about three years, which the default window (all history from 2017 to the holdout) gives.
 
 #### Holdings
 
