@@ -76,7 +76,7 @@ metadata:
   name: features_daily
   version: "1"
 spec:
-  description: "Daily features per security from point-in-time inputs only: price (momentum, 12-1, volatility, 52-week high), valuation, quality and growth from the fundamentals version known that day priced at that day's market cap, and days since the latest filing. Every feature is in the registry (pipeline.layer2.features.REGISTRY) and documented in the catalog."
+  description: "Daily features per security from point-in-time inputs only: price (momentum, 12-1, volatility, 52-week high), valuation, quality and growth from the fundamentals version known that day priced at that day's market cap, days since the latest filing, and events (#457: earnings surprises, analyst revisions, price targets, insider buying, S&P 500 additions, share-count change). Every feature is in the registry (pipeline.layer2.features.REGISTRY) and documented in the catalog."
   code: |
     import oh
     from pipeline.layer2.features import compute_daily, registry_docs
@@ -91,6 +91,11 @@ spec:
     - prices_daily
     - universe_daily
     - fundamentals_pit
+    - earnings_surprises
+    - analyst_grades_history
+    - price_target_changes
+    - insider_trades
+    - index_changes
   outputs:
     - collection: features_daily
       key:
