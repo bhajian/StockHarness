@@ -252,6 +252,14 @@ test('ideas: list, detail, debate, code, actions, reproduce, compare, export', a
   const chips = Object.fromEntries(verdict.numbers.map((c: any) => [c.text, c.evaluationId]));
   assert.equal(chips[sharpe.toFixed(3)], idea.explore.id, 'a cited number links to its evaluation');
   assert.equal(chips['9.99'], null, 'an unsourced number is flagged');
+  assert.equal(verdict.numbers.find((c: any) => c.text === '9.99').kind, 'unsourced');
+  // #279: the Theorist's proposal has no red chips: its numbers are design choices.
+  const proposal = debate.filter((d: any) => d.role === 'theorist');
+  assert.ok(proposal.length > 0);
+  assert.ok(
+    proposal.every((d: any) => d.numbers.every((c: any) => c.kind !== 'unsourced')),
+    JSON.stringify(proposal.map((d: any) => d.numbers)),
+  );
 
   const code = await ok('/ideas/T-1/code');
   assert.deepEqual(
