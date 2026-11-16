@@ -1,4 +1,3 @@
-import { guardrailApi } from './guardrails.js';
 import { activities, activityView, readAgentActivity } from '../../../packages/core/src/agentActivity.js';
 import {
   canAnswer,
@@ -683,7 +682,6 @@ app.use('/api/integrations', requireSession, integrations);
 app.use('/api/integrations/webhooks', requireSession, webhookSettings);
 app.use('/api/mongodb', requireSession, mongodb);
 app.use('/api', requireSession, codeJobsApi);
-app.use('/api', requireSession, guardrailApi);
 app.use('/api', requireSession, datasetSyncRouter);
 app.use('/api', requireSession, objectsRouter);
 app.use('/api', requireSession, configBackupRouter);

@@ -1,6 +1,5 @@
 # AWS EKS overlay: HTTP ALB ingress + persistent gp3 EBS storage.
-# Excludes the Caddy TLS proxy (ALB terminates at L7) and the optional NeMo
-# guardrails / Garak evaluation services.
+# Excludes the Caddy TLS proxy (ALB terminates at L7).
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 namespace: openharness
@@ -44,32 +43,6 @@ patches:
       kind: NetworkPolicy
       metadata:
         name: public-proxy
-  # Drop the optional NeMo guardrails service.
-  - patch: |-
-      $patch: delete
-      apiVersion: apps/v1
-      kind: Deployment
-      metadata:
-        name: guardrails
-  - patch: |-
-      $patch: delete
-      apiVersion: v1
-      kind: Service
-      metadata:
-        name: guardrails
-  # Drop the optional Garak evaluation service.
-  - patch: |-
-      $patch: delete
-      apiVersion: apps/v1
-      kind: Deployment
-      metadata:
-        name: guardrail-evaluation
-  - patch: |-
-      $patch: delete
-      apiVersion: v1
-      kind: Service
-      metadata:
-        name: guardrail-evaluation
   # Public origin: the ALB terminates TLS, so the app sees https via X-Forwarded-Proto.
   - patch: |-
       apiVersion: v1

@@ -1,10 +1,4 @@
 services:
-  guardrails:
-    # Browser previews exercise NeMo, even when the developer has not enabled its optional profile.
-    profiles: !reset []
-    environment:
-      NEMO_SAFETY_MODEL_URL: http://fixtures:9090/v1
-      NEMO_SAFETY_MODEL: test-safety-classifier
   api:
     environment: &test-stores
       ALLOWED_PRIVATE_HOSTS: fixtures,host.docker.internal
