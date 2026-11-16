@@ -5,7 +5,9 @@ from pipeline.strategy import engine, synthetic
 from pipeline.strategy.engine import EvaluationError
 
 COSTS = {"commission_bps": 1, "slippage_bps": 5, "borrow_cost_bps_default": 50, "delisting_return": -0.3,
-         "execution_lag_days": 1, "sizing": {"gross_limit": 1.0}}
+         "execution_lag_days": 1, "sizing": {"gross_limit": 1.0},
+         # The mechanics tests hold one-name books; the caps (#465) have their own tests.
+         "evaluation_caps": {"max_weight": None, "sector_cap": None}}
 
 MOMENTUM = '''import numpy as np
 META = {"side": "long", "horizon_days": 20, "rebalance": "weekly", "top_n": 5}
@@ -23,7 +25,8 @@ def constant(side="long", top_n=1, rebalance="weekly"):
 
 def run(code, src, start, end, **kw):
     params = {"start": start, "end": end, **kw.pop("params", {})}
-    return engine.evaluate(code, source=src, policies=synthetic.POLICIES, params=params, config=COSTS, **kw)
+    return engine.evaluate(code, source=src, policies=synthetic.POLICIES, params=params, config=kw.pop("config", COSTS),
+                           **kw)
 
 
 class Engine(unittest.TestCase):
@@ -33,7 +36,7 @@ class Engine(unittest.TestCase):
         b = run(MOMENTUM, src, days[70], days[-1])
         self.assertEqual(a, b)
         self.assertTrue(a["record_hash"].startswith("sha256:"))
-        self.assertEqual(a["evaluator_version"], "1.4.0")
+        self.assertEqual(a["evaluator_version"], "1.6.0")
         self.assertGreater(a["summary"]["rebalances"], 30)
         self.assertEqual(len(a["series"]["dates"]), len(a["series"]["series"]["equity"]))
         c = run(MOMENTUM, src, days[70], days[-1], params={"top_n": 3})
@@ -279,3 +282,81 @@ class HeldDataQuality(unittest.TestCase):
         w = [x for x in r["warnings"] if x["code"] == "data_quality_on_held_names"]
         self.assertEqual(len(w), 1)
         self.assertEqual(w[0]["by_flag"], {"large_move": 1})
+
+
+class Costs(unittest.TestCase):
+    """#452: square-root impact by ADV at the assumed book size, borrow by size, capacity in the record."""
+
+    def _market(self, adv, mcap):
+        src, days = synthetic.market(n_sec=20, n_days=200, seed=7)
+        for u in src.collections["universe_daily"]:
+            u["adv_20d"], u["market_cap"] = adv, mcap
+        return src, days
+
+    def test_illiquid_names_cost_more(self):
+        liquid, days = self._market(5e9, 5e10)
+        thin, _ = self._market(2e6, 5e10)
+        a = run(MOMENTUM, liquid, days[70], days[-1])
+        b = run(MOMENTUM, thin, days[70], days[-1])
+        self.assertGreater(b["summary"]["impact_paid"], 10 * a["summary"]["impact_paid"])
+        self.assertLess(b["summary"]["total_return"], a["summary"]["total_return"])
+        self.assertGreater(a["capacity"]["capacity_aum"], b["capacity"]["capacity_aum"])
+        self.assertEqual(len(a["series"]["series"]["returns_before_costs"]), len(a["series"]["dates"]))
+
+    def test_unknown_adv_pays_the_flat_rates_only(self):
+        src, days = synthetic.market(n_sec=20, n_days=200, seed=7)
+        r = run(MOMENTUM, src, days[70], days[-1])
+        self.assertEqual(r["summary"]["impact_paid"], 0.0)
+        self.assertEqual(r["capacity"], {"trades": 0})
+
+    def test_borrow_by_size(self):
+        from pipeline.strategy import costs
+        self.assertEqual(costs.borrow_bps(5e10, 50), 25.0)
+        self.assertEqual(costs.borrow_bps(1e8, 50), 500.0)
+        self.assertEqual(costs.borrow_bps(None, 50), 50)
+        small, days = self._market(5e9, 1e8)
+        big, _ = self._market(5e9, 5e10)
+        short = MOMENTUM.replace('"side": "long"', '"side": "short"')
+        self.assertGreater(run(short, small, days[70], days[-1])["summary"]["borrow_paid"],
+                           run(short, big, days[70], days[-1])["summary"]["borrow_paid"])
+
+
+class Churn(unittest.TestCase):
+    """#466: the rank buffer keeps held names near the cut, and the record reports how much the book churns."""
+
+    def test_rank_buffer_keeps_names_near_the_cut(self):
+        order = [f"S{k}" for k in range(10)]
+        held = {"S4": 0.25, "S5": 0.25}  # held names now ranked 5th and 6th; a top-4 book
+        self.assertEqual(sorted(engine._with_buffer(order, set(held), 4, 1.5)), ["S0", "S1", "S4", "S5"])
+        self.assertEqual(engine._with_buffer(order, set(held), 4, 1.0), ["S0", "S1", "S2", "S3"])
+
+    def test_buffer_lowers_turnover_and_churn_is_reported(self):
+        src, days = synthetic.market(n_sec=40, n_days=260, seed=9)
+        tight = run(MOMENTUM, src, days[70], days[-1], config={**COSTS, "turnover": {"rank_buffer": 1.0}})
+        loose = run(MOMENTUM, src, days[70], days[-1], config={**COSTS, "turnover": {"rank_buffer": 2.0}})
+        self.assertLess(loose["summary"]["annual_turnover"], tight["summary"]["annual_turnover"])
+        c = loose["summary"]["churn"]
+        self.assertGreater(c["avg_holding_days"], tight["summary"]["churn"]["avg_holding_days"])
+        self.assertEqual(c["rank_buffer"], 2.0)
+        self.assertIsNotNone(c["reentry_rate"])
+
+
+
+class Diversification(unittest.TestCase):
+    """#465: name and sector caps on every book, and how concentrated the books were."""
+
+    def test_cap_book(self):
+        book = {"A": 0.25, "B": 0.25, "C": 0.25, "D": 0.25}
+        sector = {"A": "Tech", "B": "Tech", "C": "Tech", "D": "Energy"}.get
+        capped = engine.cap_book(book, 0.2, 0.3, sector)
+        self.assertAlmostEqual(capped["D"], 0.2)
+        self.assertAlmostEqual(sum(capped[s] for s in "ABC"), 0.3)
+        self.assertAlmostEqual(engine.cap_book({"A": -0.5}, 0.1, None, sector)["A"], -0.1)
+
+    def test_records_carry_concentration_and_obey_the_caps(self):
+        src, days = synthetic.market(n_sec=30, n_days=200, seed=3)
+        r = run(MOMENTUM, src, days[70], days[-1], config={**COSTS, "evaluation_caps": {"max_weight": 0.1, "sector_cap": 0.3}})
+        c = r["concentration"]
+        self.assertLessEqual(c["max_sector"], 1.0)
+        self.assertGreater(c["effective_names"], 1)
+        self.assertLessEqual(max(r["series"]["series"]["gross"]), 0.6 + 1e-6, "two sectors at 30% each")
