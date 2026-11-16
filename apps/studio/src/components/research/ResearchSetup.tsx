@@ -200,6 +200,16 @@ export function ResearchSetup({
               onChange={(e) => set({ maxCoderBacklog: Number(e.target.value) })}
             />
           </Field>
+          <Field label="Theorist mode" hint="Steps: read, note, then propose (compared on the Scorecards)">
+            <select
+              aria-label="Theorist mode"
+              value={s.theoristMode ?? 'single'}
+              onChange={(e) => set({ theoristMode: e.target.value })}
+            >
+              <option value="single">One pass</option>
+              <option value="steps">Steps</option>
+            </select>
+          </Field>
         </div>
         <table className="compact-table setup-theorists" aria-label="Theorist models">
           <thead>

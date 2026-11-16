@@ -1,6 +1,8 @@
 // Scorecard formulas (#460), pure so they are unit-tested; researchKpis.ts loads the data.
 export type IdeaRow = {
   model: string;
+  /** #462: single or steps (from the theory's mode tag). */
+  mode?: string;
   agentId?: string;
   family: string;
   status: string;
@@ -71,6 +73,7 @@ export function scorecards(rows: IdeaRow[], now = new Date()) {
     overall: scorecard('all', rs),
     byModel: group(rs, (r) => r.model),
     byFamily: group(rs, (r) => r.family),
+    byMode: group(rs, (r) => r.mode ?? 'single'),
   });
   return { all: view(rows), last90: view(since(90)), last30: view(since(30)) };
 }

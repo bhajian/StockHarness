@@ -54,3 +54,20 @@ test('ideas name the Theorist that proposed them', () => {
   assert.equal(agentLabel('judge_pre'), undefined);
   assert.equal(agentLabel(undefined), undefined);
 });
+
+test('#462: step mode gives each Theorist the step prompt and the scratch-note tool; single mode is unchanged', () => {
+  const theorists = (w: ReturnType<typeof makeResearchLoop>) =>
+    w.nodes.filter((n: any) => /^theorist_\d+$/.test(n.id)).map((n: any) => n.config);
+  const single = theorists(makeResearchLoop({ ...base, theorists: 2 }));
+  const steps = theorists(makeResearchLoop({ ...base, theorists: 2, theoristMode: 'steps' }));
+  for (const c of single) {
+    assert.doesNotMatch(c.systemPrompt, /Step 1 \(orient\)/);
+    assert.ok(!c.connections[0].tools.includes('vault_scratch'));
+  }
+  for (const c of steps) {
+    assert.match(c.systemPrompt, /Step 1 \(orient\)[\s\S]*Step 5 \(decide\)/);
+    assert.ok(c.connections[0].tools.includes('vault_scratch'));
+    assert.ok(c.connections[0].tools.includes('submit_theory'));
+  }
+  assert.equal(researchSettingsSchema.parse({}).theoristMode, 'single');
+});

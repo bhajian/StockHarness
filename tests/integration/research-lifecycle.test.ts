@@ -628,3 +628,31 @@ test('#459: the research vault: index, a family note, an idea post-mortem, searc
   assert.ok(Array.isArray(found.results));
   assert.match((await theorist.call('vault_read', { path: 'nope' })).error, /No note/);
 });
+
+test('#462: step mode: a scratch note is kept and read back, and new ideas carry their Theorist mode', async () => {
+  const { theorist } = clients;
+  await ok('/research/settings', { maxCoderBacklog: 200, theoristMode: 'steps' }, 'PUT');
+  const note = await theorist.call('vault_scratch', {
+    title: 'Plan',
+    text: 'Candidates: twelve-day leaders vs [[ideas/T-1]].',
+  });
+  assert.match(note.path, /^scratch\//);
+  const back = await theorist.call('vault_read', { path: note.path });
+  assert.match(JSON.stringify(back), /twelve-day leaders/);
+  const t = await theorist.call('submit_theory', {
+    title: 'Twelve-day leaders, step mode',
+    hypothesis: 'The best 12-day performers keep outperforming over the next two weeks in liquid names.',
+    signal_logic: 'Rank by 12-day compounded tr_1d; long the top 3, rebalanced weekly.',
+    falsification: 'No excess over the S&P 500.',
+    data_needed: ['prices_daily.tr_1d'],
+    reasoning: 'Step-mode test',
+  });
+  const idea = await ok(`/ideas/${t.theory_id}`);
+  assert.ok(JSON.stringify(idea).includes('mode:steps'), JSON.stringify(idea).slice(0, 400));
+  const kpis = await ok('/research/kpis');
+  assert.ok(
+    kpis.all.byMode.some((c: any) => c.key === 'steps'),
+    JSON.stringify(kpis.all.byMode),
+  );
+  await ok('/research/settings', { maxCoderBacklog: 8, theoristMode: 'single' }, 'PUT');
+});

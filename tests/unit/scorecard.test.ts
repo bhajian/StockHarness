@@ -51,3 +51,14 @@ test('scorecards split by model, family and window', () => {
   );
   assert.equal(s.all.byFamily.find((c: any) => c.key === 'value').yieldPer100, 100);
 });
+
+test('#462: scorecards by Theorist mode; ideas without a mode count as single', () => {
+  const s = scorecards(
+    [row({ mode: 'steps' }), row({}), row({ mode: 'single' })],
+    new Date('2026-11-15T00:00:00Z'),
+  );
+  assert.deepEqual(s.all.byMode.map((c: any) => [c.key, c.proposed]).sort(), [
+    ['single', 2],
+    ['steps', 1],
+  ]);
+});

@@ -223,3 +223,17 @@ ideas proposed, the Judge's pre-code approval rate, ideas evaluated, promising a
 (promising + successful per 100 proposals), the median exploration Sharpe and excess, and the Coder's attempts per
 idea (`GET /api/research/kpis`). Each Theorist's brief carries its own record (`your_track_record`, by agent id or
 else its model), with its families, so it can lean towards what survived the gates.
+
+## Theorist step mode (#462)
+
+Setup → Theorists → **Theorist mode** chooses how a Theorist works (`theoristMode` in the research settings):
+
+- **One pass** (`single`, the default): the original prompt, one agent turn sequence that reads and proposes.
+- **Steps** (`steps`): the same Theorist works in five explicit steps, each reading only what it needs:
+  orient (the brief and `vault_index`), learn (the family note and 3 to 5 related notes), data (describe and sample
+  every field it would use), plan (`vault_scratch`: two or three candidates with why each could work or fail, linked
+  to past ideas) and decide (check near-duplicates, then one `submit_theory`).
+
+`vault_scratch` (Theorist only) keeps a plan note under `scratch/<id>` in the vault; `vault_read` reads it back.
+Every new idea is tagged `mode:single` or `mode:steps`, and the Scorecards group **By Theorist mode**, so the two
+modes can be compared on yield and Sharpe before anyone switches. Ideas from before #462 count as single.

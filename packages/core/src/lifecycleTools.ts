@@ -108,6 +108,18 @@ export const LIFECYCLE_TOOLS: {
     },
   },
   {
+    name: 'vault_scratch',
+    roles: ['theorist'],
+    description:
+      'Write a short scratch note (your plan: candidate hypotheses, why and why not, [[ideas/T-n]] links). Returns its path; vault_read reads it back, and the Judge can read it.',
+    inputSchema: {
+      type: 'object',
+      properties: { title: str, text: str },
+      required: ['text'],
+      additionalProperties: false,
+    },
+  },
+  {
     name: 'vault_backlinks',
     roles: 'all',
     description:
@@ -300,12 +312,13 @@ export async function callLifecycleTool(
       const { researchBrief } = await import('./researchLoop.js');
       return researchBrief(ownerId, role, meta);
     }
+    case 'vault_scratch':
     case 'vault_index':
     case 'vault_search':
     case 'vault_read':
     case 'vault_backlinks': {
       const { vaultTool } = await import('./vault.js');
-      return vaultTool(ownerId, name, args);
+      return vaultTool(ownerId, name, args, meta);
     }
     case 'search_theories':
       return searchTheories(ownerId, String(args.text ?? ''), Math.min(50, Number(args.limit) || 10));
@@ -325,9 +338,12 @@ export async function callLifecycleTool(
         return brief(await transitionTheory(ownerId, edited._id, 'pre_review', actor, args.reasoning));
       }
       await assertBacklogRoom(ownerId);
-      return brief(
-        await createTheory(ownerId, content(args), actor, { submit: true, reasoning: args.reasoning }),
-      );
+      // #462: the Theorist mode that produced the idea, for the scorecards (mode:single / mode:steps).
+      const { researchSettings } = await import('./researchLoop.js');
+      const mode = (await researchSettings(ownerId)).theoristMode ?? 'single';
+      const c = content(args) as Record<string, any>;
+      c.tags = [...new Set([...(Array.isArray(c.tags) ? c.tags : []), `mode:${mode}`])];
+      return brief(await createTheory(ownerId, c as any, actor, { submit: true, reasoning: args.reasoning }));
     }
     case 'review_theory': {
       need(role, ['judge'], name);

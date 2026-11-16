@@ -10,7 +10,10 @@ export { scorecard, scorecards, type IdeaRow } from './scorecard.js';
 /** The ideas of a workspace with who proposed them and their latest exploration. */
 export async function ideaRows(ownerId: string): Promise<IdeaRow[]> {
   const ts = await theories()
-    .find({ ownerId }, { projection: { status: 1, family: 1, history: 1, createdAt: 1, codeAttempts: 1 } })
+    .find(
+      { ownerId },
+      { projection: { status: 1, family: 1, history: 1, createdAt: 1, codeAttempts: 1, tags: 1 } },
+    )
     .toArray();
   const evals = await collection<any>('evaluations')
     .find(
@@ -35,6 +38,9 @@ export async function ideaRows(ownerId: string): Promise<IdeaRow[]> {
       model: created?.actor?.model ?? 'unknown',
       ...(created?.actor?.agentId ? { agentId: created.actor.agentId } : {}),
       family: t.family || 'unknown',
+      mode: String((t.tags ?? []).find((x: string) => String(x).startsWith('mode:')) ?? 'mode:single').slice(
+        5,
+      ),
       status: t.status,
       createdAt: new Date(t.createdAt),
       approved: (t.history ?? []).some((h: any) => h.type === 'transition' && h.to === 'approved_for_code'),

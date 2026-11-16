@@ -24,6 +24,11 @@ export const researchSettingsSchema = z.object({
   /** Theorists that propose in parallel each cycle (the harness's Parallel step). */
   theoristsPerCycle: z.number().int().min(1).max(8).default(2),
   /**
+   * #462: "single" (one prompt) or "steps": brief and vault, related notes, the data, a plan in a scratch note, then
+   * one submission. Ideas are tagged with the mode, so the scorecards compare them before anyone switches.
+   */
+  theoristMode: z.enum(['single', 'steps']).default('single'),
+  /**
    * #413: the model of each Theorist (provider id, by position: Theorist i uses the i-th). Missing or empty entries
    * use the Theorist role's model (`agents.theorist`), so settings from before #413 keep working unchanged.
    */
@@ -439,6 +444,13 @@ export function researchProfiles(s: Pick<ResearchSettings, 'profiles'>) {
 
 export const LOOP_DONE = 'NOTHING_TO_CODE';
 const PROMPTS = {
+  theoristSteps: (i: number, n: number) =>
+    `You are Theorist ${i} of ${n} in the StockHarness research loop. Propose ONE new, testable theory, working in steps; each step reads only what it needs.\n` +
+    'Step 1 (orient): call get_research_brief (follow its instruction and steering notes first) and vault_index. If your queue has a theory sent back for revision, fix exactly what the Judge asked and re-submit it with submit_theory(theory_id=...), then stop.\n' +
+    `Step 2 (learn): pick a family (Theorist ${i} prefers position ${i} of the strategy-library order) and vault_read its family note (Lessons, Worst); vault_search your idea and read 3 to 5 related notes. Note which gates past ideas failed.\n` +
+    `Step 3 (data): describe_collection and sample_collection for every field you would use (exact names, coverage, known-at rule). Your profile is position ${i} of the brief's profiles.\n` +
+    'Step 4 (plan): call vault_scratch with a short plan: 2 or 3 candidate hypotheses, for each why it could work, why it might fail, and which past ideas it differs from ([[ideas/T-n]] links).\n' +
+    'Step 5 (decide): pick the strongest candidate; check search_theories for near-duplicates; call submit_theory with a precise hypothesis, the signal logic in words, data_needed (collection.field), horizon_days, direction, a measurable falsification and differs_from. Reply with the theory id.',
   theorist: (i: number, n: number) =>
     `You are Theorist ${i} of ${n} in the StockHarness research loop. Propose ONE new, testable theory.\n` +
     '1. Call get_research_brief: read the focus, the human steering notes (follow them), recent theories and your queue. If it has an instruction, follow it first.\n' +
@@ -471,6 +483,8 @@ export type ResearchLoopInput = {
   providers: { theorist: string; judge: string; coder: string };
   /** #413: a model per Theorist (by position); missing or empty entries use `providers.theorist`. */
   theoristProviders?: string[];
+  /** #462: the Theorist's prompt mode. */
+  theoristMode?: 'single' | 'steps';
   connections: Record<ResearchRole, string>;
   skills: { library?: string; plugin?: string; catalog?: string; judge?: string };
   /** Skills per role chosen in the research settings (replace the seed skills for that role). */
@@ -526,9 +540,11 @@ export function makeResearchLoop(o: ResearchLoopInput): Workflow {
       config: agent(
         `Theorist ${i + 1}`,
         theoristProvider(o, i),
-        PROMPTS.theorist(i + 1, o.theorists),
+        o.theoristMode === 'steps'
+          ? PROMPTS.theoristSteps(i + 1, o.theorists)
+          : PROMPTS.theorist(i + 1, o.theorists),
         o.connections.theorist,
-        ROLE_TOOLS.theorist,
+        o.theoristMode === 'steps' ? [...ROLE_TOOLS.theorist, 'vault_scratch'] : ROLE_TOOLS.theorist,
         skillsFor('theorist', o.skills.library, o.skills.catalog),
       ),
       prompt: 'Research cycle: {{input}}',
