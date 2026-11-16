@@ -24,10 +24,19 @@ export function policyOf(e: Pick<CatalogEntry, 'layer' | 'timeSemantics'>): PitP
   return { mode: 'pit', rule: { type: 'eod', field } };
 }
 
+/**
+ * #449: simulation ledgers hold future returns (simulations run over the holdout too) and dq_issues is an audit log;
+ * historical reads (strategy plugins, the agents' data tools, collection bindings) refuse them.
+ */
+export const notResearchData = (collection: string) =>
+  collection.startsWith('sim_') || collection === 'dq_issues';
 /** Policies for every catalogued collection of a workspace. */
 export async function pitPolicies(ownerId: string): Promise<Record<string, PitPolicy>> {
   const out: Record<string, PitPolicy> = {};
-  for (const e of await listCatalog(ownerId)) out[e.collection] = policyOf(e);
+  for (const e of await listCatalog(ownerId))
+    out[e.collection] = notResearchData(e.collection)
+      ? { mode: 'refuse', reason: 'it is not point-in-time research data (simulation results or DQ audit)' }
+      : policyOf(e);
   return out;
 }
 

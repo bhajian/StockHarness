@@ -78,3 +78,11 @@ test('plugin save checks and the code hash format shared with contract.py', () =
   // sha256("abc")
   assert.equal(codeHash('abc'), 'sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad');
 });
+
+test('#449: simulation ledgers and dq_issues are not research data', async () => {
+  const { notResearchData } = await import('../../packages/core/src/pitPolicy.js');
+  for (const c of ['sim_trades', 'sim_orders', 'sim_portfolio_daily', 'sim_positions', 'dq_issues'])
+    assert.equal(notResearchData(c), true, c);
+  for (const c of ['prices_daily', 'securities', 'index_membership'])
+    assert.equal(notResearchData(c), false, c);
+});
