@@ -10,6 +10,7 @@ import { PagedRows, rankOf, SortHead, SortTh, useSort } from './tableKit';
 import { BarChart, TimeSeriesChart } from '../charts/Charts';
 import { fmtNumber } from '../charts/chartData';
 import { ObjectTransfer } from './ObjectTransfer';
+import { Empty } from './ui';
 import { SubsetPanel, SubsetResult } from './SubsetPanel';
 import { scopeLabel } from './evaluationScope';
 
@@ -76,8 +77,19 @@ function EvaluationList() {
           {data.items.length} shown · {data.trials} trials in this workspace · dev view
         </span>
       </div>
-      <div className="table-wrap">
-        {' '}
+      {!data.items.length && (
+        <Empty
+          icon={<BarChart3 size={22} />}
+          title="No evaluations yet"
+          text="The trusted evaluator scores a strategy when the Coder tests one in a research cycle, or when you rerun an idea from its Runs tab. Each run appears here with its period, returns and trial number."
+          action={
+            <button type="button" className="button secondary" onClick={() => go('/research/lab')}>
+              Open Research
+            </button>
+          }
+        />
+      )}
+      <div className="table-wrap" hidden={!data.items.length}>
         <table aria-label="Evaluations">
           <SortHead
             heads={[
@@ -290,6 +302,7 @@ export function EvaluationReport({ record: r }: { record: Record<string, any> })
           presets={false}
           logToggle={false}
           height={220}
+          empty="A rolling Sharpe needs 126 sessions of returns; this window is shorter."
         />
       </div>
       <div className="eval-grid">
@@ -594,6 +607,13 @@ function RegimesTable({ byRegime }: { byRegime: Record<string, Record<string, an
         toggle={toggle}
       />
       <tbody>
+        {!sorted.length && (
+          <tr>
+            <td colSpan={4} className="muted-line">
+              No regime split: it needs the S&amp;P 500 trend and VIX columns of macro_daily over this window.
+            </td>
+          </tr>
+        )}
         {sorted.map((x) => (
           <tr key={x.key}>
             <td>{x.label}</td>

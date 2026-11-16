@@ -208,7 +208,7 @@ async function testChecks(ownerId: string) {
   const [g, s] = await Promise.all([activeGates(ownerId), researchSettings(ownerId)]);
   const scope =
     s.scope?.kind === 'index'
-      ? { index: s.scope.index }
+      ? { index: s.scope.index ?? 'sp500' }
       : s.scope?.kind === 'top_market_cap'
         ? { top: s.scope.top }
         : { symbols: s.evaluationSymbols };

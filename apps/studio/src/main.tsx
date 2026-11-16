@@ -512,9 +512,12 @@ function App() {
                 dispatchEvent(new PopStateEvent('popstate'));
               }}
             />
-            <span className={`system-status ${healthy ? '' : 'unhealthy'}`}>
+            <span
+              className={`system-status ${healthy ? '' : 'unhealthy'}`}
+              title={healthy ? 'Online' : 'Connecting…'}
+            >
               <i />
-              {healthy ? 'Online' : 'Connecting…'}
+              <span className="system-status-text">{healthy ? 'Online' : 'Connecting…'}</span>
             </span>
           </div>
         </header>

@@ -282,6 +282,7 @@ function Performance({ r }: { r: any }) {
           height={220}
           logToggle={false}
           group="sim"
+          empty={`A rolling Sharpe needs 126 sessions of returns; this simulation has ${d.length}.`}
         />
         <HeatmapChart
           title="Monthly returns"

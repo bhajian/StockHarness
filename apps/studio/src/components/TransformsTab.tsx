@@ -1082,7 +1082,7 @@ function InputCollection({
   return (
     <div className="input-collection">
       <div className="input-collection-head">
-        <button className="link-button" onClick={() => setOpen(!open)} aria-expanded={open}>
+        <button className="link-button" onClick={() => setOpen(!open)} aria-expanded={open} title={name}>
           {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
           <code>{name}</code>
         </button>

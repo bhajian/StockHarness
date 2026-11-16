@@ -424,7 +424,10 @@ function SyncsTab({
   const symbolsLabel = (s: Record<string, any>) => {
     const item = catalogById.get(s.dataset);
     if (!item?.perSymbol) return 'Market';
-    if (s.symbolsMode === 'list') return `${(s.symbols ?? []).length} tickers`;
+    if (s.symbolsMode === 'list') {
+      const k = (s.symbols ?? []).length;
+      return `${k} ticker${k === 1 ? '' : 's'}`;
+    }
     if (s.symbolsMode === 'preset') return presetById.get(s.preset)?.label ?? 'Preset';
     return 'Universe';
   };

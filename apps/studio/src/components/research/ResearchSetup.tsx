@@ -647,6 +647,14 @@ function SpendTable({
         }
       />
       <tbody>
+        {!sorted.length && (
+          <tr>
+            <td colSpan={6} className="muted-line">
+              No model calls yet. Each model appears here with its price and spend once an agent uses it; you
+              can then give it its own cap.
+            </td>
+          </tr>
+        )}
         {sorted.map((m) => (
           <tr key={m.model}>
             <td>
