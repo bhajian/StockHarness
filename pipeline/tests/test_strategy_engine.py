@@ -33,7 +33,7 @@ class Engine(unittest.TestCase):
         b = run(MOMENTUM, src, days[70], days[-1])
         self.assertEqual(a, b)
         self.assertTrue(a["record_hash"].startswith("sha256:"))
-        self.assertEqual(a["evaluator_version"], "1.2.0")
+        self.assertEqual(a["evaluator_version"], "1.3.0")
         self.assertGreater(a["summary"]["rebalances"], 30)
         self.assertEqual(len(a["series"]["dates"]), len(a["series"]["series"]["equity"]))
         c = run(MOMENTUM, src, days[70], days[-1], params={"top_n": 3})
@@ -239,3 +239,26 @@ class Delisting(unittest.TestCase):
         r, ret = self._run("long", 3)
         self.assertEqual(r["delistings"][0]["class"], "unknown")
         self.assertAlmostEqual(ret, -0.3, places=6)
+
+
+class PointInTime(unittest.TestCase):
+    """#454: the sector as of each date, no unfiltered fallback universe, hashed tie-breaks."""
+
+    def test_sector_on(self):
+        hist = [{"value": "Technology", "valid_from": "2021-10-14", "valid_to": "2026-11-15"},
+                {"value": "Financial Services", "valid_from": "2026-11-15", "valid_to": None}]
+        self.assertEqual(engine.sector_on(hist, "2021-10-13"), "Unknown")
+        self.assertEqual(engine.sector_on(hist, "2024-01-02"), "Technology")
+        self.assertEqual(engine.sector_on(hist, "2026-11-15"), "Financial Services")
+
+    def test_no_universe_rows_means_no_names(self):
+        src, days = synthetic.market(n_sec=5, n_days=20)
+        src.collections["universe_daily"] = []
+        self.assertEqual(engine._universe_on(src, days[10], ["SEC_000000", "SEC_000001"], days), [])
+
+    def test_ties_do_not_follow_id_order(self):
+        ids = [f"SEC_{k:06d}" for k in range(40)]
+        book = engine.build_book({s: 1.0 for s in ids}, None, "long", 10, 1.0)
+        self.assertEqual(len(book), 10)
+        self.assertNotEqual(sorted(book), ids[:10])
+        self.assertEqual(book, engine.build_book({s: 1.0 for s in ids}, None, "long", 10, 1.0))

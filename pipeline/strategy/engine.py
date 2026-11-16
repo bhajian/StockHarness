@@ -87,7 +87,8 @@ def _universe_on(source, d: str, scope: list[str] | None, days: list[str], top: 
             if top:
                 rows = sorted(rows, key=lambda r: (-(r.get("market_cap") or 0), r["security_id"]))[: int(top)]
             return sorted({r["security_id"] for r in rows})
-    return sorted(scope) if scope else []
+    # #454: no universe rows near this session means no eligible names, not the whole symbol scope unfiltered.
+    return []
 
 
 def ensure_indexes(source) -> None:
@@ -128,13 +129,18 @@ def top_scope(source, days: list[str], every: str, scope, top: int | None, lag: 
     return ids or scope, tickers or None
 
 
+def _tie(s: str) -> str:
+    """#454: ties break on a hash of the id, not the id itself (ids follow listing order, so older names won ties)."""
+    return hashlib.sha1(s.encode()).hexdigest()
+
+
 def build_book(scores: dict, eligible: set[str] | None, side: str, top_n: int, gross: float) -> dict[str, float]:
-    """Equal-weight target weights; ties break on security_id so the book is deterministic."""
+    """Equal-weight target weights; ties break on a hash of the security_id, so the book is deterministic."""
     ranked = sorted(
         ((s, float(v)) for s, v in (scores or {}).items()
          if isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
          and (eligible is None or s in eligible)),
-        key=lambda x: (-x[1], x[0]),
+        key=lambda x: (-x[1], _tie(x[0])),
     )
     book: dict[str, float] = {}
     if not ranked:
@@ -249,7 +255,8 @@ def evaluate(code: str, *, source, policies: dict, params: dict, config: dict | 
     sec_rows = source.find("securities", {"security_id": {"$in": load}},
                            ["security_id", "is_active", "sector_history", "identifiers"]) if load else []
     inactive = {r["security_id"] for r in sec_rows if r.get("is_active") is False}
-    sector = {r["security_id"]: _current(r.get("sector_history")) or "Unknown" for r in sec_rows}
+    sector = {r["security_id"]: _current(r.get("sector_history")) or "Unknown" for r in sec_rows}  # labels only
+    sector_hist = {r["security_id"]: r.get("sector_history") or [] for r in sec_rows}
     ticker = {r["security_id"]: _ticker(r) for r in sec_rows}
     macro = {r["date"]: r for r in source.find(
         "macro_daily", {"date": {"$gte": (date.fromisoformat(first_exec) - timedelta(days=420)).isoformat(), "$lte": end}},
@@ -291,10 +298,15 @@ def evaluate(code: str, *, source, policies: dict, params: dict, config: dict | 
         trade_returns.append(side * (growth - 1))
         name_acc(s)["trades"].append(side * (growth - 1))
 
+    eligible_now: list[str] = []
     for d in days[days.index(first_exec):]:
         day = rets.get(d, {})
         extreme += [(d, s, day[s]) for s in w if s in day and abs(day[s]) > 0.5]
-        sector_ew = _sector_means(day, sector, universe_all) if benchmarks else {}
+        if d in eligible_at:  # #454: the sector benchmark averages that date's eligible names, by that date's sector
+            eligible_now = eligible_at[d][1]
+        sec_today = {s: sector_on(sector_hist.get(s), d) for s in (set(eligible_now) | set(w))} if benchmarks else {
+            s: sector_on(sector_hist.get(s), d) for s in w}
+        sector_ew = _sector_means(day, sec_today, eligible_now) if benchmarks else {}
         port = bench = 0.0
         moved = {}
         for s, wt in w.items():
@@ -305,7 +317,7 @@ def evaluate(code: str, *, source, policies: dict, params: dict, config: dict | 
             r = r or 0.0
             moved[s] = wt * (1 + r)
             port += wt * r
-            sec = sector.get(s, "Unknown")
+            sec = sec_today.get(s, "Unknown")
             contrib[sec] = contrib.get(sec, 0.0) + wt * r
             exposure[sec] = exposure.get(sec, 0.0) + abs(wt)
             a = name_acc(s)
@@ -425,6 +437,16 @@ def _equity(returns) -> list:
         nav *= 1 + r
         out.append(_round(nav))
     return out
+
+
+def sector_on(history, d: str) -> str:
+    """#454: the sector as of `d` from a sector_history interval list [valid_from, valid_to); Unknown before it."""
+    for h in history or []:
+        vf, vt = str(h.get("valid_from") or "")[:10], h.get("valid_to")
+        vt = str(vt)[:10] if vt else None
+        if (not vf or vf <= d) and (vt is None or d < vt):
+            return h.get("value") or "Unknown"
+    return "Unknown"
 
 
 def _current(history) -> str | None:

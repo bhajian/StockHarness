@@ -211,3 +211,24 @@ class TestInstrumentTypes(unittest.TestCase):
         self.assertEqual([(d["security_id"], d["security_type"]) for d in docs], [("SEC_000009", "note")])
         # A re-run with the type already set touches nothing.
         self.assertEqual(s.build_securities_docs([], [], [], docs, {}, "2026-11-16"), [])
+
+
+class FlipFlop(unittest.TestCase):
+    """#454: two live tickers whose profiles disagree no longer add zero-length sector intervals every run."""
+
+    def test_same_day_change_replaces_and_compacts(self):
+        from pipeline.layer2.securities_logic import compact_intervals, upsert_interval
+        h = [{"value": "Utilities", "valid_from": "2016-01-04", "valid_to": None, "backfilled": True}]
+        for _ in range(3):
+            h = upsert_interval(h, "Industrials", "2026-10-23")
+            h = upsert_interval(h, "Utilities", "2026-10-23")
+        self.assertEqual(h, [{"value": "Utilities", "valid_from": "2016-01-04", "valid_to": None, "backfilled": True}])
+        bad = [{"value": "Utilities", "valid_from": "2026-10-23", "valid_to": "2026-10-23"},
+               {"value": "Industrials", "valid_from": "2026-10-23", "valid_to": "2026-10-23"},
+               {"value": "Utilities", "valid_from": "2026-10-23", "valid_to": None}]
+        self.assertEqual(compact_intervals(bad), [{"value": "Utilities", "valid_from": "2026-10-23", "valid_to": None}])
+
+    def test_a_real_change_still_opens_an_interval(self):
+        from pipeline.layer2.securities_logic import upsert_interval
+        h = upsert_interval([{"value": "Technology", "valid_from": "2016-01-04", "valid_to": None}], "Energy", "2026-11-15")
+        self.assertEqual([(i["value"], i["valid_to"]) for i in h], [("Technology", "2026-11-15"), ("Energy", None)])

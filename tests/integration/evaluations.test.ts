@@ -145,7 +145,7 @@ test('an evaluation runs in the executor and is reproducible', async () => {
   const a = await evaluate(body);
   assert.equal(a.status, 'succeeded', JSON.stringify(a.error));
   const r = a.record;
-  assert.equal(r.evaluator_version, '1.2.0');
+  assert.equal(r.evaluator_version, '1.3.0');
   assert.equal(r.plugin.name, 'momentum_40d');
   assert.match(r.plugin.hash, /^sha256:[0-9a-f]{64}$/);
   assert.equal(r.period.first_trade, DAYS[46], 'executed at the next close');
