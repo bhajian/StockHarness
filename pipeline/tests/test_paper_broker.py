@@ -156,6 +156,19 @@ class Exits(unittest.TestCase):
         _, rows = sim([canary], src, days[70], days[-1])
         self.assertNotIn("invalidation", {t["exit_reason"] for t in rows["sim_trades"]})
 
+    def test_a_short_gets_no_delisting_windfall(self):
+        """#448: a flat-price short whose name delists: the lot closes at its last price, not 30% lower."""
+        days = synthetic.weekdays("2020-01-01", 30)
+        flat = {(f"SEC_00000{k}", d): 0.0 for k in range(4) for d in days}
+        src, _ = synthetic.market(n_sec=4, n_days=30, overrides=flat, delist={"SEC_000003": days[3]})
+        short = ('META = {"side": "short", "horizon_days": 5, "rebalance": "weekly", "top_n": 1}\n'
+                 'def signal(ctx):\n    return {"SEC_000000": 2.0, "SEC_000001": 1.0, "SEC_000002": 0.0, "SEC_000003": -1.0}\n')
+        res, rows = sim([short], src, days[0], days[9])
+        gone = [t for t in rows["sim_trades"] if t["exit_reason"] == "delisted"]
+        self.assertEqual(len(gone), 1)
+        self.assertAlmostEqual(gone[0]["exit_price"], gone[0]["entry_price"], places=6)
+        self.assertLess(res["summary"]["total_return"], 0.001)
+
     def test_take_profit_fixed(self):
         src, days = synthetic.market(n_sec=10, n_days=200, seed=8, sigma=0.03)
         _, rows = sim([MOMENTUM], src, days[70], days[-1], exits={"take_profit": 0.05})

@@ -7,7 +7,14 @@ execution_lag_days: 1
 commission_bps: 1
 slippage_bps: 5
 borrow_cost_bps_default: 50 # annualized; used for shorts until real borrow data exists
-delisting_return: -0.30 # applied when a position delists for bankruptcy
+# What a held name earns when it delists (#448), by a class read from its own last prices
+# (pipeline/strategy/delisting.py): a pinned price into the end is a cash-out (merger), a last price under $1
+# or a fall of more than half in 60 sessions is distress, anything else is unknown. Shorts never gain.
+delisting:
+  merger: 0.0
+  distress: -0.55
+  unknown: -0.30
+  short: 0.0
 capacity_aum: 100000000 # assumed AUM for capacity estimates
 
 # Holdout lock (spec §5.3). Rules-mode backtests may not touch it.

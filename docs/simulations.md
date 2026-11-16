@@ -9,7 +9,7 @@ same broker will run the live paper book in M7.
 
 1. **Open the day.** Borrow is charged on yesterday's short value. Each held name then gets its split and
    dividend, and is marked to the close. A held name that stops trading and is no longer active is delisted: it
-   closes at its last price times (1 + `delisting_return`).
+   closes at its last price times (1 + its delisting return): by class and side, as in the evaluator (#448).
 2. **Exits.** An exit decided earlier fills at today's close.
 3. **Rebalance.** Each idea that rebalances today trades to its target weights at today's close.
 4. **Close the day.** Write the portfolio row and the positions.

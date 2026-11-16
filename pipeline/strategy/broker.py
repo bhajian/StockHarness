@@ -20,6 +20,7 @@ borrow.
 """
 from __future__ import annotations
 
+from . import delisting
 import math
 from dataclasses import dataclass, field
 
@@ -62,7 +63,9 @@ class PaperBroker:
     commission_bps: float = 1.0
     slippage_bps: float = 5.0
     borrow_bps: float = 50.0
-    delisting_return: float = -0.30
+    delisting_return: float = -0.30  # the old flat value, used only without `delisting` (#448)
+    delisting: dict = field(default_factory=dict)  # delisting.settings(): returns by class, shorts never gain
+    delist_class: dict = field(default_factory=dict)  # security -> merger | distress | unknown
     periods: int = 252
     inactive: set = field(default_factory=set)  # securities no longer active (for the delisting rule)
     final_bar: dict = field(default_factory=dict)  # security -> the last date it has a price
@@ -137,11 +140,15 @@ class PaperBroker:
                     "security_id": s, "ticker": self.tickers.get(s), "side": "buy", "shares": _r(qty, 6),
                     "price": _r(close, 6), "notional": _r(d, 4), "cost": 0.0, "reason": "dividend",
                 })
+        settings = self.delisting or {**delisting.DEFAULTS, "unknown": float(self.delisting_return)}
+        last_close = {}
         for key in [k for k, l in self.lots.items() if l.security_id not in bars]:
             s = key[1]
             if s in self.inactive and self.final_bar.get(s, day) < day:
-                prev = self.close.get(s, 0.0)
-                gone = prev * (1 + float(self.delisting_return))
+                # #448: the move depends on the delisting's class and the lot's side (a short never gains).
+                prev = last_close.setdefault(s, self.close.get(s, 0.0))
+                side = 1 if self.lots[key].shares > 0 else -1
+                gone = prev * (1 + delisting.price_return(self.delist_class.get(s, "unknown"), side, settings))
                 st["price_pnl"] += self.lots[key].shares * (gone - prev)
                 self.close[s] = gone
                 self._fill(day, key, -self.lots[key].shares, "delisted", cost=0.0)
