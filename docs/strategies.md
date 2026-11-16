@@ -86,7 +86,9 @@ The evaluator works in two stages, and a second, separate ledger checks the firs
    imports nothing from the evaluator (only the tape schema and the delisting rules). It fills each book at the
    as-traded close (`close_raw`) of its session, multiplies share counts by the ratio on a split's ex-date, and
    adds dividends **as paid per share** from `corporate_actions` (reinvested in the name at that close; a short
-   pays them). A bad print is not a price. It never reads `tr_1d`.
+   pays them). A bad print is not a price. A dividend repeated under two classes counts once (#518), and one on a
+   row flagged `implausible_dividend` is skipped (the bars are adjusted for it). An order with no price at its close
+   is listed as unfilled (the evaluator skips it too). It never reads `tr_1d`.
 3. **Reconciliation** (`pipeline/strategy/reconcile.py`): every day, the executor's return before costs against
    the evaluator's. A day breaches above **5 bps**; the run breaches when the compounded growth drifts apart by
    more than **1% a year**. Each breach day lists the names whose contributions differ most. The executor also

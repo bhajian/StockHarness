@@ -663,6 +663,15 @@ function Reconciliation({ rec, tape }: { rec: Record<string, any>; tape?: Record
         dividends as paid per share. Its daily return before costs must match the evaluator&apos;s within{' '}
         {rec.tolerances?.day_bps} bps, and drift less than {pct(rec.tolerances?.drift_per_year)} a year.
         {rec.rules ? ` ${rec.rules.checked} fills checked against the trading rules.` : ''}
+        {rec.rules?.unfilled_count
+          ? ` ${rec.rules.unfilled_count} order(s) had no price at their close and were not traded (by either).`
+          : ''}
+        {rec.dividends?.duplicate_count
+          ? ` ${rec.dividends.duplicate_count} duplicate dividend row(s) counted once.`
+          : ''}
+        {rec.dividends?.implausible_count
+          ? ` ${rec.dividends.implausible_count} dividend(s) skipped where the bars are already adjusted for them (flagged implausible_dividend).`
+          : ''}
       </p>
       {!!rec.breaches?.length && (
         <table aria-label="Reconciliation breaches">
