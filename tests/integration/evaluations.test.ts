@@ -244,13 +244,12 @@ test('exploration stops before the holdout; the holdout is one shot', async () =
   const again = await request('/evaluations/holdout', { plugin: 'momentum_40d', theoryId: 'T-1' });
   assert.equal(again.status, 409);
   assert.match(again.data.error, /already used .* one shot/);
-  // A new code version is a new shot; the boundary can no longer move.
+  // #450: one shot per theory, whatever the code: a new version gets none; the boundary can no longer move.
   const plugin = (await ok('/strategy-plugins')).find((p: any) => p.name === 'momentum_40d');
   await ok(`/strategy-plugins/${plugin.id}`, { code: MOMENTUM.replace('"top_n": 3', '"top_n": 4') }, 'PUT');
-  assert.equal(
-    (await request('/evaluations/holdout', { plugin: 'momentum_40d', theoryId: 'T-1' })).status,
-    202,
-  );
+  const revised = await request('/evaluations/holdout', { plugin: 'momentum_40d', theoryId: 'T-1' });
+  assert.equal(revised.status, 409);
+  assert.match(revised.data.error, /one shot per theory/);
   assert.equal((await request('/evaluator/settings', { holdoutMonths: 3 }, 'PUT')).status, 409);
   const folds = done.record.folds;
   assert.deepEqual(

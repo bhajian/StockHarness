@@ -10,7 +10,7 @@ import { workspaceDatabase } from './mongoMcp.js';
 import { runCodeJob, type CodeJobOutcome } from './codeJobs.js';
 import { HttpError, safeError } from './security.js';
 import { pitPolicies } from './pitPolicy.js';
-import { resolveStrategyPlugin } from './strategyPlugins.js';
+import { normalizedCodeHash, resolveStrategyPlugin } from './strategyPlugins.js';
 
 const ISO = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'YYYY-MM-DD');
 export const evaluationParams = z
@@ -90,6 +90,10 @@ async function nextTrial(ownerId: string) {
   );
   return r!.count;
 }
+/** #450: count runs that saw data a verdict depends on (simulations over the holdout) as trials. */
+export async function addTrials(ownerId: string, n: number) {
+  if (n > 0) await trials().updateOne({ _id: ownerId }, { $inc: { count: n } }, { upsert: true });
+}
 /**
  * Variance of the per-period (daily) Sharpe ratios of every finished evaluation in the workspace: the spread of
  * the swarm's trials, for the deflated Sharpe ratio (#106). Undefined until two exist.
@@ -144,6 +148,17 @@ export function monthsBefore(iso: string, n: number) {
   return `${ny}-${String(nm + 1).padStart(2, '0')}-${String(Math.min(d, last)).padStart(2, '0')}`;
 }
 /** The latest prices_daily as_of_date in the workspace (the data's "today"). */
+/** The first priced date (#450: the research window starts a year after it, for 12-month lookbacks). */
+export async function earliestPriceDate(ownerId: string) {
+  const row = await mongo
+    .db(workspaceDatabase(ownerId))
+    .collection('prices_daily')
+    .find({ as_of_date: { $type: 'string' } }, { projection: { as_of_date: 1 } })
+    .sort({ as_of_date: 1 })
+    .limit(1)
+    .next();
+  return (row?.as_of_date as string | undefined) ?? undefined;
+}
 export async function latestPriceDate(ownerId: string) {
   const row = await mongo
     .db(workspaceDatabase(ownerId))
@@ -191,6 +206,9 @@ export async function setHoldoutMonths(ownerId: string, months: number) {
     throw new HttpError(400, 'holdoutMonths must be a whole number of months between 1 and 120');
   if (await holdoutRuns().countDocuments({ ownerId }))
     throw new HttpError(409, 'Holdout runs exist: the holdout boundary is locked');
+  // #450: so have simulations that ran over it.
+  if (await collection('simulations').countDocuments({ ownerId, usesHoldout: true }))
+    throw new HttpError(409, 'Simulations ran over the holdout: the holdout boundary is locked');
   await settingsCol().updateOne(
     { _id: ownerId },
     { $set: { holdoutMonths: months }, $unset: { holdoutStart: '', latestAtSet: '', setAt: '' } },
@@ -439,9 +457,19 @@ export async function startHoldoutEvaluation(
   const settings = await evaluatorSettings(ownerId);
   const latest = await latestPriceDate(ownerId);
   if (!settings.holdoutStart || !latest) throw new HttpError(400, 'No price data yet: there is no holdout');
-  const { plugin, hash } = await resolveStrategyPlugin(ownerId, body.plugin, body.version);
+  const { plugin, hash, code } = await resolveStrategyPlugin(ownerId, body.plugin, body.version);
+  // #450: one shot per theory, whatever the code (a revision used to buy a new shot); a plugin without a theory gets
+  // one per code version, where a comment edit is the same version. Claims made under the old per-code key count.
   const theoryKey = body.theoryId ? `theory:${body.theoryId}` : `plugin:${plugin._id}`;
-  const _id = `${ownerId}:${theoryKey}:${hash}`;
+  const _id = body.theoryId
+    ? `${ownerId}:${theoryKey}`
+    : `${ownerId}:${theoryKey}:${normalizedCodeHash(code)}`;
+  const claimed = body.theoryId ? await holdoutRuns().findOne({ ownerId, theoryKey }) : null;
+  if (claimed)
+    throw new HttpError(
+      409,
+      `The holdout was already used for this theory (evaluation ${claimed.evaluationId}); it is one shot per theory`,
+    );
   const placeholder = `pending-${randomUUID()}`;
   try {
     await holdoutRuns().insertOne({

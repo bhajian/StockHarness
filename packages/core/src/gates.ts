@@ -20,6 +20,11 @@ export const gatesSchema = z.object({
   /** The one-shot holdout (#105): excess over the S&P 500 above this, and Sharpe at least minHoldoutSharpe. */
   minHoldoutExcess: z.number().default(0),
   minHoldoutSharpe: z.number().default(0.3),
+  /**
+   * #450: the holdout Sharpe's t-statistic, Sharpe × √years. An 18-month Sharpe has a standard error of about 0.8, so
+   * Sharpe ≥ 0.3 alone passes a third of zero-skill strategies. Versions made before this have no such gate.
+   */
+  minHoldoutT: z.number().min(0).optional(),
   /** Round-trip trades (#453: a holding from entry to exit), not every re-weight. */
   minTrades: z.number().int().min(0).default(100),
   /** Average names held per rebalance. */
@@ -197,6 +202,11 @@ export function evaluateGates(gates: Gates, explore: Rec | undefined, holdout?: 
     const hs = holdout.summary?.sharpe ?? null;
     add('holdout_excess', ex, gates.minHoldoutExcess, ex !== null && ex > gates.minHoldoutExcess);
     add('holdout_sharpe', hs, gates.minHoldoutSharpe, hs !== null && hs >= gates.minHoldoutSharpe);
+    if (gates.minHoldoutT !== undefined) {
+      const days = holdout.summary?.days ?? holdout.series?.dates?.length ?? 0;
+      const t = hs !== null && days > 0 ? hs * Math.sqrt(days / 252) : null;
+      add('holdout_t', t, gates.minHoldoutT, t !== null && t >= gates.minHoldoutT, 'holdout Sharpe × √years');
+    }
   }
   return out;
 }

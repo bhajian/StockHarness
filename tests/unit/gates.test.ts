@@ -130,3 +130,16 @@ test('#453: the trades gate counts round trips, not re-weights', () => {
   const old = G.evaluateGates(G.DEFAULT_GATES, good, holdout).find((x) => x.gate === 'trades')!;
   assert.equal(old.value, 240, 'records without trade_stats keep the old count');
 });
+
+test('#450: the holdout t-stat gate is opt-in and uses Sharpe × √years', () => {
+  const h = { ...holdout, summary: { sharpe: 0.6, days: 378 } };
+  assert.equal(
+    G.evaluateGates(G.DEFAULT_GATES, good, h).find((x) => x.gate === 'holdout_t'),
+    undefined,
+  );
+  const r = G.evaluateGates({ ...G.DEFAULT_GATES, minHoldoutT: 1 }, good, h).find(
+    (x) => x.gate === 'holdout_t',
+  )!;
+  assert.equal(r.value, Math.round(0.6 * Math.sqrt(1.5) * 1e4) / 1e4);
+  assert.equal(r.passed, false);
+});

@@ -8,7 +8,7 @@ import { collection, mongo } from './db.js';
 import { config } from './config.js';
 import { HttpError, safeError } from './security.js';
 import { runCodeJob, type CodeJobOutcome } from './codeJobs.js';
-import { evaluations, evaluatorSettings, JOB_CODE } from './evaluations.js';
+import { addTrials, evaluations, evaluatorSettings, JOB_CODE } from './evaluations.js';
 import { workspaceDatabase } from './mongoMcp.js';
 import { pitPolicies } from './pitPolicy.js';
 import { resolveStrategyPlugin, strategyPluginVersions, strategyPlugins } from './strategyPlugins.js';
@@ -270,6 +270,23 @@ export async function startSimulation(
       400,
       `end ${config.period.end} is inside the locked holdout (after ${readableEnd}); end the simulation by ${readableEnd}, or allow the holdout`,
     );
+  if (usesHoldout) {
+    // #450: a look at the holdout is a trial for each idea, and an idea gets only a few of them.
+    const ideaIds = config.ideas.map((i) => i.idea);
+    for (const idea of ideaIds) {
+      const used = await simulations().countDocuments({
+        ownerId,
+        usesHoldout: true,
+        'config.ideas.idea': idea,
+      });
+      if (used >= HOLDOUT_SIMULATIONS_PER_IDEA)
+        throw new HttpError(
+          409,
+          `${idea} has already been simulated over the holdout ${used} times (the limit is ${HOLDOUT_SIMULATIONS_PER_IDEA}): every look at the holdout weakens it`,
+        );
+    }
+    await addTrials(ownerId, ideaIds.length);
+  }
   const estimate = await estimateSimulation(ownerId, config);
   const doc: Simulation = {
     _id: randomUUID(),
@@ -286,6 +303,9 @@ export async function startSimulation(
   const done = finishSimulation(doc, opts.execute ?? runCodeJob, usesHoldout ? undefined : readableEnd);
   return { simulation: doc, estimate, done };
 }
+
+/** #450: simulations of one idea that may run over the holdout. */
+export const HOLDOUT_SIMULATIONS_PER_IDEA = 3;
 
 /** The Python job's params from a frozen config. */
 export async function simulationJobParams(ownerId: string, sim: Simulation, readableEnd?: string) {
