@@ -86,7 +86,7 @@ class Reconciliation(unittest.TestCase):
 
 
 class Rules(unittest.TestCase):
-    def test_a_fill_without_a_price_and_an_ineligible_name_are_violations(self):
+    def test_an_ineligible_name_is_a_violation_and_a_fill_without_a_price_is_unfilled(self):
         src, days = fixture()
         tape = {"schema": 1, "lag": 1, "sessions": days[30:40],
                 "rebalances": [{"signal_date": days[29], "exec_date": days[30], "eligible": 1, "eligible_hash": "x"}],
@@ -94,7 +94,8 @@ class Rules(unittest.TestCase):
                          {"signal_date": days[29], "exec_date": days[30], "security_id": "SEC_000001", "weight": 0.5}]}
         out = executor.run(tape, src, COSTS, {days[30]: {"SEC_NOPRICE"}})
         rules = {v["rule"] for v in out["rules"]["violations"]}
-        self.assertEqual(rules, {"fill_price_exists", "eligible_on_signal_date"})
+        self.assertEqual(rules, {"eligible_on_signal_date"})
+        self.assertEqual(out["rules"]["unfilled"], [{"exec_date": days[30], "security_id": "SEC_NOPRICE"}])
 
     def test_a_fill_before_its_lag_is_a_violation(self):
         src, days = fixture()
@@ -121,6 +122,31 @@ class NoCloses(unittest.TestCase):
         out = run(constant("long", 2), src, days[20], days[-1])
         self.assertEqual(out["reconciliation"]["status"], "unavailable")
         self.assertNotIn("reconciliation_breach", [w["code"] for w in out["warnings"]])
+
+
+
+class DataQuirks(unittest.TestCase):
+    """#518 and #481 on real data: a stale duplicate dividend row, and a dividend the bars are already adjusted for."""
+
+    def test_a_duplicate_dividend_row_counts_once(self):
+        src, days = fixture()
+        dup = next(a for a in src.collections["corporate_actions"] if a["security_id"] == "SEC_000001")
+        src.collections["corporate_actions"].append({**dup, "action_type": "cash_dividend"})
+        r = run(constant("long", 3), src, days[20], days[-1])
+        self.assertEqual(r["reconciliation"]["status"], "reconciled", r["reconciliation"]["breaches"][:1])
+        self.assertEqual(r["reconciliation"]["dividends"]["duplicate_count"], 1)
+
+    def test_a_dividend_on_an_implausible_dividend_row_is_skipped(self):
+        src, days = fixture()
+        # A merger payout the adjusted bars already absorb (KDP 2018-07-10): flagged, not in tr_1d.
+        src.collections["corporate_actions"].append(
+            {"security_id": "SEC_000001", "action_type": "special_dividend", "ex_date": days[60], "dividend_amount": 90.0})
+        for p in src.collections["prices_daily"]:
+            if p["security_id"] == "SEC_000001" and p["date"] == days[60]:
+                p["dq_flags"] = ["implausible_dividend"]
+        r = run(constant("long", 3), src, days[20], days[-1])
+        self.assertEqual(r["reconciliation"]["status"], "reconciled", r["reconciliation"]["breaches"][:1])
+        self.assertEqual(r["reconciliation"]["dividends"]["implausible_skipped"][0]["ex_date"], days[60])
 
 
 if __name__ == "__main__":

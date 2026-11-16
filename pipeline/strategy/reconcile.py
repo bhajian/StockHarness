@@ -49,4 +49,4 @@ def compare(eval_dates: list[str], eval_returns: list[float], executed: dict,
     return {"status": "reconciled" if ok else "not_reconciled", "days": len(eval_dates), "breach_days": breach_days,
             "max_daily_bps": round(worst * 1e4, 3), "drift_per_year": round(drift, 6) if math.isfinite(drift) else None,
             "growth": {"evaluator": round(ge, 8), "executor": round(gx, 8)}, "tolerances": tol,
-            "breaches": breaches, "rules": rules}
+            "breaches": breaches, "rules": rules, "dividends": executed.get("dividends") or {}}

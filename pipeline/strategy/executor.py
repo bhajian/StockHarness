@@ -11,6 +11,9 @@ documented policy both follow. It never reads `tr_1d` or `ret_1d` for valuation:
 - on a dividend's ex-date the position earns shares × the dividend as paid per share (a short pays it), reinvested
   in the same name at that close, which is what a total return assumes;
 - a bad print (`dq_flags` has `bad_print`) is not a price: the last good close is kept;
+- a dividend is counted once per security and ex-date when several rows give the same amount (#518: a class change
+  can leave a stale cash/special duplicate), and skipped where the price row is flagged `implausible_dividend`
+  (the bars are adjusted for it, e.g. KDP's $103.75 merger dividend on 2018-07-10): both are listed;
 - a held name whose prices stopped and which is no longer active delists once, by the delisting rules, into cash.
 
 Its daily return is before costs: the reconciliation compares it with the evaluator's return before costs.
@@ -34,6 +37,7 @@ def _num(v):
 def load_market(source, names: list[str], start: str, end: str, calendar_from: str | None = None) -> dict:
     """As-traded closes, corporate actions, activity and the calendar for `names` over start..end."""
     px: dict[str, dict[str, float]] = {}
+    implausible: set[tuple[str, str]] = set()
     last_row: dict[str, str] = {}
     rets: dict[str, list] = {}  # for the delisting class: (date, close, ret_1d) in date order
     for r in source.find("prices_daily", {"security_id": {"$in": names}, "date": {"$gte": start, "$lte": end}},
@@ -43,23 +47,37 @@ def load_market(source, names: list[str], start: str, end: str, calendar_from: s
         price = _num(r.get("close_raw"))
         price = price if price is not None else _num(r.get("close"))
         rets.setdefault(s, []).append((d, price, r.get("ret_1d")))
+        if "implausible_dividend" in (r.get("dq_flags") or []):
+            implausible.add((s, d))
         if price is None or price <= 0 or "bad_print" in (r.get("dq_flags") or []):
             continue
         px.setdefault(s, {})[d] = price
     splits: dict[str, dict[str, float]] = {}
-    divs: dict[str, dict[str, float]] = {}
+    amounts: dict[tuple[str, str], set[float]] = {}
+    rows_of: dict[tuple[str, str], int] = {}
     for a in source.find("corporate_actions", {"security_id": {"$in": names}, "ex_date": {"$gte": start, "$lte": end}},
                          ["security_id", "action_type", "ex_date", "split_ratio", "dividend_amount"]) if names else []:
         s, d = a["security_id"], str(a["ex_date"])[:10]
         if a.get("action_type") == SPLIT and _num(a.get("split_ratio")) and a["split_ratio"] > 0:
             splits.setdefault(s, {})[d] = splits.get(s, {}).get(d, 1.0) * float(a["split_ratio"])
         elif a.get("action_type") in DIVIDENDS and _num(a.get("dividend_amount")):
-            divs.setdefault(s, {})[d] = divs.get(s, {}).get(d, 0.0) + float(a["dividend_amount"])
+            amounts.setdefault((s, d), set()).add(round(float(a["dividend_amount"]), 8))
+            rows_of[(s, d)] = rows_of.get((s, d), 0) + 1
+    divs: dict[str, dict[str, float]] = {}
+    skipped = []
+    for (s, d), xs in sorted(amounts.items()):
+        if (s, d) in implausible:
+            skipped.append({"security_id": s, "ex_date": d, "amount": max(xs)})
+            continue
+        divs.setdefault(s, {})[d] = sum(xs)  # distinct amounts add up (a regular and a special on one day)
+    duplicates = [{"security_id": s, "ex_date": d} for (s, d), n in sorted(rows_of.items()) if n > len(amounts[(s, d)])]
     inactive = {r["security_id"] for r in source.find("securities", {"security_id": {"$in": names}},
                                                        ["security_id", "is_active"]) if r.get("is_active") is False}
     calendar = {r["date"] for r in source.find("trading_calendar", {"date": {"$gte": calendar_from or start, "$lte": end}},
                                                ["date", "is_trading_day"]) if r.get("is_trading_day", True)}
     return {"px": px, "splits": splits, "divs": divs, "inactive": inactive, "last_row": last_row,
+            "dividend_notes": {"duplicates_ignored": duplicates[:20], "duplicate_count": len(duplicates),
+                               "implausible_skipped": skipped[:20], "implausible_count": len(skipped)},
             "history": {s: sorted(v) for s, v in rets.items()}, "calendar": calendar}
 
 
@@ -93,6 +111,7 @@ def run(tape: dict, source, cfg: dict, eligible: dict[str, set[str]] | None = No
             violations.append({"rule": "lag_sessions", "signal_date": rb["signal_date"], "exec_date": rb["exec_date"],
                                "sessions": pos[rb["exec_date"]] - pos[rb["signal_date"]], "lag": int(tape["lag"])})
     checked = 0
+    unfilled: list[dict] = []
     shares: dict[str, float] = {}
     last: dict[str, float] = {}
     cash, nav_prev = 1.0, 1.0
@@ -133,8 +152,8 @@ def run(tape: dict, source, cfg: dict, eligible: dict[str, set[str]] | None = No
             book = {s: w for s, w in books[d].items() if d in px.get(s, {}) and s not in gone}
             for s, w in books[d].items():
                 checked += 1
-                if s not in book and s not in gone:
-                    violations.append({"rule": "fill_price_exists", "exec_date": d, "security_id": s})
+                if s not in book and s not in gone:  # no price at this close: not traded (the evaluator skips it too)
+                    unfilled.append({"exec_date": d, "security_id": s})
                 if eligible is not None and s not in eligible.get(d, set()):
                     violations.append({"rule": "eligible_on_signal_date", "exec_date": d, "security_id": s})
             shares = {s: w * nav / px[s][d] for s, w in book.items()}
@@ -144,4 +163,6 @@ def run(tape: dict, source, cfg: dict, eligible: dict[str, set[str]] | None = No
         if nav <= 0:  # wiped out, like the evaluator: no book after a total loss
             shares, cash = {}, 0.0
     return {"dates": dates, "returns": returns, "contributions": contributions,
-            "rules": {"checked": checked, "violations": violations[:50], "violation_count": len(violations)}}
+            "rules": {"checked": checked, "violations": violations[:50], "violation_count": len(violations),
+                      "unfilled": unfilled[:20], "unfilled_count": len(unfilled)},
+            "dividends": mk["dividend_notes"]}
