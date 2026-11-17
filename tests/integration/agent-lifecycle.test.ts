@@ -259,23 +259,6 @@ test('reflection keeps intermediate text out of chat and exposes complete tenant
   }
 });
 
-test('reflection history preserves output redaction', async () => {
-  const policy = await ok('/guardrails', {
-    name: 'Private reflection output',
-    provider: 'builtin',
-    stages: ['output'],
-    pii: true,
-  });
-  const { agent: a } = await agent('test-guardrail', { pattern: 'reflection', guardrailIds: [policy.id] });
-  const result = await run(a.id, 'guarded private output');
-  assert.equal(result.status, 'succeeded', result.error);
-  const history = await ok(`/runs/${result.id}/activity`);
-  const saved = await Promise.all(history.entries.map((e: any) => ok(`/runs/${result.id}/activity/${e.id}`)));
-  assert.match(saved[0].content, /\[EMAIL\]/);
-  assert.ok(saved.every((e: any) => !e.content.includes('alice@example.com')));
-});
-
-// Deterministic HTTP prompt contracts, not a claim to evaluate a live model's translation ability.
 test('language policy and original request reach every pattern, child and final synthesis', async () => {
   const cases = [
     {
@@ -316,14 +299,9 @@ test('language policy and original request reach every pattern, child and final 
   }
 });
 
-test('workflow wrappers retain the original request language without bypassing input redaction', async () => {
-  const policy = await ok('/guardrails', {
-    name: 'Private language reference',
-    provider: 'builtin',
-    stages: ['input'],
-    pii: true,
-  });
-  const { agent: a, provider } = await agent('test-language', { guardrailIds: [policy.id] });
+// Redaction was a guardrail feature, removed with the guardrails (#472); the language contract stays.
+test('workflow wrappers retain the original request language', async () => {
+  const { agent: a, provider } = await agent('test-language');
   const workflow = await ok('/workflows', {
     name: 'Language wrapper regression',
     startAt: 'start',
@@ -340,7 +318,6 @@ test('workflow wrappers retain the original request language without bypassing i
           providerId: provider.id,
           systemPrompt: 'Research accurately.',
           tokenBudget: 200000,
-          guardrailIds: [policy.id],
         },
       },
       { id: 'finish', type: 'finish', name: 'Finish', template: '{{last}}' },
@@ -362,8 +339,6 @@ test('workflow wrappers retain the original request language without bypassing i
     assert.ok(calls.length > 0);
     for (const call of calls) {
       assert.match(call.source, /Explain the outlook in English/);
-      assert.match(call.source, /\[EMAIL\]/);
-      assert.doesNotMatch(JSON.stringify(call), /alice@example.com/);
       if ('workflowId' in target) assert.equal(call.latest, 'Prüfe die deutschen Quellen.');
     }
   }

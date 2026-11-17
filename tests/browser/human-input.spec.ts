@@ -59,7 +59,8 @@ test('Playground answers a paused question and Inbox reviews edited tool argumen
   await expect(page.getByLabel('Human input request')).toContainText('Approve');
   await page.getByLabel('Approval arguments').fill('{"query":"browser approved edit"}');
   await page.getByRole('button', { name: 'Approve', exact: true }).click();
-  await expect(page.getByText('No pending requests.')).toBeVisible();
+  // The Inbox's empty state (#283) once the request is answered.
+  await expect(page.getByText('Nothing waits for you')).toBeVisible();
   await expect
     .poll(async () => (await api(`/runs/${run.id}`)).output ?? '')
     .toContain('browser approved edit');
