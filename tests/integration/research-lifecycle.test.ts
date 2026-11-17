@@ -733,3 +733,37 @@ test('#528: a failed idea is refined with its lineage; the verdict carried a cau
   assert.ok(Array.isArray(b.near_misses) && Array.isArray(b.your_last_failures));
   await ok('/research/settings', { maxCoderBacklog: 8 }, 'PUT');
 });
+
+test('a judged idea is rebuilt: new code, the same trial, a fresh verdict (owner, 2026-11-17)', async () => {
+  const { judge, coder, theorist } = clients;
+  await ok('/research/settings', { maxCoderBacklog: 200 }, 'PUT');
+  const found = await theorist.call('search_theories', { text: 'Forty-day leaders keep leading' });
+  const ref = found.matches.find((m: any) => m.title === 'Forty-day leaders keep leading')?.ref;
+  assert.ok(ref, JSON.stringify(found).slice(0, 300));
+  const before = await ok(`/ideas/${ref}/evaluations`);
+  const oldTrial = (before.items ?? before).find(
+    (e: any) => e.mode === 'explore' && e.status === 'succeeded',
+  )?.trial;
+  assert.ok(oldTrial, JSON.stringify(before).slice(0, 300));
+  const rebuilt = await ok(`/ideas/${ref}/actions`, { action: 'rebuild' });
+  assert.equal(rebuilt.status, 'approved_for_code');
+  const queue = (await coder.call('get_research_brief', {})).queue;
+  const item = queue.find((q: any) => q.theory_id === ref);
+  assert.match(item.instruction, /^Rebuild:/);
+  assert.equal((await coder.call('submit_code', { theory_id: ref, code: GOOD })).passed, true);
+  const ev = await coder.call('evaluate_strategy', { theory_id: ref, params });
+  const after = await ok(`/ideas/${ref}/evaluations`);
+  const fresh = (after.items ?? after).find(
+    (e: any) => e.id === ev.evaluation_id || e.evaluationId === ev.evaluation_id,
+  );
+  assert.equal(fresh?.trial ?? ev.trial, oldTrial, 'the rebuild keeps the trial number');
+  const v = await judge.call('set_verdict', {
+    theory_id: ref,
+    verdict: 'failed',
+    reasoning: 'Fresh verdict after the rebuild.',
+  });
+  assert.ok(['failed', 'promising'].includes(v.status), JSON.stringify(v).slice(0, 300));
+  const all = await ok('/ideas/rebuild-all', {});
+  assert.ok(Array.isArray(all.rebuilt));
+  await ok('/research/settings', { maxCoderBacklog: 8 }, 'PUT');
+});

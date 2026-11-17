@@ -237,6 +237,8 @@ export async function startEvaluation(
     readableEnd?: string;
     /** Re-run this evaluation (same plugin version and params): it keeps the original's trial number. */
     reproduces?: Evaluation;
+    /** A rebuilt idea's evaluation keeps the idea's earlier trial number (owner, 2026-11-17): not a new trial. */
+    trial?: number;
   } = {},
 ) {
   const body = evaluationInput.parse(input);
@@ -263,7 +265,7 @@ export async function startEvaluation(
     ...(body.theoryId ? { theoryId: body.theoryId } : {}),
     mode,
     params: body.params,
-    trial: opts.reproduces ? opts.reproduces.trial : await nextTrial(ownerId),
+    trial: opts.trial ?? (opts.reproduces ? opts.reproduces.trial : await nextTrial(ownerId)),
     ...(opts.reproduces
       ? { reproduces: { of: opts.reproduces._id, originalHash: opts.reproduces.record?.record_hash } }
       : {}),

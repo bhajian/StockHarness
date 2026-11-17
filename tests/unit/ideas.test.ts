@@ -68,6 +68,7 @@ test('what a person can do depends on the status', () => {
     reject: true,
     sendBack: true,
     resume: false,
+    rebuild: true,
   });
   assert.deepEqual(humanActions({ status: 'failed' }), {
     approve: false,
@@ -75,6 +76,7 @@ test('what a person can do depends on the status', () => {
     reject: false,
     sendBack: true,
     resume: false,
+    rebuild: true,
   });
   // #379: an idea in progress can be set aside.
   assert.deepEqual(humanActions({ status: 'coding' }), {
@@ -83,5 +85,6 @@ test('what a person can do depends on the status', () => {
     reject: false,
     sendBack: false,
     resume: false,
+    rebuild: false,
   });
 });

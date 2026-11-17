@@ -279,7 +279,9 @@ export async function coderStep(
   }
   return {
     next_step: 'write',
-    instruction: `get_theory("${ref}"), describe each collection it needs once, write the plugin and call submit_code; then evaluate_strategy once it passes.`,
+    instruction: t.rebuild
+      ? `Rebuild: this idea is coded again after the data fixes (corrected dividends and universe). get_theory("${ref}"), describe each collection it needs once, write the plugin fresh from its hypothesis and signal logic (the previous version is only a reference), call submit_code, then evaluate_strategy once it passes.`
+      : `get_theory("${ref}"), describe each collection it needs once, write the plugin and call submit_code; then evaluate_strategy once it passes.`,
   };
 }
 const STEP_ORDER: Record<CoderStep, number> = { evaluate: 0, fix: 1, revise: 2, write: 3, wait: 4, done: 5 };

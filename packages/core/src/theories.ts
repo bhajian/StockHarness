@@ -90,6 +90,8 @@ export type Theory = TheoryContent & {
   holdoutEvaluationId?: string;
   /** Evaluations run for this theory (counted in the workspace trials). */
   trials: number;
+  /** A rebuild in progress: the code is written again and re-evaluated under the trial it already had. */
+  rebuild?: { trial?: number; from: string; at: Date };
   /** Depends on estimate / consensus snapshots: no backtest, paper tracking only (#113). */
   forwardOnly?: boolean;
   /** The Coder working on it (#115): set when coding starts, so parallel Coders do not collide. Not exported. */

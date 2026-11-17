@@ -323,12 +323,21 @@ export async function callStrategyTool(
   if (name === 'test_strategy') return testStrategy(ownerId, args as unknown as TestArgs);
   if (name !== 'evaluate_strategy') throw new HttpError(404, `Unknown tool ${name}`);
   if (!args.plugin) throw new HttpError(400, 'plugin is required (or theory_id, for a theory in coding)');
-  const { evaluation, done } = await startEvaluation(ownerId, {
-    plugin: args.plugin,
-    ...(args.version ? { version: args.version } : {}),
-    ...(args.theory_id ? { theoryId: args.theory_id } : {}),
-    params: args.params,
-  });
+  // A rebuilt idea's evaluation keeps its earlier trial (owner, 2026-11-17).
+  const { getTheory } = await import('./theories.js');
+  const rebuilding = args.theory_id
+    ? await getTheory(ownerId, String(args.theory_id)).catch(() => null)
+    : null;
+  const { evaluation, done } = await startEvaluation(
+    ownerId,
+    {
+      plugin: args.plugin,
+      ...(args.version ? { version: args.version } : {}),
+      ...(args.theory_id ? { theoryId: args.theory_id } : {}),
+      params: args.params,
+    },
+    rebuilding?.rebuild?.trial ? { trial: rebuilding.rebuild.trial } : {},
+  );
   const wait = Math.min(WAIT_MAX_SECONDS, opts.waitSeconds ?? WAIT_MAX_SECONDS) * 1000;
   const finished = await Promise.race([
     done.catch(() => undefined),

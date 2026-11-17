@@ -65,10 +65,17 @@ export const TRANSITIONS: Record<TheoryState, Partial<Record<TheoryState, Theory
   },
   revise_code: { coding: ['coder'], parked: ['human'] },
   // A verdict given before #354 is relabelled from its recorded gates (the evaluator, once).
-  failed: { revise: ['human'], promising: ['evaluator'] },
-  promising: { parked: ['human'], failed: ['human'], revise: ['human'] },
-  successful: { approved: ['human'], parked: ['human'], failed: ['human'], revise: ['human'] },
-  approved: { parked: ['human'], failed: ['human'], revise: ['human'] },
+  // A person may rebuild a judged idea: its code is written again and re-evaluated (owner, 2026-11-17).
+  failed: { revise: ['human'], promising: ['evaluator'], approved_for_code: ['human'] },
+  promising: { parked: ['human'], failed: ['human'], revise: ['human'], approved_for_code: ['human'] },
+  successful: {
+    approved: ['human'],
+    parked: ['human'],
+    failed: ['human'],
+    revise: ['human'],
+    approved_for_code: ['human'],
+  },
+  approved: { parked: ['human'], failed: ['human'], revise: ['human'], approved_for_code: ['human'] },
   parked: { revise: ['human'], approved_for_code: ['human'] },
 };
 

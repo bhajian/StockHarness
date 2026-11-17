@@ -62,3 +62,15 @@ decide:
 
 Verdicts given before the label existed are relabelled once, at startup, from their recorded gates. The history
 records the change: a `failed → promising` move by the evaluator.
+
+## Rebuild an idea
+
+**Rebuild** (idea page, or `POST /api/ideas/:id/actions {action: "rebuild"}`; admin) sends a failed, promising or
+successful idea back to the Coder's queue with fresh code attempts. The Coder writes the plugin again from the
+hypothesis and signal logic (its queue line says _Rebuild:_), the evaluator runs it, and the Judge gives a fresh
+verdict under the active gates. The new evaluation **keeps the trial number** of the idea's last exploration: it
+re-tests the same hypothesis on corrected data, so it adds no trial to the deflated Sharpe. The old code versions and
+verdict stay in the idea's history; a promising or successful verdict starts its automatic simulation.
+
+`POST /api/ideas/rebuild-all` rebuilds every judged idea that has code. Used once after the Phase-2 data fixes
+(owner, 2026-11-17).

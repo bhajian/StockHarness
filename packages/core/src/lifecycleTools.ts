@@ -600,12 +600,17 @@ export async function evaluateForTheory(
       theory: brief(t),
       next: `T-${t.number} v${version} is already being evaluated (${running._id}): call get_evaluation with that id in a minute; do not start another.`,
     };
-  const { evaluation, done } = await startEvaluation(ownerId, {
-    plugin: t.plugin.name,
-    version,
-    theoryId: t._id,
-    params: await scopedParams(ownerId, args.params),
-  });
+  const { evaluation, done } = await startEvaluation(
+    ownerId,
+    {
+      plugin: t.plugin.name,
+      version,
+      theoryId: t._id,
+      params: await scopedParams(ownerId, args.params),
+    },
+    // A rebuilt idea keeps its earlier trial: a re-test on corrected data, not a new trial (owner, 2026-11-17).
+    t.rebuild?.trial ? { trial: t.rebuild.trial } : {},
+  );
   const evaluator = actorOf('evaluator', meta);
   const settled = done.then(async (e: Evaluation) => {
     await linkTheory(ownerId, t._id, { evaluationId: e._id }, evaluator);
@@ -728,6 +733,11 @@ async function mechanicalVerdict(
     ...(holdout ? { holdoutEvaluationId: holdout._id } : {}),
   });
   await lockGates(gates);
+  // A rebuild ends at its fresh verdict.
+  if (t.rebuild) {
+    const { theories } = await import('./theories.js');
+    await theories().updateOne({ _id: t._id, ownerId }, { $unset: { rebuild: '' } });
+  }
   // Owner request: a successful or promising idea is simulated over 10 years to today, labelled with its verdict.
   if (to === 'successful' || to === 'promising') {
     const { autoSimulateAfterVerdict } = await import('./autoSimulate.js');

@@ -52,7 +52,8 @@ test('illegal transitions are refused with the legal next states', () => {
   const humanMay = (s: string, to: string) =>
     to === 'revise' ||
     (s === 'promising' && ['parked', 'failed'].includes(to)) ||
-    (s === 'parked' && to === 'approved_for_code'); // #379: a parked idea can go back to the Coder's queue
+    (s === 'parked' && to === 'approved_for_code') || // #379: a parked idea can go back to the Coder's queue
+    (['failed', 'promising'].includes(s) && to === 'approved_for_code'); // a judged idea can be rebuilt (2026-11-17)
   for (const s of TERMINAL_STATES.filter((s) => s !== 'approved'))
     for (const to of THEORY_STATES)
       if (humanMay(s, to)) assert.equal(transitionProblem(s, to, 'human', zero), undefined, `${s} → ${to}`);
