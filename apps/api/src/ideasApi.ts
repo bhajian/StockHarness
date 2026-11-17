@@ -65,7 +65,7 @@ ideasRouter.get('/ideas/:id/code', async (req, res) => {
   res.json(await ideaCode(req.principal!.tenantId, String(req.params.id), num(req.query.version)));
 });
 const actionInput = z.object({
-  action: z.enum(['approve', 'park', 'reject', 'send_back', 'resume']),
+  action: z.enum(['approve', 'park', 'reject', 'send_back', 'resume', 'rebuild']),
   comment: z.string().max(8000).default(''),
 });
 ideasRouter.post('/ideas/:id/actions', async (req, res) => {
@@ -73,6 +73,14 @@ ideasRouter.post('/ideas/:id/actions', async (req, res) => {
   const { action, comment } = actionInput.parse(req.body ?? {});
   res.json(
     await actOnIdea(req.principal!.tenantId, String(req.params.id), action, comment, req.principal!.user._id),
+  );
+});
+// Rebuild every judged idea that has code (owner, 2026-11-17): the Coder writes it again, the Judge re-decides.
+ideasRouter.post('/ideas/rebuild-all', async (req, res) => {
+  adminOnly(req.principal!.user.role);
+  const { rebuildAllIdeas } = await import('../../../packages/core/src/ideas.js');
+  res.json(
+    await rebuildAllIdeas(req.principal!.tenantId, req.principal!.user._id, String(req.body?.comment ?? '')),
   );
 });
 ideasRouter.post('/ideas/:id/comments', async (req, res) => {

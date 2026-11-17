@@ -165,6 +165,17 @@ export function IdeaDetail({ id, tab, isAdmin }: { id: string; tab: string; isAd
               <PlayCircle size={14} /> Resume
             </button>
           )}
+          {isAdmin && idea.actions.rebuild && (
+            <button
+              type="button"
+              className="button"
+              disabled={!!busy}
+              title="Write the code again and re-evaluate on today's data; the Judge gives a fresh verdict (not a new trial)"
+              onClick={() => act('rebuild')}
+            >
+              <PlayCircle size={14} /> Rebuild
+            </button>
+          )}
           {isAdmin && idea.actions.park && (
             <button type="button" className="button" disabled={!!busy} onClick={() => setDialog('park')}>
               <PauseCircle size={14} /> Park

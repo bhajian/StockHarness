@@ -261,6 +261,7 @@ export function humanActions(t: Pick<Theory, 'status'>) {
         'revise_code',
       ].includes(s),
     resume: s === 'parked',
+    rebuild: REBUILDABLE.includes(s),
     reject: s === 'successful' || s === 'approved' || s === 'promising',
     sendBack: [
       'successful',
@@ -476,7 +477,7 @@ export async function ideaCode(ownerId: string, id: string, version?: number) {
 }
 
 // --- people act on ideas (#122) -------------------------------------------------------------------------------
-export type IdeaAction = 'approve' | 'park' | 'reject' | 'send_back' | 'resume';
+export type IdeaAction = 'approve' | 'park' | 'reject' | 'send_back' | 'resume' | 'rebuild';
 export async function actOnIdea(
   ownerId: string,
   id: string,
@@ -492,9 +493,11 @@ export async function actOnIdea(
       reject: 'failed',
       send_back: 'revise',
       resume: 'approved_for_code', // #379: a parked idea back in the Coder's queue
+      rebuild: 'approved_for_code', // a judged idea's code is written again and re-evaluated
     } as const
   )[action];
-  if (!to) throw new HttpError(400, 'action must be approve, park, reject, send_back or resume');
+  if (!to) throw new HttpError(400, 'action must be approve, park, reject, send_back, resume or rebuild');
+  if (action === 'rebuild') return rebuildIdea(ownerId, t, comment, userId);
   const text = comment.trim();
   if ((action === 'send_back' || action === 'reject') && text.length < 5)
     throw new HttpError(
@@ -512,6 +515,59 @@ export async function actOnIdea(
     },
   );
   return getIdea(ownerId, moved._id);
+}
+const REBUILDABLE = ['failed', 'promising', 'successful', 'approved'];
+/**
+ * Rebuild a judged idea (owner, 2026-11-17): back in the Coder's queue with fresh code attempts; its new evaluation
+ * keeps the trial number of its last exploration (a re-test of the same hypothesis on corrected data, not a new
+ * trial), and the Judge gives a fresh verdict. The old code and verdict stay in the history.
+ */
+export async function rebuildIdea(ownerId: string, t: Theory, comment: string, userId: string) {
+  if (!REBUILDABLE.includes(t.status))
+    throw new HttpError(
+      409,
+      `T-${t.number} is ${t.status}: only a failed, promising or successful idea is rebuilt`,
+    );
+  const last = await evaluations()
+    .find({ ownerId, theoryId: t._id, mode: 'explore', status: 'succeeded' }, { projection: { trial: 1 } })
+    .sort({ createdAt: -1 })
+    .limit(1)
+    .next();
+  const moved = await transitionTheory(
+    ownerId,
+    t._id,
+    'approved_for_code',
+    { role: 'human', userId },
+    comment.trim() || 'Rebuild: write the code again and re-evaluate on the corrected data',
+    { action: 'rebuild', from: t.status, ...(last?.trial ? { trial: last.trial } : {}) },
+  );
+  await theories().updateOne(
+    { _id: moved._id, ownerId },
+    {
+      $set: {
+        codeAttempts: 0,
+        rebuild: { ...(last?.trial ? { trial: last.trial } : {}), from: t.status, at: new Date() },
+      },
+    },
+  );
+  return getIdea(ownerId, moved._id);
+}
+/** Rebuild every judged idea that has code (failed, promising, successful or approved). */
+export async function rebuildAllIdeas(ownerId: string, userId: string, comment = '') {
+  const rows = await theories()
+    .find(
+      { ownerId, status: { $in: REBUILDABLE as any }, 'plugin.name': { $exists: true } },
+      { projection: { number: 1 } },
+    )
+    .sort({ number: 1 })
+    .toArray();
+  const done: string[] = [];
+  for (const r of rows) {
+    const t = await getTheory(ownerId, r._id);
+    await rebuildIdea(ownerId, t, comment, userId);
+    done.push(`T-${t.number}`);
+  }
+  return { rebuilt: done };
 }
 export async function commentOnIdea(ownerId: string, id: string, text: string, userId: string) {
   const t = await getTheory(ownerId, id);
