@@ -58,10 +58,12 @@ export function SimulationsPage({ isAdmin }: { isAdmin: boolean }) {
 function SimulationList({ isAdmin }: { isAdmin: boolean }) {
   const [rows, setRows] = useState<any[] | null>(null);
   const [building, setBuilding] = useState(false);
+  // Archived runs (e.g. from before the data fixes) are kept but hidden unless asked for.
+  const [showArchived, setShowArchived] = useState(false);
   useEffect(() => {
     let stop = false;
     const load = () =>
-      api<any[]>('/simulations').then((r) => {
+      api<any[]>(showArchived ? '/simulations?archived=1' : '/simulations').then((r) => {
         if (stop) return;
         setRows(r);
         if (r.some((x) => x.status === 'running')) setTimeout(load, 4000);
@@ -70,7 +72,7 @@ function SimulationList({ isAdmin }: { isAdmin: boolean }) {
     return () => {
       stop = true;
     };
-  }, []);
+  }, [showArchived]);
   // Click a header to sort (#385); unsorted, newest first.
   const { sorted, sort, toggle } = useSort(rows ?? [], {
     name: { value: (r) => r.name },
@@ -105,10 +107,14 @@ function SimulationList({ isAdmin }: { isAdmin: boolean }) {
           </div>
         )}
       </header>
+      <label className="muted-line archived-toggle">
+        <input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} />{' '}
+        Show archived simulations (kept, hidden: e.g. run before the data fixes)
+      </label>
       {building && <PortfolioBuilder onClose={() => setBuilding(false)} />}
       {!rows.length ? (
         <div className="empty-state">
-          <p>No simulations yet.</p>
+          <p>{showArchived ? 'No archived simulations.' : 'No simulations yet.'}</p>
           <p className="muted-line">
             Start one here, or from an idea&apos;s page (<em>Simulate</em>) once the idea has evaluated code.
           </p>
@@ -149,6 +155,7 @@ function SimulationList({ isAdmin }: { isAdmin: boolean }) {
                         />
                       )}
                       {r.usesHoldout && <small className="muted-line">uses the holdout</small>}
+                      {r.archived && <small className="muted-line">archived: {r.archived.reason}</small>}
                     </td>
                     <td>
                       <span className="chips">

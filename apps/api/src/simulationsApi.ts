@@ -1,3 +1,4 @@
+import { z } from 'zod';
 // Simulations API (#125). Mounted under /api with requireSession; starting and deleting runs is admin-only.
 import { Router } from 'express';
 import { HttpError } from '../../../packages/core/src/security.js';
@@ -27,7 +28,26 @@ const int = (v: unknown) =>
   v === undefined || v === '' ? undefined : Number.parseInt(String(v), 10) || undefined;
 
 simulationsRouter.get('/simulations', async (req, res) => {
-  res.json(await listSimulations(req.principal!.tenantId));
+  res.json(await listSimulations(req.principal!.tenantId, { archived: req.query.archived === '1' }));
+});
+// Archive (hide, keep) simulations: by ids, or all created before a date (e.g. before the data fixes).
+simulationsRouter.post('/simulations/archive', async (req, res) => {
+  adminOnly(req.principal!.user.role);
+  const body = z
+    .object({
+      ids: z.array(z.string()).max(1000).optional(),
+      before: z.string().optional(),
+      reason: z.string().min(3).max(500),
+    })
+    .parse(req.body ?? {});
+  const { archiveSimulations } = await import('../../../packages/core/src/simulations.js');
+  res.json(await archiveSimulations(req.principal!.tenantId, body));
+});
+simulationsRouter.post('/simulations/unarchive', async (req, res) => {
+  adminOnly(req.principal!.user.role);
+  const ids = z.object({ ids: z.array(z.string()).min(1).max(1000) }).parse(req.body ?? {}).ids;
+  const { unarchiveSimulations } = await import('../../../packages/core/src/simulations.js');
+  res.json(await unarchiveSimulations(req.principal!.tenantId, ids));
 });
 simulationsRouter.get('/simulations/configs', async (req, res) => {
   res.json(

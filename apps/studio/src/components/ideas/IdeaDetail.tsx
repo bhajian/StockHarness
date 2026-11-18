@@ -129,6 +129,11 @@ export function IdeaDetail({ id, tab, isAdmin }: { id: string; tab: string; isAd
           </h2>
           <div className="idea-meta">
             <IdeaStatus status={idea.status} />
+            {idea.rebuilding && (
+              <span title="New code and a fresh verdict on the corrected data are on the way; the old runs and verdict are in the history">
+                <StatusPill status="running" label="rebuilding" />
+              </span>
+            )}
             {idea.forwardOnly && <StatusPill status="forward-only" label="forward only" />}
             <span className="profile-chip">{profileOf(theoryProfileId(t)).label}</span>
             <span>{t.family}</span>
@@ -822,6 +827,12 @@ function Runs({
                 <td>{when(e.createdAt)}</td>
                 <td>
                   {e.mode === 'holdout' ? <StatusPill status="warn" label="holdout" /> : e.mode}
+                  {e.superseded && (
+                    <span title="Run before the rebuild, on the old data and code">
+                      {' '}
+                      <StatusPill status="disabled" label="before the rebuild" />
+                    </span>
+                  )}
                   {e.reproduces && (
                     <StatusPill
                       status={

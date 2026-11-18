@@ -747,6 +747,15 @@ test('a judged idea is rebuilt: new code, the same trial, a fresh verdict (owner
   assert.ok(oldTrial, JSON.stringify(before).slice(0, 300));
   const rebuilt = await ok(`/ideas/${ref}/actions`, { action: 'rebuild' });
   assert.equal(rebuilt.status, 'approved_for_code');
+  // The old numbers are history: none shown while it rebuilds, the old runs marked superseded.
+  assert.equal(rebuilt.rebuilding, true);
+  assert.equal(rebuilt.sharpe, null);
+  assert.equal(rebuilt.judgeSummary, null);
+  const runs = await ok(`/ideas/${ref}/evaluations`);
+  assert.ok(
+    (runs.items ?? runs).every((e: any) => e.superseded),
+    'every earlier run is before the rebuild',
+  );
   const queue = (await coder.call('get_research_brief', {})).queue;
   const item = queue.find((q: any) => q.theory_id === ref);
   assert.match(item.instruction, /^Rebuild:/);

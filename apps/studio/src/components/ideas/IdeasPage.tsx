@@ -233,6 +233,7 @@ function IdeasList({ search }: { search: string }) {
             <article key={i.id} className="idea-card" onClick={() => go(`/ideas/${i.ref}`)}>
               <header>
                 <span className="mono">{i.ref}</span> <IdeaStatus status={i.status} />
+                {i.rebuilding && <StatusPill status="running" label="rebuilding" />}
                 <input
                   type="checkbox"
                   aria-label={`Select ${i.ref}`}
@@ -366,6 +367,7 @@ function IdeaTable({
               </td>
               <td>
                 <IdeaStatus status={i.status} />
+                {i.rebuilding && <StatusPill status="running" label="rebuilding" />}
               </td>
               <td>{i.side.replace('_', ' / ')}</td>
               <td>{i.horizonDays}d</td>
