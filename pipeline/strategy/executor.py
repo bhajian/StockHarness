@@ -11,8 +11,8 @@ documented policy both follow. It never reads `tr_1d` or `ret_1d` for valuation:
 - on a dividend's ex-date the position earns shares × the dividend as paid per share (a short pays it), reinvested
   in the same name at that close, which is what a total return assumes;
 - a bad print (`dq_flags` has `bad_print`) is not a price: the last good close is kept;
-- a dividend is counted once per security and ex-date when several rows give the same amount (#518: a class change
-  can leave a stale cash/special duplicate), and skipped where the price row is flagged `implausible_dividend`
+- a dividend row repeated within one class counts once; a cash and a special dividend on one day both count (#518),
+  and a dividend is skipped where the price row is flagged `implausible_dividend`
   (the bars are adjusted for it, e.g. KDP's $103.75 merger dividend on 2018-07-10): both are listed;
 - a held name whose prices stopped and which is no longer active delists once, by the delisting rules, into cash.
 
@@ -53,24 +53,28 @@ def load_market(source, names: list[str], start: str, end: str, calendar_from: s
             continue
         px.setdefault(s, {})[d] = price
     splits: dict[str, dict[str, float]] = {}
-    amounts: dict[tuple[str, str], set[float]] = {}
-    rows_of: dict[tuple[str, str], int] = {}
+    # Per security, ex-date and class (cash / special): the distinct amounts (#518 left a repeated row within a class
+    # possible). Classes add up: a regular and a special dividend of the same size on one day are both paid
+    # (Equinor 2024-08-19: $0.35 ordinary + $0.35 extraordinary; Ford 2025-02-18: $0.15 + $0.15 supplemental).
+    amounts: dict[tuple[str, str, str], set[float]] = {}
+    rows_of: dict[tuple[str, str, str], int] = {}
     for a in source.find("corporate_actions", {"security_id": {"$in": names}, "ex_date": {"$gte": start, "$lte": end}},
                          ["security_id", "action_type", "ex_date", "split_ratio", "dividend_amount"]) if names else []:
         s, d = a["security_id"], str(a["ex_date"])[:10]
         if a.get("action_type") == SPLIT and _num(a.get("split_ratio")) and a["split_ratio"] > 0:
             splits.setdefault(s, {})[d] = splits.get(s, {}).get(d, 1.0) * float(a["split_ratio"])
         elif a.get("action_type") in DIVIDENDS and _num(a.get("dividend_amount")):
-            amounts.setdefault((s, d), set()).add(round(float(a["dividend_amount"]), 8))
-            rows_of[(s, d)] = rows_of.get((s, d), 0) + 1
+            k = (s, d, a["action_type"])
+            amounts.setdefault(k, set()).add(round(float(a["dividend_amount"]), 8))
+            rows_of[k] = rows_of.get(k, 0) + 1
     divs: dict[str, dict[str, float]] = {}
     skipped = []
-    for (s, d), xs in sorted(amounts.items()):
+    for (s, d, _kind), xs in sorted(amounts.items()):
         if (s, d) in implausible:
             skipped.append({"security_id": s, "ex_date": d, "amount": max(xs)})
             continue
-        divs.setdefault(s, {})[d] = sum(xs)  # distinct amounts add up (a regular and a special on one day)
-    duplicates = [{"security_id": s, "ex_date": d} for (s, d), n in sorted(rows_of.items()) if n > len(amounts[(s, d)])]
+        divs.setdefault(s, {})[d] = divs.get(s, {}).get(d, 0.0) + sum(xs)
+    duplicates = [{"security_id": s, "ex_date": d} for (s, d, k), n in sorted(rows_of.items()) if n > len(amounts[(s, d, k)])]
     inactive = {r["security_id"] for r in source.find("securities", {"security_id": {"$in": names}},
                                                        ["security_id", "is_active"]) if r.get("is_active") is False}
     calendar = {r["date"] for r in source.find("trading_calendar", {"date": {"$gte": calendar_from or start, "$lte": end}},
