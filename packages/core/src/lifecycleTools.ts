@@ -736,7 +736,10 @@ async function mechanicalVerdict(
   // A rebuild ends at its fresh verdict.
   if (t.rebuild) {
     const { theories } = await import('./theories.js');
-    await theories().updateOne({ _id: t._id, ownerId }, { $unset: { rebuild: '' } });
+    await theories().updateOne(
+      { _id: t._id, ownerId },
+      { $unset: { rebuild: '' }, $set: { rebuiltAt: t.rebuild.at } },
+    );
   }
   // Owner request: a successful or promising idea is simulated over 10 years to today, labelled with its verdict.
   if (to === 'successful' || to === 'promising') {

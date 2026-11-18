@@ -25,7 +25,24 @@ export const IN_PROGRESS = [
 ];
 
 /** The evaluations that belong to an idea (its trials, the holdout, and reproductions), newest first. */
-async function ideaEvaluationDocs(t: Theory) {
+/**
+ * The rebuild cutoff (owner, 2026-11-17): a rebuilding or rebuilt idea counts only what came after its rebuild began;
+ * the earlier code, runs and verdict stay in its history (preserved, never shown as its current numbers).
+ */
+export const rebuildCutoff = (t: Pick<Theory, 'rebuild' | 'rebuiltAt'>) => {
+  const at = t.rebuild?.at ?? t.rebuiltAt;
+  return at ? new Date(at) : undefined;
+};
+const afterCutoff = (t: Theory, at: Date | string | undefined) => {
+  const c = rebuildCutoff(t);
+  return !c || (!!at && new Date(at) >= c);
+};
+/** The idea's evaluations; with `all`, the ones from before a rebuild too (marked superseded by the caller). */
+async function ideaEvaluationDocs(t: Theory, opts: { all?: boolean } = {}) {
+  const docs = await allIdeaEvaluationDocs(t);
+  return opts.all ? docs : docs.filter((e) => afterCutoff(t, e.createdAt));
+}
+async function allIdeaEvaluationDocs(t: Theory) {
   const ids = [...t.evaluationIds, ...(t.holdoutEvaluationId ? [t.holdoutEvaluationId] : [])];
   // Records imported from another workspace keep their original ids as sourceId.
   const theoryIds = [
@@ -52,7 +69,9 @@ function spark(record: Record<string, any> | undefined) {
   return eq.filter((_, i) => i % step === 0 || i === eq.length - 1).map((v) => r4(v));
 }
 const lastVerdict = (t: Theory) =>
-  [...t.history].reverse().find((h) => h.type === 'transition' && h.data && 'gatesVersion' in h.data);
+  [...t.history]
+    .reverse()
+    .find((h) => h.type === 'transition' && h.data && 'gatesVersion' in h.data && afterCutoff(t, h.at));
 
 function row(t: Theory, evals: Evaluation[]) {
   const ex = latestExplore(evals)?.record;
@@ -72,6 +91,8 @@ function row(t: Theory, evals: Evaluation[]) {
     forwardOnly: !!t.forwardOnly,
     trials: t.trials,
     revisions: t.revisions,
+    // Rebuilding: new code and a fresh verdict on the corrected data are on the way; the old numbers are history.
+    ...(t.rebuild ? { rebuilding: true } : {}),
     sharpe: r4(ex?.summary?.sharpe),
     deflatedSharpe: r4(ex?.trial_context?.dsr),
     excessPerYear: r4(ex?.excess?.spx?.excess_cagr),
@@ -213,7 +234,9 @@ export async function getIdea(ownerId: string, id: string) {
         ),
         final: false,
       };
-  const judge = [...t.history].reverse().find((h) => h.actor.role === 'judge' && h.type === 'transition');
+  const judge = [...t.history]
+    .reverse()
+    .find((h) => h.actor.role === 'judge' && h.type === 'transition' && afterCutoff(t, h.at));
   const models: Record<string, string[]> = {};
   for (const h of t.history)
     if (h.actor.model) models[h.actor.role] = [...new Set([...(models[h.actor.role] ?? []), h.actor.model])];
@@ -310,7 +333,11 @@ function summaryOf(e: Evaluation) {
 }
 export async function ideaEvaluations(ownerId: string, id: string) {
   const t = await getTheory(ownerId, id);
-  return (await ideaEvaluationDocs(t)).map(summaryOf);
+  // Every run, the ones before a rebuild marked superseded (kept as history).
+  return (await ideaEvaluationDocs(t, { all: true })).map((e) => ({
+    ...summaryOf(e),
+    ...(afterCutoff(t, e.createdAt) ? {} : { superseded: true }),
+  }));
 }
 
 // --- the debate, with cited numbers checked against the idea's evaluations (#121) ---------------------------

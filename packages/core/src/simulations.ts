@@ -119,6 +119,8 @@ export type Simulation = {
   error?: { message: string; type?: string; idea_id?: string; frames?: unknown[]; problems?: string[] };
   sourceId?: string;
   importedAt?: Date;
+  /** Hidden from the list, kept with its ledger (e.g. run before the data fixes): never deleted. */
+  archived?: { at: Date; reason: string };
 };
 type SavedConfig = {
   _id: string;
@@ -436,10 +438,14 @@ export async function getSimulation(ownerId: string, id: string) {
   return settleStale(s);
 }
 /** The list: config summary and headline numbers, newest first. */
-export async function listSimulations(ownerId: string) {
+export async function listSimulations(ownerId: string, opts: { archived?: boolean } = {}) {
   const docs = await simulations()
     .find(
-      { ownerId },
+      // Archived runs are listed only when asked for (they are kept, with their ledgers).
+      { ownerId, archived: opts.archived ? { $exists: true } : { $exists: false } } as Record<
+        string,
+        unknown
+      >,
       { projection: { 'result.series': 0, 'result.attribution': 0, 'result.monthly_returns': 0 } },
     )
     .sort({ createdAt: -1 })
@@ -457,6 +463,7 @@ export async function listSimulations(ownerId: string) {
         status: s.status,
         usesHoldout: s.usesHoldout,
         ...(s.config.label ? { label: s.config.label } : {}),
+        ...(s.archived ? { archived: s.archived } : {}),
         ...(s.config.auto ? { auto: true } : {}),
         cagr: sum.cagr ?? null,
         sharpe: sum.sharpe ?? null,
@@ -644,6 +651,9 @@ export function simulationRunSpec(s: Simulation) {
     ...(s.durationMs !== undefined ? { durationMs: s.durationMs } : {}),
     createdAt: new Date(s.createdAt).toISOString(),
     ...(s.finishedAt ? { finishedAt: new Date(s.finishedAt).toISOString() } : {}),
+    ...(s.archived
+      ? { archived: { at: new Date(s.archived.at).toISOString(), reason: s.archived.reason } }
+      : {}),
   };
 }
 export const simulationRunSpecSchema = z.object({
@@ -657,6 +667,7 @@ export const simulationRunSpecSchema = z.object({
   durationMs: z.number().optional(),
   createdAt: z.string().refine((v) => !Number.isNaN(Date.parse(v)), 'a date'),
   finishedAt: z.string().optional(),
+  archived: z.object({ at: z.string(), reason: z.string() }).optional(),
 });
 /** Restore a saved config from YAML as it is (no resolution: the ideas may arrive in the same import). */
 export async function restoreSimulationConfig(ownerId: string, name: string, spec: Record<string, unknown>) {
@@ -696,6 +707,7 @@ export async function restoreSimulationRun(
     ...(spec.durationMs !== undefined ? { durationMs: spec.durationMs } : {}),
     createdAt: new Date(spec.createdAt),
     ...(spec.finishedAt ? { finishedAt: new Date(spec.finishedAt) } : {}),
+    ...(spec.archived ? { archived: { at: new Date(spec.archived.at), reason: spec.archived.reason } } : {}),
     importedAt: new Date(),
   });
 }
@@ -713,4 +725,30 @@ export async function recoverSimulations() {
     },
   );
   return r.modifiedCount;
+}
+
+/** Archive simulations (hidden from the list; the run and its ledger are kept): by id, or every one created before. */
+export async function archiveSimulations(
+  ownerId: string,
+  opts: { ids?: string[]; before?: string; reason: string },
+) {
+  const filter: Record<string, unknown> = {
+    ownerId,
+    archived: { $exists: false },
+    status: { $ne: 'running' },
+  };
+  if (opts.ids?.length) filter._id = { $in: opts.ids };
+  else if (opts.before) filter.createdAt = { $lt: new Date(opts.before) };
+  else throw new HttpError(400, 'ids or before is required');
+  const r = await simulations().updateMany(filter, {
+    $set: { archived: { at: new Date(), reason: opts.reason } },
+  });
+  return { archived: r.modifiedCount };
+}
+/** Bring archived simulations back into the list. */
+export async function unarchiveSimulations(ownerId: string, ids: string[]) {
+  const r = await simulations().updateMany({ ownerId, _id: { $in: ids } } as Record<string, unknown>, {
+    $unset: { archived: '' },
+  });
+  return { restored: r.modifiedCount };
 }

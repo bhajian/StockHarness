@@ -92,6 +92,8 @@ export type Theory = TheoryContent & {
   trials: number;
   /** A rebuild in progress: the code is written again and re-evaluated under the trial it already had. */
   rebuild?: { trial?: number; from: string; at: Date };
+  /** When the last rebuild began: results from before it are history, not the idea's numbers. */
+  rebuiltAt?: Date;
   /** Depends on estimate / consensus snapshots: no backtest, paper tracking only (#113). */
   forwardOnly?: boolean;
   /** The Coder working on it (#115): set when coding starts, so parallel Coders do not collide. Not exported. */

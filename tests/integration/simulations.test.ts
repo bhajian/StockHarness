@@ -409,3 +409,17 @@ test('#461: the portfolio builder proposes a book with an audit of every candida
   if (r.picked.length) assert.equal(r.simulation.ideas.length, r.picked.length);
   else assert.equal(r.simulation, null);
 });
+
+test('archived simulations leave the list, are kept, and come back (owner, 2026-11-17)', async () => {
+  const before = await ok('/simulations');
+  assert.ok(before.length > 0);
+  const id = before[0].id;
+  const a = await ok('/simulations/archive', { ids: [id], reason: 'Run before the data fixes' });
+  assert.equal(a.archived, 1);
+  assert.ok(!(await ok('/simulations')).some((s: any) => s.id === id), 'hidden from the list');
+  const archived = await ok('/simulations?archived=1');
+  assert.equal(archived.find((s: any) => s.id === id)?.archived?.reason, 'Run before the data fixes');
+  assert.ok((await ok(`/simulations/${id}`)).id, 'kept: the run still opens');
+  assert.equal((await ok('/simulations/unarchive', { ids: [id] })).restored, 1);
+  assert.ok((await ok('/simulations')).some((s: any) => s.id === id));
+});
