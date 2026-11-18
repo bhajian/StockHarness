@@ -128,13 +128,27 @@ class NoCloses(unittest.TestCase):
 class DataQuirks(unittest.TestCase):
     """#518 and #481 on real data: a stale duplicate dividend row, and a dividend the bars are already adjusted for."""
 
-    def test_a_duplicate_dividend_row_counts_once(self):
+    def test_a_repeated_row_within_a_class_counts_once(self):
         src, days = fixture()
         dup = next(a for a in src.collections["corporate_actions"] if a["security_id"] == "SEC_000001")
-        src.collections["corporate_actions"].append({**dup, "action_type": "cash_dividend"})
+        src.collections["corporate_actions"].append(dict(dup))
         r = run(constant("long", 3), src, days[20], days[-1])
         self.assertEqual(r["reconciliation"]["status"], "reconciled", r["reconciliation"]["breaches"][:1])
         self.assertEqual(r["reconciliation"]["dividends"]["duplicate_count"], 1)
+
+    def test_a_regular_and_a_special_of_the_same_size_both_count(self):
+        """Equinor 2024-08-19: $0.35 ordinary + $0.35 extraordinary on one ex-date; tr_1d carries $0.70."""
+        src, days = fixture()
+        sid, ex = "SEC_000003", DAYS[60]
+        rows = sorted((r for r in src.collections["prices_daily"] if r["security_id"] == sid), key=lambda r: r["date"])
+        prev = next(r for r in rows if r["date"] < ex and r is rows[rows.index(next(x for x in rows if x["date"] == ex)) - 1])
+        today = next(r for r in rows if r["date"] == ex)
+        today["tr_1d"] = (today["close"] + 1.0) / prev["close"] - 1  # the price as is, plus $0.50 + $0.50
+        for kind in ("cash_dividend", "special_dividend"):
+            src.collections["corporate_actions"].append({"security_id": sid, "action_type": kind, "ex_date": ex, "dividend_amount": 0.5})
+        r = run(constant("long", 4), src, days[20], days[-1])
+        bad = [b for b in r["reconciliation"]["breaches"] if b.get("date") == ex]
+        self.assertEqual(bad, [], "both dividends are credited")
 
     def test_a_dividend_on_an_implausible_dividend_row_is_skipped(self):
         src, days = fixture()
