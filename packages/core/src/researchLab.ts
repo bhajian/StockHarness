@@ -6,6 +6,15 @@ import { trialCount } from './evaluations.js';
 import { coderBacklog, researchSettings } from './researchLoop.js';
 import { researchState } from './researchState.js';
 import { budgetState } from './spendGuard.js';
+import {
+  activityOf,
+  cycleNumbers,
+  lastTouch,
+  runFocus,
+  STAGES,
+  stageOf,
+  STEP_NAMES,
+} from './boardProgress.js';
 
 export const BOARD_COLUMNS: { key: string; label: string; statuses: Theory['status'][] }[] = [
   { key: 'draft', label: 'Draft', statuses: ['draft', 'revise'] },
@@ -102,11 +111,25 @@ export async function researchStatus(ownerId: string) {
         .next()
     : null;
   const activeRun = h
-    ? await collection<{ _id: string; status: string; createdAt: Date; cancelRequested?: boolean }>('runs')
+    ? await collection<{
+        _id: string;
+        status: string;
+        createdAt: Date;
+        cancelRequested?: boolean;
+        checkpoint?: { cursor?: string };
+        events?: { type: string; nodeId?: string; data?: { arguments?: unknown } }[];
+      }>('runs')
         .find(
           { ownerId, workflowId: h._id, status: { $in: ['queued', 'running'] } } as Record<string, unknown>,
           {
-            projection: { status: 1, createdAt: 1, cancelRequested: 1 },
+            // #543: the step it is on (cursor) and its latest tool calls, for what each card says.
+            projection: {
+              status: 1,
+              createdAt: 1,
+              cancelRequested: 1,
+              checkpoint: 1,
+              events: { $slice: -200 },
+            },
           },
         )
         .sort({ createdAt: -1 })
@@ -133,6 +156,7 @@ export async function researchStatus(ownerId: string) {
     capExceeded: spend.exceeded,
     backlog: { size: await coderBacklog(ownerId), limit: s.maxCoderBacklog },
   });
+  const { card, ...board } = await boardOf(ownerId, h?._id, all, activeRun);
   return {
     paused: !!s.paused,
     // #458: the one status the Lab and Setup show, with its reason and the controls that apply.
@@ -163,6 +187,7 @@ export async function researchStatus(ownerId: string) {
         : null,
     tokensByRole: tokens,
     board: {
+      ...board,
       columns: BOARD_COLUMNS.map((c) => ({
         key: c.key,
         label: c.label,
@@ -172,7 +197,116 @@ export async function researchStatus(ownerId: string) {
     },
   };
 }
-const card = (t: Theory) => ({
+
+/** The ideas each agent takes next, in the order it takes them (number order, as the briefs list them). */
+const BOARD_QUEUES: Theory['status'][][] = [
+  ['pre_review'],
+  ['approved_for_code', 'revise_code', 'code_error', 'coding'],
+  ['post_review'],
+];
+
+/**
+ * #543: the board's cards with who has each idea, what is happening to it, its stage and the cycle (C-n) that last
+ * worked on it; and the running cycle with its step.
+ */
+async function boardOf(
+  ownerId: string,
+  workflowId: string | undefined,
+  all: Theory[],
+  activeRun: {
+    _id: string;
+    createdAt: Date;
+    checkpoint?: { cursor?: string };
+    events?: { type: string; nodeId?: string; data?: { arguments?: unknown } }[];
+  } | null,
+) {
+  const today = startOfDay();
+  const shown = all.filter(
+    (t) => IN_FLIGHT.includes(t.status) || t.status === 'draft' || t.updatedAt >= today,
+  );
+  const ids = shown.map((t) => t._id);
+  // The list above skips history; the cards need only its last entries.
+  const recent = new Map(
+    (
+      await theories()
+        .find({ ownerId, _id: { $in: ids } }, { projection: { history: { $slice: -12 } } })
+        .toArray()
+    ).map((t) => [t._id, t.history ?? []]),
+  );
+  const evaluations = new Map(
+    (
+      await collection<{ _id: string; theoryId?: string; status: string; createdAt: Date }>('evaluations')
+        .find(
+          { ownerId, theoryId: { $in: ids }, status: { $in: ['queued', 'running'] } } as Record<
+            string,
+            unknown
+          >,
+          { projection: { theoryId: 1, status: 1, createdAt: 1 } },
+        )
+        .toArray()
+    ).map((e) => [e.theoryId!, e]),
+  );
+  const touches = new Map(shown.map((t) => [t._id, lastTouch(recent.get(t._id))]));
+  const numbers = workflowId
+    ? await cycleNumbers(ownerId, workflowId, [
+        ...[...touches.values()].map((x) => x.runId ?? ''),
+        activeRun?._id ?? '',
+      ])
+    : new Map<string, number>();
+  const focus = activeRun ? runFocus(activeRun) : { step: undefined, focusRef: undefined };
+  const queues = new Map<string, { position: number; size: number }>();
+  for (const q of BOARD_QUEUES) {
+    const members = all.filter((t) => q.includes(t.status)).sort((a, b) => a.number - b.number);
+    members.forEach((t, i) => queues.set(t._id, { position: i + 1, size: members.length }));
+  }
+  const card = (t: Theory) => {
+    const touch = touches.get(t._id) ?? lastTouch();
+    const evaluation = evaluations.get(t._id);
+    const ref = `T-${t.number}`;
+    const q = queues.get(t._id);
+    return {
+      ...cardOf(t),
+      stage: stageOf(t.status),
+      activity: activityOf({
+        status: t.status,
+        ref,
+        codeAttempts: t.codeAttempts,
+        rebuild: !!t.rebuild,
+        ...(focus.step ? { step: focus.step } : {}),
+        ...(focus.focusRef ? { focusRef: focus.focusRef } : {}),
+        ...(evaluation ? { evaluation: { status: evaluation.status, since: evaluation.createdAt } } : {}),
+        ...(q ? { queuePosition: q.position, queueSize: q.size } : {}),
+      }),
+      ...(t.rebuild ? { rebuilding: true } : {}),
+      stageSince: touch.stageSince ?? t.updatedAt,
+      ...(touch.model ? { model: touch.model } : {}),
+      ...(touch.runId
+        ? {
+            cycle: {
+              id: touch.runId,
+              number: numbers.get(touch.runId) ?? null,
+              current: touch.runId === activeRun?._id,
+            },
+          }
+        : {}),
+    };
+  };
+  return {
+    stages: STAGES,
+    activeCycle: activeRun
+      ? {
+          id: activeRun._id,
+          number: numbers.get(activeRun._id) ?? null,
+          startedAt: activeRun.createdAt,
+          step: focus.step ?? null,
+          stepName: focus.step ? (STEP_NAMES[focus.step] ?? focus.step) : null,
+          focusRef: focus.focusRef ?? null,
+        }
+      : null,
+    card,
+  };
+}
+const cardOf = (t: Theory) => ({
   id: t._id,
   ref: `T-${t.number}`,
   title: t.title,

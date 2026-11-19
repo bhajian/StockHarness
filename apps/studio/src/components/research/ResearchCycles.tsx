@@ -27,6 +27,7 @@ function CycleList() {
   }, []);
   // Click a header to sort (#385); unsorted, newest first.
   const { sorted, sort, toggle } = useSort(rows ?? [], {
+    cycle: { value: (r) => r.number, firstDesc: true },
     started: { value: (r) => new Date(r.startedAt), firstDesc: true },
     status: {
       value: (r) =>
@@ -60,6 +61,7 @@ function CycleList() {
       <table aria-label="Cycles">
         <SortHead
           heads={[
+            ['cycle', 'Cycle'],
             ['started', 'Started'],
             ['status', 'Status'],
             ['took', 'Took', 'num'],
@@ -78,6 +80,7 @@ function CycleList() {
           <PagedRows rows={sorted} resetKey={sort}>
             {(r) => (
               <tr key={r.id} className="clickable" onClick={() => go(`/research/cycles/${r.id}`)}>
+                <td className="mono nowrap">{r.number ? `C-${r.number}` : '—'}</td>
                 <td className="nowrap">{when(r.startedAt)}</td>
                 <td>
                   <StatusPill status={r.outcome ?? r.status} />
@@ -116,7 +119,8 @@ function Cycle({ id }: { id: string }) {
         <button type="button" className="link-button" onClick={() => go('/research/cycles')}>
           <ArrowLeft size={14} /> Cycles
         </button>
-        <span aria-hidden="true">›</span> {when(c.startedAt)}
+        <span aria-hidden="true">›</span> {c.number ? `C-${c.number} · ` : ''}
+        {when(c.startedAt)}
       </nav>
       <p>
         <StatusPill status={c.outcome ?? c.status} />{' '}

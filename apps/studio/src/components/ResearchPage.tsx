@@ -34,6 +34,21 @@ type Card = {
   codeAttempts: number;
   trials: number;
   forwardOnly?: boolean;
+  /** #543: stage index into board.stages, who has it and what is happening, and the cycle that last worked on it. */
+  stage?: number;
+  activity?: { who: string; text: string; active: boolean };
+  stageSince?: string;
+  model?: string;
+  rebuilding?: boolean;
+  cycle?: { id: string; number: number | null; current: boolean };
+};
+type ActiveCycle = {
+  id: string;
+  number: number | null;
+  startedAt: string;
+  step: string | null;
+  stepName: string | null;
+  focusRef: string | null;
 };
 type Status = {
   paused: boolean;
@@ -61,7 +76,12 @@ type Status = {
     stopReason?: string;
   };
   tokensByRole: Record<string, { input: number; output: number; calls: number }>;
-  board: { columns: { key: string; label: string; cards: Card[] }[]; verdictsToday: Card[] };
+  board: {
+    columns: { key: string; label: string; cards: Card[] }[];
+    verdictsToday: Card[];
+    stages?: string[];
+    activeCycle?: ActiveCycle | null;
+  };
 };
 type Item = {
   at: string;
@@ -178,33 +198,7 @@ function ResearchLab({ data, isAdmin }: { data: Data; isAdmin: boolean }) {
         />
       </div>
       {kpis && <Scorecards kpis={kpis} />}
-      <div className="research-board" aria-label="Pipeline board">
-        {[
-          ...status.board.columns,
-          { key: 'verdicts', label: "Today's verdicts", cards: status.board.verdictsToday },
-        ].map((col) => (
-          <div key={col.key} className="board-column" aria-label={col.label}>
-            <h3>
-              {col.label} <small>{col.cards.length}</small>
-            </h3>
-            {!col.cards.length && <span className="board-empty">Nothing here now</span>}
-            {col.cards.map((c) => (
-              <button key={c.id} type="button" className="board-card" onClick={() => go(`/ideas/${c.ref}`)}>
-                <strong>
-                  {c.ref} {c.title}
-                </strong>
-                <span>
-                  <IdeaStatus status={c.status} /> {c.family}
-                  {c.forwardOnly ? ' · forward only' : ''}
-                </span>
-                <small>
-                  {c.revisions} rev · {c.codeAttempts} code retries · {c.trials} trials
-                </small>
-              </button>
-            ))}
-          </div>
-        ))}
-      </div>
+      <PipelineBoard board={status.board} />
       <div className="eval-grid">
         <div className="activity-feed" aria-label="Live activity">
           <h3>
@@ -284,6 +278,160 @@ function ResearchLab({ data, isAdmin }: { data: Data; isAdmin: boolean }) {
         </div>
       )}
     </div>
+  );
+}
+
+/** "3 h", "12 min": how long an idea has been in its stage. */
+export const ago = (at?: string, now = Date.now()) => {
+  if (!at) return '';
+  const m = Math.max(0, Math.round((now - new Date(at).getTime()) / 60000));
+  return m < 60 ? `${m} min` : m < 48 * 60 ? `${Math.round(m / 60)} h` : `${Math.round(m / 1440)} d`;
+};
+const WHO: Record<string, string> = {
+  theorist: 'Theorist',
+  judge: 'Judge',
+  coder: 'Coder',
+  evaluator: 'Evaluator',
+  none: 'Done',
+};
+
+/** #543: the cycle tag, like a sprint tag: C-n, linking to the cycle; "now" when it is the running cycle. */
+export function CycleTag({ cycle }: { cycle: { id: string; number: number | null; current?: boolean } }) {
+  return (
+    <button
+      type="button"
+      className={`cycle-tag${cycle.current ? ' current' : ''}`}
+      title={
+        cycle.current ? 'In the running cycle: open it' : 'The cycle that last worked on this idea: open it'
+      }
+      onClick={(e) => {
+        e.stopPropagation();
+        go(`/research/cycles/${cycle.id}`);
+      }}
+    >
+      {cycle.number ? `C-${cycle.number}` : 'cycle'}
+      {cycle.current ? ' · now' : ''}
+    </button>
+  );
+}
+
+/** The pipeline board (#116, #543): a card per idea with who has it, what is happening, its progress and cycle. */
+function PipelineBoard({ board }: { board: Status['board'] }) {
+  const [onlyCycle, setOnlyCycle] = useState(false);
+  const stages = board.stages ?? [];
+  const active = board.activeCycle;
+  const keep = (c: Card) => !onlyCycle || !!c.cycle?.current;
+  return (
+    <section className="research-board-wrap" aria-label="Pipeline">
+      <div className="section-heading board-head">
+        <h3>Pipeline</h3>
+        {active ? (
+          <p className="board-cycle" aria-label="Running cycle">
+            <CycleTag cycle={{ id: active.id, number: active.number, current: true }} /> running since{' '}
+            {new Date(active.startedAt).toLocaleTimeString()} · step:{' '}
+            <strong>{active.stepName ?? '—'}</strong>
+            {active.focusRef ? ` · on ${active.focusRef}` : ''}
+          </p>
+        ) : (
+          <p className="board-cycle muted-line" aria-label="Running cycle">
+            No cycle running now.
+          </p>
+        )}
+        <span className="spacer" />
+        <label className="board-filter">
+          <input
+            type="checkbox"
+            checked={onlyCycle}
+            disabled={!active}
+            onChange={(e) => setOnlyCycle(e.target.checked)}
+          />{' '}
+          Only this cycle&apos;s ideas
+        </label>
+      </div>
+      <div className="research-board" aria-label="Pipeline board">
+        {[...board.columns, { key: 'verdicts', label: "Today's verdicts", cards: board.verdictsToday }].map(
+          (col) => {
+            const cards = col.cards.filter(keep);
+            return (
+              <div key={col.key} className="board-column" aria-label={col.label}>
+                <h3>
+                  {col.label} <small>{cards.length}</small>
+                </h3>
+                {!cards.length && <span className="board-empty">Nothing here now</span>}
+                {cards.map((c) => (
+                  <BoardCard key={c.id} c={c} stages={stages} />
+                ))}
+              </div>
+            );
+          },
+        )}
+      </div>
+    </section>
+  );
+}
+
+function BoardCard({ c, stages }: { c: Card; stages: string[] }) {
+  const a = c.activity;
+  return (
+    <article
+      className={`board-card${a?.active ? ' active' : ''}`}
+      aria-label={`${c.ref} ${c.title}`}
+      onClick={() => go(`/ideas/${c.ref}`)}
+    >
+      <div className="board-card-tags">
+        <span className="mono">{c.ref}</span>
+        {c.cycle && <CycleTag cycle={c.cycle} />}
+        {c.rebuilding && <span className="board-tag">rebuild</span>}
+      </div>
+      <button
+        type="button"
+        className="board-card-title"
+        aria-label={`Open ${c.ref} ${c.title}`}
+        onClick={(e) => {
+          e.stopPropagation();
+          go(`/ideas/${c.ref}`);
+        }}
+      >
+        {c.title}
+      </button>
+      <span className="board-card-meta">
+        <IdeaStatus status={c.status} /> {c.family}
+        {c.forwardOnly ? ' · forward only' : ''}
+      </span>
+      {a && (
+        <p className={`board-activity who-${a.who}`} aria-label="Now">
+          <span className={`who-dot${a.active ? ' live' : ''}`} aria-hidden="true" />
+          <strong>{WHO[a.who] ?? a.who}</strong> {a.text}
+        </p>
+      )}
+      {c.stage !== undefined && stages.length > 0 && (
+        <div
+          className="stage-bar"
+          role="progressbar"
+          aria-label="Stage"
+          aria-valuemin={1}
+          aria-valuemax={stages.length}
+          aria-valuenow={c.stage + 1}
+          aria-valuetext={`${stages[c.stage]} (${c.stage + 1} of ${stages.length})`}
+          title={stages.map((s, i) => `${i === c.stage ? '▶ ' : ''}${s}`).join(' → ')}
+        >
+          {stages.map((s, i) => (
+            <span
+              key={s}
+              className={i < c.stage! ? 'done' : i === c.stage ? (a?.active ? 'now live' : 'now') : ''}
+            />
+          ))}
+        </div>
+      )}
+      <small>
+        {c.stage !== undefined && stages[c.stage] ? `${stages[c.stage]} ${c.stage + 1}/${stages.length}` : ''}
+        {c.stageSince ? ` · ${ago(c.stageSince)} in stage` : ''}
+        {c.model ? ` · ${c.model}` : ''}
+      </small>
+      <small>
+        {c.revisions} rev · {c.codeAttempts} code retries · {c.trials} trials
+      </small>
+    </article>
   );
 }
 
