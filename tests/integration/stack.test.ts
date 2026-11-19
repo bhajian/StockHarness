@@ -277,6 +277,53 @@ test('workflow branches and parallel agents persist their outputs and traces', a
   const other = await waitRun((await ok('/runs', { workflowId: workflow.id, input: 'skip' })).id);
   assert.equal(other.output, 'No work requested.');
 });
+test('#548: a tolerant parallel step carries on when one member fails; by default it fails', async () => {
+  const refused = await ok('/providers', {
+    name: `Refused model ${suffix}`,
+    kind: 'openai-compatible',
+    baseUrl: 'http://fixtures:9090/v1',
+    model: 'test-refused',
+    apiKey: 'refused-model-key',
+  });
+  const down = await ok('/agents', {
+    name: `Refused agent ${suffix}`,
+    providerId: refused.id,
+    systemPrompt: 'Answer briefly.',
+  });
+  const flow = (tolerant: boolean) =>
+    ok('/workflows', {
+      name: `Parallel ${tolerant ? 'tolerant' : 'strict'} ${suffix}`,
+      startAt: 'team',
+      nodes: [
+        {
+          id: 'team',
+          name: 'Team',
+          type: 'parallel',
+          agentIds: [agent.id, down.id],
+          prompt: '{{input}}',
+          ...(tolerant ? { continueOnMemberFailure: true } : {}),
+          next: 'answer',
+        },
+        { id: 'answer', name: 'Answer', type: 'output', template: 'Done' },
+      ],
+    });
+  const tolerant = await waitRun(
+    (await ok('/runs', { workflowId: (await flow(true)).id, input: 'a short task' })).id,
+  );
+  assert.equal(tolerant.status, 'succeeded', tolerant.error);
+  assert.equal(tolerant.outputs.team.length, 2);
+  assert.ok(tolerant.outputs.team[0]?.output, 'the healthy member answered');
+  assert.equal(tolerant.outputs.team[1], null, 'the failed member has no output');
+  const failed = tolerant.events.filter((e: any) => e.type === 'member_failed');
+  assert.equal(failed.length, 1);
+  assert.equal(failed[0].data.agentId, down.id);
+  assert.match(JSON.stringify(failed[0].data.error), /403|Resource exhausted/);
+  const strict = await waitRun(
+    (await ok('/runs', { workflowId: (await flow(false)).id, input: 'a short task' })).id,
+  );
+  assert.equal(strict.status, 'failed');
+  assert.match(String(strict.error), /403/);
+});
 test('explicit MCP tool steps use typed bindings and report failures without claiming success', async () => {
   const flow = await ok('/workflows', {
     name: `Tool flow ${suffix}`,

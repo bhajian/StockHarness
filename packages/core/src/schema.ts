@@ -301,6 +301,11 @@ export const nodeSchema = z.discriminatedUnion('type', [
     /** Saved agents (legacy); new workflows reference agent cards instead. */
     agentIds: z.array(id).max(8).default([]),
     prompt: z.string().max(32000).default('{{input}}'),
+    /**
+     * #548: carry on when at least one member succeeds. A failed member's output is null and a member_failed event
+     * says why; if every member fails, the step fails. Off by default: one failure fails the step.
+     */
+    continueOnMemberFailure: z.boolean().optional(),
     next,
   }),
   z.object({

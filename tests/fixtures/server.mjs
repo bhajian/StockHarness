@@ -1198,6 +1198,9 @@ app.post('/context-upgrade/release', (req, res) => {
   res.sendStatus(204);
 });
 app.post('/v1/chat/completions', async (req, res) => {
+  // #548: a model that is always refused (not retried), for a parallel step whose member fails.
+  if (req.body.model === 'test-refused')
+    return res.status(403).json({ error: { message: 'Resource exhausted (fixture)' } });
   if (req.body.model === 'test-skill-report') {
     const { messages, tools = [] } = req.body;
     const key = /skill report regression ([a-f0-9-]{36})/.exec(
