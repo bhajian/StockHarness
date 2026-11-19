@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { HttpError } from './security.js';
+import { HttpError, safeError } from './security.js';
 import {
   applyBinding,
   bindingProblem,
@@ -2530,15 +2530,29 @@ export async function executeRun(run: Run, signal: AbortSignal, onDelta?: DeltaW
               }),
             };
           } catch (error) {
-            if (!(error instanceof HumanPause)) controller.abort(error);
+            // #548: a tolerant step lets the other members finish.
+            if (!(error instanceof HumanPause) && !node.continueOnMemberFailure) controller.abort(error);
             throw error;
           }
         });
         const settled = await Promise.allSettled(tasks);
-        const failure =
-          settled.find((r) => r.status === 'rejected' && !(r.reason instanceof HumanPause)) ??
-          settled.find((r) => r.status === 'rejected');
-        if (failure?.status === 'rejected') throw failure.reason;
+        const paused = settled.find((r) => r.status === 'rejected' && r.reason instanceof HumanPause);
+        const failed = settled.filter((r) => r.status === 'rejected' && !(r.reason instanceof HumanPause));
+        const succeeded = settled.some((r) => r.status === 'fulfilled');
+        if (node.continueOnMemberFailure && failed.length && succeeded && !paused) {
+          // #548: carry on with the members that finished; each failure is recorded.
+          for (const [i, r] of settled.entries())
+            if (r.status === 'rejected')
+              await event({
+                type: 'member_failed',
+                nodeId: node.id,
+                message: `${members[i]!.agent?.name ?? members[i]!.id} failed; ${node.name} carries on with the others`,
+                data: { agentId: members[i]!.id, error: safeError(r.reason) },
+              });
+        } else {
+          const failure = failed[0] ?? paused;
+          if (failure?.status === 'rejected') throw failure.reason;
+        }
         result = settled.map((r) => (r.status === 'fulfilled' ? r.value : null));
         current = node.next;
         break;

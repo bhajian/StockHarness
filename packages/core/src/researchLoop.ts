@@ -603,6 +603,8 @@ export function makeResearchLoop(o: ResearchLoopInput): Workflow {
       agentNodeIds: theoristIds,
       agentIds: [],
       prompt: 'Research cycle: {{input}}',
+      // #548: one Theorist's model failing (a 429, an outage) costs its idea, not the whole cycle.
+      continueOnMemberFailure: true,
       next: 'judge_pre',
       position: { x: 180, y: 200 },
     } as WorkflowNode,
