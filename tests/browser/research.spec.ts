@@ -124,8 +124,16 @@ test('the Research Lab shows a cycle: KPIs, board, activity, debate, steering, p
   const board = page.getByLabel('Pipeline board');
   for (const col of ['Draft', 'Pre-review', 'Coding', 'Evaluating', 'Post-review', "Today's verdicts"])
     await expect(board.getByRole('heading', { name: new RegExp(`^${col}`) })).toBeVisible();
-  const verdicts = board.getByLabel("Today's verdicts").getByRole('button');
+  const verdicts = board.getByLabel("Today's verdicts").locator('.board-card');
   await expect(verdicts).toHaveCount(2);
+  // #543: each card says who has it and what is happening, its stage, and the cycle tag (C-n) that opens the cycle.
+  await expect(verdicts.first().getByLabel('Now')).toHaveText(/Verdict: /);
+  await expect(verdicts.first().getByRole('progressbar', { name: 'Stage' })).toHaveAttribute(
+    'aria-valuenow',
+    '6',
+  );
+  await expect(verdicts.first().locator('.cycle-tag')).toHaveText(/^C-\d+$/);
+  await expect(page.getByLabel('Running cycle')).toBeVisible();
   await expect(
     page
       .getByLabel('Live activity')
@@ -233,7 +241,13 @@ test('the Research Lab shows a cycle: KPIs, board, activity, debate, steering, p
   await page.goto('/research');
 
   // #119–#123, #269: a board card opens the idea's own page; its tabs are URLs; back to the master table.
-  await verdicts.first().click();
+  // The cycle tag opens its cycle, numbered the same; back, then the card opens the idea.
+  const tag = (await verdicts.first().locator('.cycle-tag').textContent())!;
+  await verdicts.first().locator('.cycle-tag').click();
+  await expect(page).toHaveURL(/\/research\/cycles\/[^/]+$/);
+  await expect(page.getByLabel('Breadcrumbs')).toContainText(`${tag} · `);
+  await page.goto('/research');
+  await verdicts.first().locator('.board-card-title').click();
   await expect(page).toHaveURL(/\/ideas\/T-\d+$/);
   const ref = new URL(page.url()).pathname.split('/')[2]!;
   const idea = page.locator('.idea-page');

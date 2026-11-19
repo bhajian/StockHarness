@@ -211,6 +211,31 @@ test('Research Lab: status, board, charts, activity (JSON and SSE)', async () =>
     ['Draft', 'Pre-review', 'Coding', 'Evaluating', 'Post-review'],
   );
   assert.equal(s.board.verdictsToday.length, 2);
+  // #543: each card says who has it and what is happening, its stage, and the cycle (C-n) that last worked on it.
+  assert.deepEqual(s.board.stages, ['Draft', 'Pre-review', 'Coding', 'Evaluating', 'Post-review', 'Verdict']);
+  for (const c of s.board.verdictsToday) {
+    assert.equal(c.stage, 5);
+    assert.equal(c.activity.who, 'none');
+    assert.match(c.activity.text, /^Verdict: /);
+    assert.ok(c.cycle?.id, 'the cycle that gave the verdict');
+    assert.ok(c.cycle.number >= 1, 'cycles are numbered C-1, C-2, …');
+    assert.equal(c.cycle.current, false, 'no cycle is running now');
+    assert.ok(c.stageSince);
+  }
+  assert.equal(s.board.activeCycle, null);
+  const cycles = await ok('/research/cycles');
+  assert.deepEqual(
+    cycles.map((c: any) => c.number),
+    cycles.map((_: any, i: number) => cycles.length - i),
+    'the list counts down from the newest cycle',
+  );
+  const tagged = s.board.verdictsToday[0].cycle;
+  assert.equal(
+    cycles.find((c: any) => c.id === tagged.id)?.number,
+    tagged.number,
+    'the tag and the list agree',
+  );
+  assert.equal((await ok(`/research/cycles/${tagged.id}`)).number, tagged.number);
   const charts = await ok('/research/charts?days=7');
   assert.equal(charts.verdicts.dates.length, 7);
   assert.equal(charts.verdicts.series.failed.at(-1), 2);

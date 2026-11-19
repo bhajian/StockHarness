@@ -306,7 +306,8 @@ function IdeaTable({
     // A finished holdout by its excess return; unfinished or none go last.
     holdout: { value: (i) => (i.holdout?.status === 'succeeded' ? i.holdout.excess : null), firstDesc: true },
   });
-  const height = Math.min(640, items.length * ROW_HEIGHT + 44);
+  // #543: the box is one standard height in every view (CSS); windowing assumes its tallest size.
+  const height = 680;
   const first = Math.max(0, Math.floor(top / ROW_HEIGHT) - 5);
   const last = Math.min(items.length, first + Math.ceil(height / ROW_HEIGHT) + 10);
   const shown = sorted.slice(first, last);
@@ -316,12 +317,7 @@ function IdeaTable({
     </SortTh>
   );
   return (
-    <div
-      className="idea-table"
-      ref={box}
-      style={{ maxHeight: height }}
-      onScroll={(e) => setTop((e.target as HTMLDivElement).scrollTop)}
-    >
+    <div className="idea-table" ref={box} onScroll={(e) => setTop((e.target as HTMLDivElement).scrollTop)}>
       <table aria-label="Ideas">
         <thead>
           <tr>

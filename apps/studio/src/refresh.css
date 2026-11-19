@@ -5044,3 +5044,163 @@ th.num .th-sort {
   text-underline-offset: 3px;
   cursor: help;
 }
+
+/* #543: the pipeline board says who has each idea, what is happening, its stage and its cycle (C-n). */
+.board-head {
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.board-head h3 {
+  margin: 0;
+}
+.board-cycle {
+  margin: 0;
+  font-size: 13px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.board-filter {
+  font-size: 13px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.research-board .board-column {
+  max-height: 640px;
+  overflow-y: auto;
+}
+.research-board .board-column h3 {
+  position: sticky;
+  top: -8px;
+  z-index: 1;
+  background: var(--surface-2);
+  padding: 4px 2px;
+}
+.board-card.active {
+  border-color: var(--blue);
+  box-shadow: 0 0 0 1px var(--blue);
+}
+.board-card-tags {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.board-card .board-card-title {
+  all: unset;
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--ink);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.board-card .board-card-title:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 2px;
+}
+.cycle-tag {
+  font: 600 11px/1.6 var(--mono);
+  padding: 0 6px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--slate);
+  cursor: pointer;
+}
+.cycle-tag:hover {
+  border-color: var(--blue);
+  color: var(--blue-ink);
+}
+.cycle-tag.current {
+  background: var(--blue-bg);
+  border-color: var(--blue);
+  color: var(--blue-ink);
+}
+.board-card .board-tag {
+  font-size: 11px;
+  padding: 0 6px;
+  border-radius: 4px;
+  background: var(--violet-bg);
+  color: var(--violet);
+}
+.board-activity {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--ink);
+}
+.board-card .board-activity strong {
+  font-size: 12px;
+}
+.who-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 5px;
+  background: var(--faint);
+  vertical-align: middle;
+}
+.who-theorist .who-dot {
+  background: var(--violet);
+}
+.who-judge .who-dot {
+  background: var(--teal);
+}
+.who-coder .who-dot,
+.who-evaluator .who-dot {
+  background: var(--blue);
+}
+.who-dot.live {
+  animation: who-pulse 1.4s ease-in-out infinite;
+}
+@keyframes who-pulse {
+  50% {
+    opacity: 0.3;
+  }
+}
+.stage-bar {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 2px;
+}
+.stage-bar span {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--border);
+}
+.stage-bar span.done {
+  background: var(--teal);
+}
+.stage-bar span.now {
+  background: var(--blue);
+}
+.stage-bar span.now.live {
+  animation: who-pulse 1.4s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .who-dot.live,
+  .stage-bar span.now.live {
+    animation: none;
+  }
+}
+
+/* #543: every Ideas view uses one table height, and every row one height, so a short list never scrolls. */
+.idea-table {
+  height: clamp(360px, calc(100vh - 360px), 680px);
+}
+.idea-table td {
+  white-space: nowrap;
+}
+.idea-table td strong,
+.idea-table td small {
+  max-width: 440px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

@@ -7,6 +7,7 @@ import { HttpError } from './security.js';
 import { ROLE_CONNECTION_NAMES } from './researchLoop.js';
 import { priceOf, usdOf } from './spendGuard.js';
 import { theories } from './theories.js';
+import { cycleNumbers } from './boardProgress.js';
 
 type Node = {
   id: string;
@@ -161,6 +162,8 @@ export async function researchCycles(ownerId: string, limit = 50) {
     .limit(limit)
     .toArray();
   const ids = runs.map((r) => r._id);
+  // #543: C-n, the cycle's place by start time; the list is newest first and unfiltered, so it counts down.
+  const total = await collection<any>('runs').countDocuments({ ownerId, workflowId: wf._id });
   const usage = await collection<any>('model_usage')
     .aggregate([
       { $match: { ownerId, runId: { $in: ids } } },
@@ -187,12 +190,13 @@ export async function researchCycles(ownerId: string, limit = 50) {
       },
     ])
     .toArray();
-  return runs.map((r) => {
+  return runs.map((r, i) => {
     const u = usage.filter((x) => x._id.run === r._id);
     const t = touched.filter((x) => x._id.run === r._id);
     const count = (pred: (x: (typeof t)[number]) => boolean) => t.filter(pred).reduce((a, x) => a + x.n, 0);
     return {
       id: r._id,
+      number: total - i,
       status: r.status,
       // #458: what the cycle actually did. A run that "succeeded" while paused did nothing.
       outcome: cycleOutcome(r.status, r.researchNotes),
@@ -327,8 +331,10 @@ export async function researchCycle(ownerId: string, runId: string) {
       { projection: { number: 1, title: 1, status: 1, history: 1 } },
     )
     .toArray();
+  const number = (await cycleNumbers(ownerId, run.workflowId, [run._id])).get(run._id) ?? null;
   return {
     id: run._id,
+    number,
     status: run.status,
     outcome: cycleOutcome(run.status, run.researchNotes),
     notes: (run.researchNotes ?? []) as string[],
