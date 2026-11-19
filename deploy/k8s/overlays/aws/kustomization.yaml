@@ -10,7 +10,7 @@ resources:
 images:
   - name: openharness
     newName: 491085405405.dkr.ecr.us-east-1.amazonaws.com/openharness/app
-    newTag: b67faa3cadd8
+    newTag: 2137f51854cf
   - name: openharness-mongodb-mcp
     newName: 491085405405.dkr.ecr.us-east-1.amazonaws.com/openharness/mongodb-mcp
     newTag: c6f90af9dacf
