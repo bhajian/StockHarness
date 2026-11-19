@@ -14,6 +14,21 @@ const addYears = (iso: string, n: number) => {
   return d.toISOString().slice(0, 10);
 };
 
+/**
+ * The simulation's name (#544): "T-n <title> (label)". A simulation name allows 120 characters and no slashes or
+ * control characters, so a slash becomes a dash, and the title is cut to leave room for the label.
+ */
+export const NAME_MAX = 120;
+export const autoName = (ref: string, title: string, label: string) => {
+  const suffix = ` (${label})`;
+  const clean = title
+    .replace(/[\\/]/g, '-')
+    .replace(/[\u0000-\u001f]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return `${ref} ${clean}`.slice(0, NAME_MAX - suffix.length).trimEnd() + suffix;
+};
+
 /** The period: 10 years to the latest price, no earlier than a year after the first price (lookbacks need it). */
 export async function autoPeriod(ownerId: string) {
   const end = await latestPriceDate(ownerId);
@@ -51,7 +66,7 @@ export async function autoSimulateIdea(
   const period = await autoPeriod(ownerId);
   if (!period) return { skipped: 'no prices' };
   const sim = await startSimulation(ownerId, {
-    name: `${ref} ${t.title}`.slice(0, 110) + ` (${label})`,
+    name: autoName(ref, t.title, label),
     description: `Automatic simulation of a ${label} idea: ${period.start} → ${period.end}, $1M, the research scope.`,
     label,
     auto: true,
